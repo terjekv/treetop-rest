@@ -1,8 +1,6 @@
-use treetop_rest;
 
 use actix_web::{App, HttpServer, middleware::Logger};
 use clap::Parser;
-use env_logger;
 use regex::Regex;
 use std::sync::{Arc, Mutex};
 use treetop_core::initialize_host_patterns;

@@ -70,7 +70,7 @@ impl Completer for CLIHelper {
         };
 
         // Filter out flags/commands that have already been used
-        let used = tokens.iter().cloned().collect::<Vec<&str>>();
+        let used = tokens.to_vec();
         let candidates = base
             .iter()
             .filter(|&&item| !used.contains(&item))
@@ -215,7 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(input) => {
                     rl.add_history_entry(input.as_str())?;
                     let parts: Vec<&str> = input.split_whitespace().collect();
-                    match parts.get(0).copied() {
+                    match parts.first().copied() {
                         Some("exit") | Some("quit") => break,
                         Some("help") => print_help(),
                         Some(_) => {
@@ -259,7 +259,7 @@ async fn execute_command(
             unreachable!();
         }
         Commands::Status => {
-            let resp = client.get(&format!("{}/status", base_url)).send().await?;
+            let resp = client.get(format!("{}/status", base_url)).send().await?;
             handle_response::<StatusResponse>(resp).await;
         }
         Commands::Check {
@@ -275,7 +275,7 @@ async fn execute_command(
                 resource_ip,
             };
             let resp = client
-                .post(&format!("{}/check", base_url))
+                .post(format!("{}/check", base_url))
                 .json(&req)
                 .send()
                 .await?;
@@ -298,7 +298,7 @@ async fn execute_command(
             let content = fs::read_to_string(&file)?;
             let resp = if raw {
                 client
-                    .post(&format!("{}/policies", base_url))
+                    .post(format!("{}/policies", base_url))
                     .header("Content-Type", "text/plain")
                     .body(content)
                     .send()
@@ -309,7 +309,7 @@ async fn execute_command(
                     policies: String,
                 }
                 client
-                    .post(&format!("{}/policies", base_url))
+                    .post(format!("{}/policies", base_url))
                     .json(&Upload { policies: content })
                     .send()
                     .await?
@@ -318,7 +318,7 @@ async fn execute_command(
         }
         Commands::ListPolicies { user } => {
             let resp = client
-                .get(&format!("{}/policies/{}", base_url, user))
+                .get(format!("{}/policies/{}", base_url, user))
                 .send()
                 .await?;
             handle_response::<UserPolicies>(resp).await;

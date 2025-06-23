@@ -41,7 +41,7 @@ pub fn build_request(req: &CheckRequest) -> Result<Request, ServiceError> {
         action: Action::new(&req.action, None),
         groups: vec![],
         resource: Host {
-            name: req.resource_name.clone().into(),
+            name: req.resource_name.clone(),
             ip,
         },
     })
