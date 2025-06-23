@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use treetop_core::{Action, Decision, Host, Request, User};
+use treetop_core::{Action, Decision, Groups, Host, Request, User};
 
 use crate::errors::ServiceError;
 
@@ -39,7 +39,7 @@ pub fn build_request(req: &CheckRequest) -> Result<Request, ServiceError> {
     Ok(Request {
         principal: User::new(&req.principal, None),
         action: Action::new(&req.action, None),
-        groups: vec![],
+        groups: Groups(vec![]),
         resource: Host {
             name: req.resource_name.clone(),
             ip,

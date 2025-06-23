@@ -2820,7 +2820,9 @@ dependencies = [
 
 [[package]]
 name = "treetop-core"
-version = "0.1.0"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89a6d06379956d4d653565aa8b54428f1928065030a6dcff6f563a6705e1e8a8"
 dependencies = [
  "cedar-policy",
  "cedar-policy-core",
@@ -2836,7 +2838,7 @@ dependencies = [
 
 [[package]]
 name = "treetop-rest"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "actix-web",
  "chrono",
