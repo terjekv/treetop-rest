@@ -203,7 +203,7 @@ struct ErrorResponse {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let base_url = format!("http://{}:{}", cli.host, cli.port);
+    let base_url = format!("http://{}:{}/api/v1", cli.host, cli.port);
     let client = Client::new();
 
     if let Commands::Repl = cli.command {

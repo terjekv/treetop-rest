@@ -17,11 +17,11 @@ struct Upload {
 
 /// Configure routes for the service.
 pub fn init(cfg: &mut web::ServiceConfig) {
-    cfg.route("/status", web::get().to(get_status))
-        .route("/check", web::post().to(check))
-        .route("/policies", web::get().to(get_policies))
-        .route("/policies", web::post().to(upload_policies))
-        .route("/policies/{user}", web::get().to(list_policies));
+    cfg.route("/api/v1/status", web::get().to(get_status))
+        .route("/api/v1/check", web::post().to(check))
+        .route("/api/v1/policies", web::get().to(get_policies))
+        .route("/api/v1/policies", web::post().to(upload_policies))
+        .route("/api/v1/policies/{user}", web::get().to(list_policies));
 }
 
 pub async fn check(
