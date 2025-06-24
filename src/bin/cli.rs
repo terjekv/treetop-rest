@@ -8,6 +8,7 @@ use rustyline::validate::Validator;
 use rustyline::{Context, Editor, Helper};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use treetop_rest::models::PolicyURL;
 
 // Top-level commands
 const COMMANDS_MAIN: &[&str] = &[
@@ -27,7 +28,7 @@ const CHECK_FLAGS: &[&str] = &[
     "--resource-ip",
 ];
 const GET_POLICIES_FLAGS: &[&str] = &["--raw"];
-const UPLOAD_FLAGS: &[&str] = &["--file", "--raw"];
+const UPLOAD_FLAGS: &[&str] = &["--file", "--raw", "--token"];
 
 struct CLIHelper;
 impl Helper for CLIHelper {}
@@ -130,6 +131,8 @@ enum Commands {
         file: std::path::PathBuf,
         #[clap(long)]
         raw: bool,
+        #[clap(long)]
+        token: String,
     },
     /// List policies relevant to a user
     ListPolicies { user: String },
@@ -144,12 +147,24 @@ struct StatusResponse {
     sha256: String,
     uploaded_at: String,
     size: usize,
+    allow_upload: bool,
+    url: Option<PolicyURL>,
+    refresh_frequency: Option<u32>,
 }
 impl CliDisplay for StatusResponse {
     fn display(&self) -> String {
+        let refresh = match self.refresh_frequency {
+            Some(freq) => format!("{} seconds", freq),
+            None => "N/A".to_string(),
+        };
+        let url = match self.url.as_ref().map(|u| u.to_string()) {
+            Some(url) => url,
+            None => "None".to_string(),
+        };
+
         format!(
-            "Policies SHA256: {}\nUploaded at: {}\nSize: {} bytes",
-            self.sha256, self.uploaded_at, self.size
+            "Policies SHA256: {}\nTimestamp: {}\nSize: {} bytes\nAllow Upload: {}\nURL: {}\nRefresh: {}",
+            self.sha256, self.uploaded_at, self.size, self.allow_upload, url, refresh
         )
     }
 }
@@ -294,12 +309,13 @@ async fn execute_command(
                 handle_response::<PoliciesDownload>(resp).await;
             }
         }
-        Commands::Upload { file, raw } => {
+        Commands::Upload { file, raw, token } => {
             let content = fs::read_to_string(&file)?;
             let resp = if raw {
                 client
                     .post(format!("{}/policies", base_url))
                     .header("Content-Type", "text/plain")
+                    .header("X-Upload-Token", token)
                     .body(content)
                     .send()
                     .await?

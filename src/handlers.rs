@@ -5,9 +5,7 @@ use crate::models::{
 use crate::state::SharedPolicyStore;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::Arc;
 use treetop_core::UserPolicies;
 
 #[derive(Deserialize)]
@@ -51,7 +49,7 @@ pub async fn get_policies(
         Ok(HttpResponse::Ok().json(PoliciesDownload {
             policies: store.dsl.clone(),
             sha256: store.sha256.clone(),
-            uploaded_at: store.uploaded_at,
+            uploaded_at: store.timestamp,
         }))
     }
 }
@@ -61,6 +59,24 @@ pub async fn upload_policies(
     body: web::Bytes,
     store: web::Data<SharedPolicyStore>,
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
+    // Check that upload is allowed, and if it is, check that the upload token is set in the headers
+    let mut guard = store.lock().map_err(|_| ServiceError::LockPoison)?;
+    if !guard.allow_upload {
+        return Err(ServiceError::UploadNotAllowed);
+    }
+
+    if let Some(upload_token) = guard.upload_token.as_ref() {
+        if req
+            .headers()
+            .get("X-Upload-Token")
+            .map_or(true, |h| h.to_str().unwrap_or("") != upload_token)
+        {
+            return Err(ServiceError::InvalidUploadToken);
+        }
+    } else {
+        return Err(ServiceError::UploadTokenNotSet);
+    }
+
     let content_type = req.content_type();
     let dsl_string = if content_type.starts_with("application/json") {
         let upload: Upload =
@@ -70,24 +86,15 @@ pub async fn upload_policies(
         String::from_utf8(body.to_vec()).map_err(|_| ServiceError::InvalidTextPayload)?
     };
 
-    let mut hasher = Sha256::new();
-    hasher.update(dsl_string.as_bytes());
-    let sha256 = format!("{:x}", hasher.finalize());
-
-    let new_engine = treetop_core::PolicyEngine::new_from_str(&dsl_string)
-        .map_err(|e| ServiceError::CompileError(e.to_string()))?;
-
-    let mut guard = store.lock().map_err(|_| ServiceError::LockPoison)?;
-    guard.engine = Arc::new(new_engine);
-    guard.dsl = dsl_string.clone();
-    guard.sha256 = sha256.clone();
-    guard.uploaded_at = chrono::Utc::now();
-    guard.size = dsl_string.len();
+    guard.update_dsl(&dsl_string)?;
 
     Ok(web::Json(PoliciesMetadata {
-        sha256,
-        uploaded_at: guard.uploaded_at,
+        sha256: guard.sha256.clone(),
+        uploaded_at: guard.timestamp,
         size: guard.size,
+        allow_upload: guard.allow_upload,
+        url: guard.url.clone(),
+        refresh_frequency: guard.refresh_frequency,
     }))
 }
 
@@ -110,7 +117,10 @@ pub async fn get_status(
     let guard = store.lock().map_err(|_| ServiceError::LockPoison)?;
     Ok(web::Json(PoliciesMetadata {
         sha256: guard.sha256.clone(),
-        uploaded_at: guard.uploaded_at,
+        uploaded_at: guard.timestamp,
         size: guard.size,
+        allow_upload: guard.allow_upload,
+        url: guard.url.clone(),
+        refresh_frequency: guard.refresh_frequency,
     }))
 }

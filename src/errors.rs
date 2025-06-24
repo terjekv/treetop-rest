@@ -1,6 +1,7 @@
 use actix_web::{HttpResponse, ResponseError, http::StatusCode};
 use serde::Serialize;
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use treetop_core::PolicyError;
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -9,6 +10,9 @@ pub enum ServiceError {
     InvalidIp,
     InvalidJsonPayload,
     InvalidTextPayload,
+    UploadNotAllowed,
+    InvalidUploadToken,
+    UploadTokenNotSet,
     CompileError(String),
     EvaluationError(String),
     ListPoliciesError(String),
@@ -29,6 +33,9 @@ impl Display for ServiceError {
             ServiceError::CompileError(msg) => write!(f, "Failed to compile policies: {}", msg),
             ServiceError::EvaluationError(msg) => write!(f, "Policy evaluation error: {}", msg),
             ServiceError::ListPoliciesError(_) => write!(f, "Error listing policies"),
+            ServiceError::UploadNotAllowed => write!(f, "Policy upload is not allowed"),
+            ServiceError::InvalidUploadToken => write!(f, "Invalid upload token provided"),
+            ServiceError::UploadTokenNotSet => write!(f, "Upload token is not set"),
         }
     }
 }
@@ -43,6 +50,9 @@ impl ResponseError for ServiceError {
             | ServiceError::InvalidJsonPayload
             | ServiceError::InvalidTextPayload
             | ServiceError::CompileError(_) => StatusCode::BAD_REQUEST,
+            ServiceError::UploadNotAllowed
+            | ServiceError::InvalidUploadToken
+            | ServiceError::UploadTokenNotSet => StatusCode::FORBIDDEN,
         }
     }
 
@@ -51,5 +61,11 @@ impl ResponseError for ServiceError {
             error: self.to_string(),
         };
         HttpResponse::build(self.status_code()).json(err)
+    }
+}
+
+impl From<PolicyError> for ServiceError {
+    fn from(err: PolicyError) -> Self {
+        ServiceError::CompileError(err.to_string())
     }
 }

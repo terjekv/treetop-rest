@@ -1,8 +1,45 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use treetop_core::{Action, Decision, Groups, Host, Request, User};
+use url::Url;
 
 use crate::errors::ServiceError;
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct PolicyURL {
+    url: Url,
+}
+
+impl PolicyURL {
+    pub fn new(url: Url) -> Self {
+        PolicyURL { url }
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.url.as_str()
+    }
+
+    pub fn url(&self) -> &Url {
+        &self.url
+    }
+}
+
+impl std::fmt::Display for PolicyURL {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.url)
+    }
+}
+
+impl std::str::FromStr for PolicyURL {
+    type Err = url::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match Url::parse(s) {
+            Ok(url) => Ok(PolicyURL { url }),
+            Err(e) => Err(e),
+        }
+    }
+}
 
 #[derive(Deserialize)]
 pub struct CheckRequest {
@@ -22,6 +59,9 @@ pub struct PoliciesMetadata {
     pub sha256: String,
     pub uploaded_at: DateTime<Utc>,
     pub size: usize,
+    pub allow_upload: bool,
+    pub url: Option<PolicyURL>,
+    pub refresh_frequency: Option<u32>,
 }
 
 #[derive(Serialize)]

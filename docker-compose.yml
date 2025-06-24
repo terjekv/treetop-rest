@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  cedar-server:
+    image: svenstaro/miniserve
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./policies:/data:ro
+    command: ["/data", "--index", "default.cedar", "--port", "8080", "--spa"]
