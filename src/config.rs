@@ -1,6 +1,6 @@
 use clap::Parser;
 
-use crate::models::PolicyURL;
+use crate::models::Endpoint;
 
 /// Application configuration (host and port).
 #[derive(Parser, Debug)]
@@ -23,9 +23,17 @@ pub struct Config {
 
     /// URL to fetch policies from
     #[clap(long, default_value = None, env = "APP_POLICY_URL")]
-    pub policy_url: Option<PolicyURL>,
+    pub policy_url: Option<Endpoint>,
 
-    /// Update frequency in seconds (default is 60 seconds)
+    /// Update frequency in seconds for fetching APP_POLICY_URL (default is 60 seconds)
     #[clap(long, default_value = None, env = "APP_POLICY_UPDATE_FREQUENCY")]
     pub update_frequency: Option<u32>,
+
+    /// Optional URL to fetch host labels from
+    #[clap(long, default_value = None, env = "APP_HOST_LABELS_URL")]
+    pub host_labels_url: Option<Endpoint>,
+
+    /// Update frequency in seconds for fetching host labels (default is 60 seconds)
+    #[clap(long, default_value = None, env = "APP_HOST_LABELS_UPDATE_FREQUENCY")]
+    pub host_labels_refresh: Option<u32>,
 }

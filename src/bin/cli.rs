@@ -8,7 +8,7 @@ use rustyline::validate::Validator;
 use rustyline::{Context, Editor, Helper};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use treetop_rest::models::PolicyURL;
+use treetop_rest::models::Endpoint;
 
 // Top-level commands
 const COMMANDS_MAIN: &[&str] = &[
@@ -144,27 +144,45 @@ trait CliDisplay {
 
 #[derive(Deserialize)]
 struct StatusResponse {
-    sha256: String,
-    uploaded_at: String,
-    size: usize,
-    allow_upload: bool,
-    url: Option<PolicyURL>,
-    refresh_frequency: Option<u32>,
+    policies_sha256: String,
+    policies_uploaded_at: String,
+    policies_size: usize,
+    policies_allow_upload: bool,
+    policies_url: Option<Endpoint>,
+    policies_refresh_frequency: Option<u32>,
+    host_labels_url: Option<Endpoint>,
+    host_labels_refresh_frequency: Option<u32>,
 }
 impl CliDisplay for StatusResponse {
     fn display(&self) -> String {
-        let refresh = match self.refresh_frequency {
+        let refresh = match self.policies_refresh_frequency {
             Some(freq) => format!("{} seconds", freq),
             None => "N/A".to_string(),
         };
-        let url = match self.url.as_ref().map(|u| u.to_string()) {
+        let url = match self.policies_url.as_ref().map(|u| u.to_string()) {
+            Some(url) => url,
+            None => "None".to_string(),
+        };
+
+        let hrefresh = match self.host_labels_refresh_frequency {
+            Some(freq) => format!("{} seconds", freq),
+            None => "N/A".to_string(),
+        };
+        let hurl = match self.host_labels_url.as_ref().map(|u| u.to_string()) {
             Some(url) => url,
             None => "None".to_string(),
         };
 
         format!(
-            "Policies SHA256: {}\nTimestamp: {}\nSize: {} bytes\nAllow Upload: {}\nURL: {}\nRefresh: {}",
-            self.sha256, self.uploaded_at, self.size, self.allow_upload, url, refresh
+            "**Policies**\n  SHA256: {}\n  Timestamp: {}\n  Size: {} bytes\n  Allow Upload: {}\n  URL: {}\n  Refresh: {}\n**Host labels**\n  URL: {}\n  Refresh: {}",
+            self.policies_sha256,
+            self.policies_uploaded_at,
+            self.policies_size,
+            self.policies_allow_upload,
+            url,
+            refresh,
+            hurl,
+            hrefresh
         )
     }
 }

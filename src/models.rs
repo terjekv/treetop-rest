@@ -6,13 +6,13 @@ use url::Url;
 use crate::errors::ServiceError;
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct PolicyURL {
+pub struct Endpoint {
     url: Url,
 }
 
-impl PolicyURL {
+impl Endpoint {
     pub fn new(url: Url) -> Self {
-        PolicyURL { url }
+        Endpoint { url }
     }
 
     pub fn as_str(&self) -> &str {
@@ -24,18 +24,18 @@ impl PolicyURL {
     }
 }
 
-impl std::fmt::Display for PolicyURL {
+impl std::fmt::Display for Endpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.url)
     }
 }
 
-impl std::str::FromStr for PolicyURL {
+impl std::str::FromStr for Endpoint {
     type Err = url::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match Url::parse(s) {
-            Ok(url) => Ok(PolicyURL { url }),
+            Ok(url) => Ok(Endpoint { url }),
             Err(e) => Err(e),
         }
     }
@@ -56,12 +56,14 @@ pub struct CheckResponse {
 
 #[derive(Serialize)]
 pub struct PoliciesMetadata {
-    pub sha256: String,
-    pub uploaded_at: DateTime<Utc>,
-    pub size: usize,
-    pub allow_upload: bool,
-    pub url: Option<PolicyURL>,
-    pub refresh_frequency: Option<u32>,
+    pub policies_sha256: String,
+    pub policies_uploaded_at: DateTime<Utc>,
+    pub policies_size: usize,
+    pub policies_allow_upload: bool,
+    pub policies_url: Option<Endpoint>,
+    pub policies_refresh_frequency: Option<u32>,
+    pub host_labels_url: Option<Endpoint>,
+    pub host_labels_refresh_frequency: Option<u32>,
 }
 
 #[derive(Serialize)]

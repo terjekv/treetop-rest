@@ -48,8 +48,8 @@ pub async fn get_policies(
     } else {
         Ok(HttpResponse::Ok().json(PoliciesDownload {
             policies: store.dsl.clone(),
-            sha256: store.sha256.clone(),
-            uploaded_at: store.timestamp,
+            sha256: store.policies_sha256.clone(),
+            uploaded_at: store.policies_timestamp,
         }))
     }
 }
@@ -61,7 +61,7 @@ pub async fn upload_policies(
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
     // Check that upload is allowed, and if it is, check that the upload token is set in the headers
     let mut guard = store.lock().map_err(|_| ServiceError::LockPoison)?;
-    if !guard.allow_upload {
+    if !guard.policies_allow_upload {
         return Err(ServiceError::UploadNotAllowed);
     }
 
@@ -89,12 +89,14 @@ pub async fn upload_policies(
     guard.update_dsl(&dsl_string)?;
 
     Ok(web::Json(PoliciesMetadata {
-        sha256: guard.sha256.clone(),
-        uploaded_at: guard.timestamp,
-        size: guard.size,
-        allow_upload: guard.allow_upload,
-        url: guard.url.clone(),
-        refresh_frequency: guard.refresh_frequency,
+        policies_sha256: guard.policies_sha256.clone(),
+        policies_uploaded_at: guard.policies_timestamp,
+        policies_size: guard.policies_size,
+        policies_allow_upload: guard.policies_allow_upload,
+        policies_url: guard.policies_url.clone(),
+        policies_refresh_frequency: guard.policies_refresh_frequency,
+        host_labels_url: guard.host_labels_url.clone(),
+        host_labels_refresh_frequency: guard.host_labels_refresh_frequency,
     }))
 }
 
@@ -116,11 +118,13 @@ pub async fn get_status(
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
     let guard = store.lock().map_err(|_| ServiceError::LockPoison)?;
     Ok(web::Json(PoliciesMetadata {
-        sha256: guard.sha256.clone(),
-        uploaded_at: guard.timestamp,
-        size: guard.size,
-        allow_upload: guard.allow_upload,
-        url: guard.url.clone(),
-        refresh_frequency: guard.refresh_frequency,
+        policies_sha256: guard.policies_sha256.clone(),
+        policies_uploaded_at: guard.policies_timestamp,
+        policies_size: guard.policies_size,
+        policies_allow_upload: guard.policies_allow_upload,
+        policies_url: guard.policies_url.clone(),
+        policies_refresh_frequency: guard.policies_refresh_frequency,
+        host_labels_url: guard.host_labels_url.clone(),
+        host_labels_refresh_frequency: guard.host_labels_refresh_frequency,
     }))
 }

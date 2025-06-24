@@ -56,13 +56,15 @@ The server supports the following environment variables:
 - `APP_ALLOW_UPLOAD`: Whether to allow manually uploading policies to the server. If set to `true`, you can upload policies via `POST` to the `/api/v1/policies` endpoint with the content type `text/plain`. You will need to provide the upload token in the header `X-Upload-Token`. This token is printed in the logs at the `warn` level when the server starts. (default: `false`)
 - `APP_POLICY_URL`: An optional URL for fetching the policy file (in Cedar format) (default: `None`).
 - `APP_POLICY_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the policy file from the `APP_POLICY_URL` (default: `60`).
+- `APP_HOST_LABEL_URL`: An optional URL for fetching the host label file (in JSON format) (default: `None`).
+- `APP_HOST_LABEL_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the host label file from the `APP_HOST_LABEL_URL` (default: `60`).
 
 ### Client interaction
 
 From the command line, you can use `curl` to interact with the API. For example, to upload a policy file, you can use:
 
 ```bash
-curl -X POST http://localhost:9999/policies -H "Content-Type: text/plain" -H "X-Upload-Token: <your-upload-token>" --data-binary @policies/default.cedar
+curl -X POST http://localhost:9999/policies -H "Content-Type: text/plain" -H "X-Upload-Token: <your-upload-token>" --data-binary @testdata/default.cedar
 ```
 
 To check a request, you can use:
@@ -81,9 +83,9 @@ $ curl -X POST http://localhost:9999/api/v1/check \
 Or you can use the CLI client provided in this repository. To run the CLI client, you can use:
 
 ```bash
-$ cargo run --bin cli -- upload --file policies.cedar --raw --token <your-upload-token>
+$ cargo run --bin cli -- upload --file testdata/default.cedar --raw --token <your-upload-token>
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
-     Running `target/debug/cli upload --file policies.cedar --raw`
+     Running `target/debug/cli upload --file testdata/default.cedar --raw`
 Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db
 Uploaded at: 2025-06-23T22:59:05.014440Z
 Size: 843 bytes
@@ -102,7 +104,7 @@ cargo run --bin cli -- repl
 Then you can enter commands with tab expansion and history support. For example:
 
 ```bash
-policy> upload --file policies/default.cedar --raw --token <your-upload-token>
+policy> upload --file testdata/default.cedar --raw --token <your-upload-token>
 Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db
 Uploaded at: 2025-06-23T22:25:50.285684Z
 Size: 843 bytes
@@ -119,7 +121,7 @@ Refresh: 5 seconds
 
 ## Development
 
-There is also a `docker-compose.yml` to set up a minialist web server to host cedar policies. This will automatically set up a web server hosting `default.cedar` at `http://localhost:8080/default.cedar`.
+There is also a `docker-compose.yml` to set up a minialist web server to host cedar policies. This will automatically set up a web server hosting the `testdata` folder. Currently, this will `http://localhost:8080/default.cedar` and `http://localhost:8080/host_labels.json`.
 
 ```bash
 docker-compose up

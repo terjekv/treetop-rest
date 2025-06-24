@@ -69,3 +69,5 @@ impl From<PolicyError> for ServiceError {
         ServiceError::CompileError(err.to_string())
     }
 }
+
+impl std::error::Error for ServiceError {}
