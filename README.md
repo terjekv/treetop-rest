@@ -63,8 +63,8 @@ $ curl -X POST http://localhost:9999/api/v1/check \
   -d '{
     "action": "create_host",
     "principal": "alice",
-        "resource_name": "resource456",
-        "resource_ip": "192.168.1.1"
+        "resource_name": "host.example.com",
+        "resource_ip": "10.0.0.1"
   }'
 ```
 
