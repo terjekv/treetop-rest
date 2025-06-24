@@ -9,7 +9,7 @@ Note, these endpoints are currently in development and may change in the future.
 `/api/v1/policies`
 
 - `GET`: List all policies.
-- `POST`: Upload a new policy file in Cedar format. This requires the server to be started with `APP_ALLOW_UPLOAD` to be set to true, and token set in `X-Upload-Token` header. This token is found in the server logs if `APP_ALLOW_UPLOAD` is set to true. The policy file should be sent as the body of the request with `Content-Type: text/plain`.
+- `POST`: Upload a new policy file in Cedar format, if enabled.
 
 `/api/v1/policies/<username>`
 
@@ -53,7 +53,7 @@ The server supports the following environment variables:
 - `APP_HOST`: The host to bind the server to (default: `localhost`)
 - `APP_PORT`: The port to bind the server to (default: `9999`)
 - `APP_WORKERS`: The number of worker threads to use (default: `4`)
-- `APP_ALLOW_UPLOAD`: Whether to allow manually uploading policies to the server (default: `false`). If set to `true`, you can upload policies via `POST` to the `/api/v1/policies` endpoint. You will need to provide a random token in the header `X-Upload-Token`, which is printed in the logs at the `warn` level when the server starts.
+- `APP_ALLOW_UPLOAD`: Whether to allow manually uploading policies to the server. If set to `true`, you can upload policies via `POST` to the `/api/v1/policies` endpoint with the content type `text/plain`. You will need to provide the upload token in the header `X-Upload-Token`. This token is printed in the logs at the `warn` level when the server starts. (default: `false`)
 - `APP_POLICY_URL`: An optional URL for fetching the policy file (in Cedar format) (default: `None`).
 - `APP_POLICY_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the policy file from the `APP_POLICY_URL` (default: `60`).
 
