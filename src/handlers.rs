@@ -69,7 +69,7 @@ pub async fn upload_policies(
         if req
             .headers()
             .get("X-Upload-Token")
-            .map_or(true, |h| h.to_str().unwrap_or("") != upload_token)
+            .is_none_or(|h| h.to_str().unwrap_or("") != upload_token)
         {
             return Err(ServiceError::InvalidUploadToken);
         }

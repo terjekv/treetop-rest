@@ -48,7 +48,7 @@ impl PolicyStore {
     pub fn update_dsl(&mut self, dsl_string: &String) -> Result<(), ServiceError> {
         let mut hasher = Sha256::new();
         hasher.update(dsl_string.as_bytes());
-        self.engine = Arc::new(PolicyEngine::new_from_str(&dsl_string)?);
+        self.engine = Arc::new(PolicyEngine::new_from_str(dsl_string)?);
         self.sha256 = format!("{:x}", hasher.finalize());
         self.dsl = dsl_string.clone();
         self.timestamp = Utc::now();
