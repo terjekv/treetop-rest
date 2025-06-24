@@ -62,7 +62,7 @@ The server supports the following environment variables:
 From the command line, you can use `curl` to interact with the API. For example, to upload a policy file, you can use:
 
 ```bash
-curl -X POST http://localhost:9999/policies -H "Content-Type: text/plain" -H "X-Upload-Token: <your-upload-token>" --data-binary @policies.cedar
+curl -X POST http://localhost:9999/policies -H "Content-Type: text/plain" -H "X-Upload-Token: <your-upload-token>" --data-binary @policies/default.cedar
 ```
 
 To check a request, you can use:
@@ -102,7 +102,7 @@ cargo run --bin cli -- repl
 Then you can enter commands with tab expansion and history support. For example:
 
 ```bash
-policy> upload --file policies.cedar --raw --token <your-upload-token>
+policy> upload --file policies/default.cedar --raw --token <your-upload-token>
 Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db
 Uploaded at: 2025-06-23T22:25:50.285684Z
 Size: 843 bytes
