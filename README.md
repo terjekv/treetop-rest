@@ -97,4 +97,5 @@ Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0d
 Uploaded at: 2025-06-23T22:25:50.285684Z
 Size: 843 bytes
 policy> check --principal alice --action create_host --resource-name host.example.com --resource-ip 10.0.0.1
+Allow
 ```
