@@ -89,9 +89,9 @@ $ cargo run --bin cli -- upload --file testdata/default.cedar --raw --token <you
 Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db
 Uploaded at: 2025-06-23T22:59:05.014440Z
 Size: 843 bytes
-$ cargo run --bin cli -- check --principal alice --action create_host --resource-name host.example.com --resource-ip 10.0.0.1
+$ cargo run --bin cli -- check --principal alice --action create_host --resource-type host --resource-data hostname.example.com:10.0.0.1
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
-     Running `target/debug/cli check --principal alice --action create_host --resource-name host.example.com --resource-ip 10.0.0.1`
+     Running `target/debug/cli check --principal alice --action create_host --resource-type host --resource-data hostname.example.com:10.0.0.1`
 Allow
 ```
 
@@ -108,7 +108,7 @@ policy> upload --file testdata/default.cedar --raw --token <your-upload-token>
 Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db
 Uploaded at: 2025-06-23T22:25:50.285684Z
 Size: 843 bytes
-policy> check --principal alice --action create_host --resource-name host.example.com --resource-ip 10.0.0.1
+policy> check --principal alice --action create_host --resource-type host --resource-data hostname.example.com:10.0.0.1
 Allow
 policy> status
 Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db

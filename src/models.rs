@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use treetop_core::{Action, Decision, Groups, Host, Request, User};
+use treetop_core::{Action, Decision, Groups, Request, Resource, User};
 use url::Url;
 
 use crate::errors::ServiceError;
@@ -41,12 +41,11 @@ impl std::str::FromStr for Endpoint {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct CheckRequest {
     pub principal: String,
     pub action: String,
-    pub resource_name: String,
-    pub resource_ip: String,
+    pub resource: Resource,
 }
 
 #[derive(Serialize)]
@@ -74,17 +73,10 @@ pub struct PoliciesDownload {
 }
 
 pub fn build_request(req: &CheckRequest) -> Result<Request, ServiceError> {
-    let ip = req
-        .resource_ip
-        .parse()
-        .map_err(|_| ServiceError::InvalidIp)?;
     Ok(Request {
         principal: User::new(&req.principal, None),
         action: Action::new(&req.action, None),
         groups: Groups(vec![]),
-        resource: Host {
-            name: req.resource_name.clone(),
-            ip,
-        },
+        resource: req.resource.clone(),
     })
 }

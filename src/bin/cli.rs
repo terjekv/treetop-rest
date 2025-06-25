@@ -8,6 +8,8 @@ use rustyline::validate::Validator;
 use rustyline::{Context, Editor, Helper};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::net::IpAddr;
+use treetop_core::Resource;
 use treetop_rest::models::Endpoint;
 
 // Top-level commands
@@ -24,8 +26,8 @@ const COMMANDS_MAIN: &[&str] = &[
 const CHECK_FLAGS: &[&str] = &[
     "--principal",
     "--action",
-    "--resource-name",
-    "--resource-ip",
+    "--resource-type",
+    "--resource-data",
 ];
 const GET_POLICIES_FLAGS: &[&str] = &["--raw"];
 const UPLOAD_FLAGS: &[&str] = &["--file", "--raw", "--token"];
@@ -115,10 +117,10 @@ enum Commands {
         principal: String,
         #[clap(long)]
         action: String,
-        #[clap(long = "resource-name")]
-        resource_name: String,
-        #[clap(long = "resource-ip")]
-        resource_ip: String,
+        #[clap(long = "resource-type")]
+        resource_type: String,
+        #[clap(long = "resource-data")]
+        resource_data: String,
     },
     /// Download policies (JSON by default, use --raw for plain text)
     GetPolicies {
@@ -191,8 +193,7 @@ impl CliDisplay for StatusResponse {
 struct CheckRequest {
     principal: String,
     action: String,
-    resource_name: String,
-    resource_ip: String,
+    resource: Resource,
 }
 
 #[derive(Deserialize)]
@@ -277,7 +278,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn print_help() {
     println!(
-        "Available commands:\n  status\n  check --principal <P> --action <A> --resource-name <N> --resource-ip <IP>\n  get-policies [--raw]\n  upload --file <PATH> [--raw]\n  list-policies <USER>\n  help\n  exit"
+        "Available commands:\n  status\n  check --principal <P> --action <A> --resource-type <N> --resource-data <DATA>\n  get-policies [--raw]\n  upload --file <PATH> [--raw]\n  list-policies <USER>\n  help\n  exit"
     );
 }
 
@@ -298,14 +299,44 @@ async fn execute_command(
         Commands::Check {
             principal,
             action,
-            resource_name,
-            resource_ip,
+            resource_type,
+            resource_data,
         } => {
+            let resource = match resource_type.to_lowercase().as_str() {
+                "host" => {
+                    let name = resource_data.split(':').next().unwrap_or("").to_string();
+                    let ip: IpAddr = match resource_data
+                        .split(':')
+                        .nth(1)
+                        .unwrap_or("")
+                        .to_string()
+                        .parse()
+                    {
+                        Ok(ip) => ip,
+                        Err(_) => {
+                            eprintln!(
+                                "Invalid IP address format in resource data: {}",
+                                resource_data
+                            );
+                            return Ok(());
+                        }
+                    };
+
+                    Resource::Host { name, ip }
+                }
+                "photo" => Resource::Photo {
+                    id: resource_data.to_string(),
+                },
+                _ => {
+                    eprintln!("Unsupported resource type: {}", resource_type);
+                    return Ok(());
+                }
+            };
+
             let req = CheckRequest {
                 principal,
                 action,
-                resource_name,
-                resource_ip,
+                resource,
             };
             let resp = client
                 .post(format!("{}/check", base_url))
