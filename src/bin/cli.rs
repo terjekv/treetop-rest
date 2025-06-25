@@ -9,7 +9,7 @@ use rustyline::{Context, Editor, Helper};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::IpAddr;
-use treetop_core::Resource;
+use treetop_core::{Resource, ResourceKind};
 use treetop_rest::models::Endpoint;
 
 // Top-level commands
@@ -234,6 +234,40 @@ struct ErrorResponse {
     error: String,
 }
 
+trait FromColonString {
+    fn from_colon_string(s: &str) -> Result<Resource, String>;
+}
+
+impl FromColonString for Resource {
+    fn from_colon_string(s: &str) -> Result<Resource, String> {
+        let (tag, data) = s
+            .split_once(':')
+            .ok_or_else(|| format!("expected `<kind>:<payload>`, got {:?}", s))?;
+
+        let kind = tag
+            .parse::<ResourceKind>()
+            .map_err(|_| format!("unknown resource kind {:?}", tag))?;
+
+        match kind {
+            ResourceKind::Host => {
+                let (name, ip_str) = data
+                    .split_once(':')
+                    .ok_or_else(|| format!("host needs `name:ip`, got {:?}", data))?;
+                let ip = ip_str
+                    .parse::<IpAddr>()
+                    .map_err(|e| format!("invalid IP `{}`: {}", ip_str, e))?;
+                Ok(Resource::Host {
+                    name: name.to_string(),
+                    ip,
+                })
+            }
+            ResourceKind::Photo => Ok(Resource::Photo {
+                id: data.to_string(),
+            }),
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -302,33 +336,13 @@ async fn execute_command(
             resource_type,
             resource_data,
         } => {
-            let resource = match resource_type.to_lowercase().as_str() {
-                "host" => {
-                    let name = resource_data.split(':').next().unwrap_or("").to_string();
-                    let ip: IpAddr = match resource_data
-                        .split(':')
-                        .nth(1)
-                        .unwrap_or("")
-                        .to_string()
-                        .parse()
-                    {
-                        Ok(ip) => ip,
-                        Err(_) => {
-                            eprintln!(
-                                "Invalid IP address format in resource data: {}",
-                                resource_data
-                            );
-                            return Ok(());
-                        }
-                    };
-
-                    Resource::Host { name, ip }
-                }
-                "photo" => Resource::Photo {
-                    id: resource_data.to_string(),
-                },
-                _ => {
-                    eprintln!("Unsupported resource type: {}", resource_type);
+            let resource = match Resource::from_colon_string(&format!(
+                "{}:{}",
+                resource_type, resource_data
+            )) {
+                Ok(res) => res,
+                Err(e) => {
+                    eprintln!("Error parsing resource: {}", e);
                     return Ok(());
                 }
             };
