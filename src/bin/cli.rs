@@ -264,6 +264,10 @@ impl FromColonString for Resource {
             ResourceKind::Photo => Ok(Resource::Photo {
                 id: data.to_string(),
             }),
+            ResourceKind::Generic => Ok(Resource::Generic {
+                kind: tag.to_string(),
+                id: data.to_string(),
+            }),
         }
     }
 }
