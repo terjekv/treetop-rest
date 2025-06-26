@@ -54,6 +54,17 @@ pub struct CheckResponse {
 }
 
 #[derive(Serialize)]
+pub enum DecisionBrief {
+    Allow,
+    Deny,
+}
+
+#[derive(Serialize)]
+pub struct CheckResponseBrief {
+    pub decision: DecisionBrief,
+}
+
+#[derive(Serialize)]
 pub struct PoliciesMetadata {
     pub policies_sha256: String,
     pub policies_uploaded_at: DateTime<Utc>,

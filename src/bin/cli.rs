@@ -28,6 +28,7 @@ const CHECK_FLAGS: &[&str] = &[
     "--action",
     "--resource-type",
     "--resource-data",
+    "--detailed",
 ];
 const GET_POLICIES_FLAGS: &[&str] = &["--raw"];
 const UPLOAD_FLAGS: &[&str] = &["--file", "--raw", "--token"];
@@ -111,7 +112,7 @@ enum Commands {
     Repl,
     /// Get service status
     Status,
-    /// Check a request against policies
+    /// Check a request against policies.     
     Check {
         #[clap(long)]
         principal: String,
@@ -121,6 +122,8 @@ enum Commands {
         resource_type: String,
         #[clap(long = "resource-data")]
         resource_data: String,
+        #[clap(long = "detailed")]
+        detailed: Option<bool>,
     },
     /// Download policies (JSON by default, use --raw for plain text)
     GetPolicies {
@@ -203,6 +206,22 @@ struct CheckResponse {
 impl CliDisplay for CheckResponse {
     fn display(&self) -> String {
         self.decision.clone()
+    }
+}
+
+#[derive(Deserialize)]
+struct CheckResponseDetailed {
+    decision: treetop_core::Decision,
+}
+
+impl CliDisplay for CheckResponseDetailed {
+    fn display(&self) -> String {
+        match &self.decision {
+            treetop_core::Decision::Allow { policy } => {
+                format!("Allow\n--- Matching policy ---\n{}\n---", policy.literal)
+            }
+            treetop_core::Decision::Deny => "Deny".to_string(),
+        }
     }
 }
 
@@ -339,6 +358,7 @@ async fn execute_command(
             action,
             resource_type,
             resource_data,
+            detailed,
         } => {
             let resource = match Resource::from_colon_string(&format!(
                 "{}:{}",
@@ -356,6 +376,17 @@ async fn execute_command(
                 action,
                 resource,
             };
+            if let Some(detailed) = detailed {
+                if detailed {
+                    let resp = client
+                        .post(format!("{}/check_detailed", base_url))
+                        .json(&req)
+                        .send()
+                        .await?;
+                    handle_response::<CheckResponseDetailed>(resp).await;
+                    return Ok(());
+                }
+            }
             let resp = client
                 .post(format!("{}/check", base_url))
                 .json(&req)

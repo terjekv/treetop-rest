@@ -1,6 +1,7 @@
 use crate::errors::ServiceError;
 use crate::models::{
-    CheckRequest, CheckResponse, PoliciesDownload, PoliciesMetadata, build_request,
+    CheckRequest, CheckResponse, CheckResponseBrief, DecisionBrief, PoliciesDownload,
+    PoliciesMetadata, build_request,
 };
 use crate::state::SharedPolicyStore;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
@@ -17,12 +18,30 @@ struct Upload {
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.route("/api/v1/status", web::get().to(get_status))
         .route("/api/v1/check", web::post().to(check))
+        .route("/api/v1/check_detailed", web::post().to(check_detailed))
         .route("/api/v1/policies", web::get().to(get_policies))
         .route("/api/v1/policies", web::post().to(upload_policies))
         .route("/api/v1/policies/{user}", web::get().to(list_policies));
 }
 
 pub async fn check(
+    store: web::Data<SharedPolicyStore>,
+    req: web::Json<CheckRequest>,
+) -> Result<web::Json<CheckResponseBrief>, ServiceError> {
+    let store = store.lock().map_err(|_| ServiceError::LockPoison)?;
+    let request = build_request(&req)?;
+    match store.engine.evaluate(&request) {
+        Ok(full_decision) => {
+            let brief = match full_decision {
+                treetop_core::Decision::Allow { .. } => DecisionBrief::Allow,
+                treetop_core::Decision::Deny => DecisionBrief::Deny,
+            };
+            Ok(web::Json(CheckResponseBrief { decision: brief }))
+        }
+        Err(e) => Err(ServiceError::EvaluationError(e.to_string())),
+    }
+}
+pub async fn check_detailed(
     store: web::Data<SharedPolicyStore>,
     req: web::Json<CheckRequest>,
 ) -> Result<web::Json<CheckResponse>, ServiceError> {
