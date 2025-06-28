@@ -18,7 +18,7 @@ impl HostLabelAdapter {
 impl Fetchable for HostLabelAdapter {
     fn update_store(&mut self, body: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut s = self.store.lock().unwrap();
-        s.set_host_labels(&body.to_string(), None, None)?;
+        s.set_host_labels(body, None, None)?;
         Ok(())
     }
 

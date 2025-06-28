@@ -32,17 +32,17 @@ struct JsonError {
 impl Display for ServiceError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            ServiceError::LockPoison(msg) => write!(f, "Internal server error: {}", msg),
+            ServiceError::LockPoison(msg) => write!(f, "Internal server error: {msg}"),
             ServiceError::InvalidIp => write!(f, "Invalid IP address"),
-            ServiceError::InvalidJsonPayload(msg) => write!(f, "Invalid JSON payload: {}", msg),
+            ServiceError::InvalidJsonPayload(msg) => write!(f, "Invalid JSON payload: {msg}"),
             ServiceError::InvalidTextPayload => write!(f, "Invalid text payload"),
-            ServiceError::CompileError(msg) => write!(f, "Failed to compile policies: {}", msg),
-            ServiceError::EvaluationError(msg) => write!(f, "Policy evaluation error: {}", msg),
+            ServiceError::CompileError(msg) => write!(f, "Failed to compile policies: {msg}"),
+            ServiceError::EvaluationError(msg) => write!(f, "Policy evaluation error: {msg}"),
             ServiceError::ListPoliciesError(_) => write!(f, "Error listing policies"),
             ServiceError::UploadNotAllowed => write!(f, "Policy upload is not allowed"),
             ServiceError::InvalidUploadToken => write!(f, "Invalid upload token provided"),
             ServiceError::UploadTokenNotSet => write!(f, "Upload token is not set"),
-            ServiceError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
+            ServiceError::ValidationError(msg) => write!(f, "Validation error: {msg}"),
         }
     }
 }

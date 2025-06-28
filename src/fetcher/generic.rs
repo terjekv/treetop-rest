@@ -79,12 +79,11 @@ impl<T: Fetchable + Send + 'static> GenericFetcher<T> {
             format!("{:x}", hasher.finalize())
         };
 
-        if let Some(old_hash) = self.inner.current_hash() {
-            if old_hash == &new_hash {
+        if let Some(old_hash) = self.inner.current_hash()
+            && old_hash == &new_hash {
                 debug!(message = "body unchanged", url = &self.url);
                 return Ok(());
             }
-        }
 
         // 3. Update store and record hash
         self.inner.update_store(&body)?;

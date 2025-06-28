@@ -187,8 +187,7 @@ impl MetadataParser for OfHostLabels {
                         error = %e
                     );
                     return Err(ServiceError::InvalidJsonPayload(format!(
-                        "Invalid regex in host pattern: {}",
-                        e
+                        "Invalid regex in host pattern: {e}"
                     )));
                 }
             };
@@ -242,7 +241,7 @@ impl PolicyStore {
 
     pub fn set_dsl(
         &mut self,
-        dsl: &String,
+        dsl: &str,
         source: Option<Endpoint>,
         refresh_frequency: Option<u32>,
     ) -> Result<(), ServiceError> {
@@ -250,16 +249,16 @@ impl PolicyStore {
         let source = source.or(old_metadata.source);
         let refresh_frequency = refresh_frequency.or(old_metadata.refresh_frequency);
 
-        let metadata = Metadata::<OfPolicies>::new(dsl.clone(), source, refresh_frequency)?;
+        let metadata = Metadata::<OfPolicies>::new(dsl.to_string(), source, refresh_frequency)?;
 
-        self.engine = Arc::new(PolicyEngine::new_from_str(&dsl)?);
+        self.engine = Arc::new(PolicyEngine::new_from_str(dsl)?);
         self.policies = metadata;
         Ok(())
     }
 
     pub fn set_host_labels(
         &mut self,
-        labels: &String,
+        labels: &str,
         source: Option<Endpoint>,
         refresh_frequency: Option<u32>,
     ) -> Result<(), ServiceError> {
@@ -267,7 +266,8 @@ impl PolicyStore {
         let source = source.or(old_metadata.source);
         let refresh_frequency = refresh_frequency.or(old_metadata.refresh_frequency);
 
-        let metadata = Metadata::<OfHostLabels>::new(labels.clone(), source, refresh_frequency)?;
+        let metadata =
+            Metadata::<OfHostLabels>::new(labels.to_string(), source, refresh_frequency)?;
         self.host_labels = metadata;
         Ok(())
     }

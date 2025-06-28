@@ -228,20 +228,20 @@ impl FromColonString for Resource {
     fn from_colon_string(s: &str) -> Result<Resource, String> {
         let (tag, data) = s
             .split_once(':')
-            .ok_or_else(|| format!("expected `<kind>:<payload>`, got {:?}", s))?;
+            .ok_or_else(|| format!("expected `<kind>:<payload>`, got {s:?}"))?;
 
         let kind = tag
             .parse::<ResourceKind>()
-            .map_err(|_| format!("unknown resource kind {:?}", tag))?;
+            .map_err(|_| format!("unknown resource kind {tag:?}"))?;
 
         match kind {
             ResourceKind::Host => {
                 let (name, ip_str) = data
                     .split_once(':')
-                    .ok_or_else(|| format!("host needs `name:ip`, got {:?}", data))?;
+                    .ok_or_else(|| format!("host needs `name:ip`, got {data:?}"))?;
                 let ip = ip_str
                     .parse::<IpAddr>()
-                    .map_err(|e| format!("invalid IP `{}`: {}", ip_str, e))?;
+                    .map_err(|e| format!("invalid IP `{ip_str}`: {e}"))?;
                 Ok(Resource::Host {
                     name: name.to_string(),
                     ip,
@@ -289,7 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
                 Err(err) => {
-                    eprintln!("Error: {}", err);
+                    eprintln!("Error: {err}");
                     break;
                 }
             }
@@ -317,7 +317,7 @@ async fn execute_command(
             unreachable!();
         }
         Commands::Status => {
-            let resp = client.get(format!("{}/status", base_url)).send().await?;
+            let resp = client.get(format!("{base_url}/status")).send().await?;
             handle_response::<PoliciesMetadata>(resp).await;
         }
         Commands::Check {
@@ -328,12 +328,11 @@ async fn execute_command(
             detailed,
         } => {
             let resource = match Resource::from_colon_string(&format!(
-                "{}:{}",
-                resource_type, resource_data
+                "{resource_type}:{resource_data}"
             )) {
                 Ok(res) => res,
                 Err(e) => {
-                    eprintln!("Error parsing resource: {}", e);
+                    eprintln!("Error parsing resource: {e}");
                     return Ok(());
                 }
             };
@@ -343,19 +342,18 @@ async fn execute_command(
                 action,
                 resource,
             };
-            if let Some(detailed) = detailed {
-                if detailed {
+            if let Some(detailed) = detailed
+                && detailed {
                     let resp = client
-                        .post(format!("{}/check_detailed", base_url))
+                        .post(format!("{base_url}/check_detailed"))
                         .json(&req)
                         .send()
                         .await?;
                     handle_response::<CheckResponseDetailed>(resp).await;
                     return Ok(());
                 }
-            }
             let resp = client
-                .post(format!("{}/check", base_url))
+                .post(format!("{base_url}/check"))
                 .json(&req)
                 .send()
                 .await?;
@@ -363,9 +361,9 @@ async fn execute_command(
         }
         Commands::GetPolicies { raw } => {
             let url = if raw {
-                format!("{}/policies?format=raw", base_url)
+                format!("{base_url}/policies?format=raw")
             } else {
-                format!("{}/policies", base_url)
+                format!("{base_url}/policies")
             };
             let resp = client.get(&url).send().await?;
             if raw && resp.status().is_success() {
@@ -378,7 +376,7 @@ async fn execute_command(
             let content = fs::read_to_string(&file)?;
             let resp = if raw {
                 client
-                    .post(format!("{}/policies", base_url))
+                    .post(format!("{base_url}/policies"))
                     .header("Content-Type", "text/plain")
                     .header("X-Upload-Token", token)
                     .body(content)
@@ -390,7 +388,7 @@ async fn execute_command(
                     policies: String,
                 }
                 client
-                    .post(format!("{}/policies", base_url))
+                    .post(format!("{base_url}/policies"))
                     .json(&Upload { policies: content })
                     .send()
                     .await?
@@ -399,7 +397,7 @@ async fn execute_command(
         }
         Commands::ListPolicies { user } => {
             let resp = client
-                .get(format!("{}/policies/{}", base_url, user))
+                .get(format!("{base_url}/policies/{user}"))
                 .send()
                 .await?;
             handle_response::<UserPolicies>(resp).await;
@@ -423,6 +421,6 @@ async fn handle_error(resp: reqwest::Response) {
     if let Ok(err) = resp.json::<ErrorResponse>().await {
         eprintln!("Error: {}", err.error);
     } else {
-        eprintln!("Unexpected error: {}", status);
+        eprintln!("Unexpected error: {status}");
     }
 }

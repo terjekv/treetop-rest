@@ -109,7 +109,7 @@ pub async fn list_policies(
     user: web::Path<String>,
 ) -> Result<web::Json<UserPolicies>, ServiceError> {
     let store = store.lock()?;
-    println!("Listing policies for user: {}", user);
+    println!("Listing policies for user: {user}");
     let policies = store.engine.list_policies_for_user(&user, vec![])?;
     Ok(web::Json(policies))
 }

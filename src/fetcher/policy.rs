@@ -18,7 +18,7 @@ impl PolicyFetchAdapter {
 impl Fetchable for PolicyFetchAdapter {
     fn update_store(&mut self, body: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut s = self.store.lock().unwrap();
-        s.set_dsl(&body.to_string(), None, None)?;
+        s.set_dsl(body, None, None)?;
         Ok(())
     }
 
