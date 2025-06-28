@@ -88,7 +88,6 @@ impl<T: Fetchable + Send + 'static> GenericFetcher<T> {
 
         // 3. Update store and record hash
         self.inner.update_store(&body)?;
-        self.inner.set_hash(new_hash.clone());
         info!(
             message = "fetched and applied update",
             url = &self.url,

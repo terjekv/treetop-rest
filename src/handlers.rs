@@ -1,14 +1,13 @@
 use crate::errors::ServiceError;
 use crate::models::{
-    CheckRequest, CheckResponse, CheckResponseBrief, DecisionBrief, PoliciesDownload,
-    PoliciesMetadata, build_request,
+    CheckRequest, CheckResponse, CheckResponseBrief, PoliciesDownload, PoliciesMetadata,
+    build_request,
 };
 use crate::state::SharedPolicyStore;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
 use serde::Deserialize;
 use std::collections::HashMap;
 use treetop_core::UserPolicies;
-
 #[derive(Deserialize)]
 struct Upload {
     policies: String,
@@ -28,16 +27,10 @@ pub async fn check(
     store: web::Data<SharedPolicyStore>,
     req: web::Json<CheckRequest>,
 ) -> Result<web::Json<CheckResponseBrief>, ServiceError> {
-    let store = store.lock().map_err(|_| ServiceError::LockPoison)?;
+    let store = store.lock()?;
     let request = build_request(&req)?;
     match store.engine.evaluate(&request) {
-        Ok(full_decision) => {
-            let brief = match full_decision {
-                treetop_core::Decision::Allow { .. } => DecisionBrief::Allow,
-                treetop_core::Decision::Deny => DecisionBrief::Deny,
-            };
-            Ok(web::Json(CheckResponseBrief { decision: brief }))
-        }
+        Ok(full_decision) => Ok(web::Json(full_decision.into())),
         Err(e) => Err(ServiceError::EvaluationError(e.to_string())),
     }
 }
@@ -45,7 +38,7 @@ pub async fn check_detailed(
     store: web::Data<SharedPolicyStore>,
     req: web::Json<CheckRequest>,
 ) -> Result<web::Json<CheckResponse>, ServiceError> {
-    let store = store.lock().map_err(|_| ServiceError::LockPoison)?;
+    let store = store.lock()?;
     let request = build_request(&req)?;
     match store.engine.evaluate(&request) {
         Ok(decision) => Ok(web::Json(CheckResponse { decision })),
@@ -58,17 +51,15 @@ pub async fn get_policies(
     store: web::Data<SharedPolicyStore>,
 ) -> Result<HttpResponse, ServiceError> {
     let format = query.get("format").map(String::as_str).unwrap_or("json");
-    let store = store.lock().map_err(|_| ServiceError::LockPoison)?;
+    let store = store.lock()?;
 
-    if format.eq_ignore_ascii_case("raw") {
+    if format.eq_ignore_ascii_case("raw") || format.eq_ignore_ascii_case("text") {
         Ok(HttpResponse::Ok()
             .content_type("text/plain")
-            .body(store.dsl.clone()))
+            .body(store.policies.content.clone()))
     } else {
         Ok(HttpResponse::Ok().json(PoliciesDownload {
-            policies: store.dsl.clone(),
-            sha256: store.policies_sha256.clone(),
-            uploaded_at: store.policies_timestamp,
+            policies: store.policies.clone(),
         }))
     }
 }
@@ -79,8 +70,8 @@ pub async fn upload_policies(
     store: web::Data<SharedPolicyStore>,
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
     // Check that upload is allowed, and if it is, check that the upload token is set in the headers
-    let mut guard = store.lock().map_err(|_| ServiceError::LockPoison)?;
-    if !guard.policies_allow_upload {
+    let mut guard = store.lock()?;
+    if !guard.allow_upload {
         return Err(ServiceError::UploadNotAllowed);
     }
 
@@ -98,24 +89,18 @@ pub async fn upload_policies(
 
     let content_type = req.content_type();
     let dsl_string = if content_type.starts_with("application/json") {
-        let upload: Upload =
-            serde_json::from_slice(&body).map_err(|_| ServiceError::InvalidJsonPayload)?;
+        let upload: Upload = serde_json::from_slice(&body)?;
         upload.policies
     } else {
         String::from_utf8(body.to_vec()).map_err(|_| ServiceError::InvalidTextPayload)?
     };
 
-    guard.update_dsl(&dsl_string)?;
+    guard.set_dsl(&dsl_string, None, None)?;
 
     Ok(web::Json(PoliciesMetadata {
-        policies_sha256: guard.policies_sha256.clone(),
-        policies_uploaded_at: guard.policies_timestamp,
-        policies_size: guard.policies_size,
-        policies_allow_upload: guard.policies_allow_upload,
-        policies_url: guard.policies_url.clone(),
-        policies_refresh_frequency: guard.policies_refresh_frequency,
-        host_labels_url: guard.host_labels_url.clone(),
-        host_labels_refresh_frequency: guard.host_labels_refresh_frequency,
+        allow_upload: guard.allow_upload,
+        policies: guard.policies.clone(),
+        host_labels: guard.host_labels.clone(),
     }))
 }
 
@@ -123,27 +108,14 @@ pub async fn list_policies(
     store: web::Data<SharedPolicyStore>,
     user: web::Path<String>,
 ) -> Result<web::Json<UserPolicies>, ServiceError> {
-    let store = store.lock().map_err(|_| ServiceError::LockPoison)?;
+    let store = store.lock()?;
     println!("Listing policies for user: {}", user);
-    let policies = store
-        .engine
-        .list_policies_for_user(&user, vec![])
-        .map_err(|e| ServiceError::ListPoliciesError(e.to_string()))?;
+    let policies = store.engine.list_policies_for_user(&user, vec![])?;
     Ok(web::Json(policies))
 }
 
 pub async fn get_status(
     store: web::Data<SharedPolicyStore>,
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
-    let guard = store.lock().map_err(|_| ServiceError::LockPoison)?;
-    Ok(web::Json(PoliciesMetadata {
-        policies_sha256: guard.policies_sha256.clone(),
-        policies_uploaded_at: guard.policies_timestamp,
-        policies_size: guard.policies_size,
-        policies_allow_upload: guard.policies_allow_upload,
-        policies_url: guard.policies_url.clone(),
-        policies_refresh_frequency: guard.policies_refresh_frequency,
-        host_labels_url: guard.host_labels_url.clone(),
-        host_labels_refresh_frequency: guard.host_labels_refresh_frequency,
-    }))
+    Ok(web::Json(store.lock()?.into()))
 }

@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::IpAddr;
 use treetop_core::{Resource, ResourceKind};
-use treetop_rest::models::Endpoint;
+use treetop_rest::models::PoliciesMetadata;
+use treetop_rest::state::{Metadata, OfPolicies};
 
 // Top-level commands
 const COMMANDS_MAIN: &[&str] = &[
@@ -147,47 +148,15 @@ trait CliDisplay {
     fn display(&self) -> String;
 }
 
-#[derive(Deserialize)]
-struct StatusResponse {
-    policies_sha256: String,
-    policies_uploaded_at: String,
-    policies_size: usize,
-    policies_allow_upload: bool,
-    policies_url: Option<Endpoint>,
-    policies_refresh_frequency: Option<u32>,
-    host_labels_url: Option<Endpoint>,
-    host_labels_refresh_frequency: Option<u32>,
-}
-impl CliDisplay for StatusResponse {
+impl CliDisplay for PoliciesMetadata {
     fn display(&self) -> String {
-        let refresh = match self.policies_refresh_frequency {
-            Some(freq) => format!("{} seconds", freq),
-            None => "N/A".to_string(),
-        };
-        let url = match self.policies_url.as_ref().map(|u| u.to_string()) {
-            Some(url) => url,
-            None => "None".to_string(),
-        };
-
-        let hrefresh = match self.host_labels_refresh_frequency {
-            Some(freq) => format!("{} seconds", freq),
-            None => "N/A".to_string(),
-        };
-        let hurl = match self.host_labels_url.as_ref().map(|u| u.to_string()) {
-            Some(url) => url,
-            None => "None".to_string(),
-        };
-
         format!(
-            "**Policies**\n  SHA256: {}\n  Timestamp: {}\n  Size: {} bytes\n  Allow Upload: {}\n  URL: {}\n  Refresh: {}\n**Host labels**\n  URL: {}\n  Refresh: {}",
-            self.policies_sha256,
-            self.policies_uploaded_at,
-            self.policies_size,
-            self.policies_allow_upload,
-            url,
-            refresh,
-            hurl,
-            hrefresh
+            "Allow upload: {}
+ Policies:
+{}
+ Host labels:
+{}",
+            self.allow_upload, self.policies, self.host_labels,
         )
     }
 }
@@ -227,15 +196,13 @@ impl CliDisplay for CheckResponseDetailed {
 
 #[derive(Deserialize)]
 struct PoliciesDownload {
-    policies: String,
-    sha256: String,
-    uploaded_at: String,
+    policies: Metadata<OfPolicies>,
 }
 impl CliDisplay for PoliciesDownload {
     fn display(&self) -> String {
         format!(
-            "Policies SHA256: {}\nUploaded at: {}\nPolicies:\n{}",
-            self.sha256, self.uploaded_at, self.policies
+            "Metadata:\n{}\nContent:\n{}",
+            self.policies, self.policies.content
         )
     }
 }
@@ -351,7 +318,7 @@ async fn execute_command(
         }
         Commands::Status => {
             let resp = client.get(format!("{}/status", base_url)).send().await?;
-            handle_response::<StatusResponse>(resp).await;
+            handle_response::<PoliciesMetadata>(resp).await;
         }
         Commands::Check {
             principal,
@@ -428,7 +395,7 @@ async fn execute_command(
                     .send()
                     .await?
             };
-            handle_response::<StatusResponse>(resp).await;
+            handle_response::<PoliciesMetadata>(resp).await;
         }
         Commands::ListPolicies { user } => {
             let resp = client

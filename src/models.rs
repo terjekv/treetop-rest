@@ -1,9 +1,13 @@
-use chrono::{DateTime, Utc};
+use std::ops::Deref;
+
 use serde::{Deserialize, Serialize};
 use treetop_core::{Action, Decision, Groups, Request, Resource, User};
 use url::Url;
 
-use crate::errors::ServiceError;
+use crate::{
+    errors::ServiceError,
+    state::{Metadata, OfHostLabels, OfPolicies, PolicyStore},
+};
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct Endpoint {
@@ -64,23 +68,43 @@ pub struct CheckResponseBrief {
     pub decision: DecisionBrief,
 }
 
-#[derive(Serialize)]
+impl From<Decision> for CheckResponseBrief {
+    fn from(decision: Decision) -> Self {
+        match decision {
+            Decision::Allow { .. } => CheckResponseBrief {
+                decision: DecisionBrief::Allow,
+            },
+            Decision::Deny => CheckResponseBrief {
+                decision: DecisionBrief::Deny,
+            },
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct PoliciesMetadata {
-    pub policies_sha256: String,
-    pub policies_uploaded_at: DateTime<Utc>,
-    pub policies_size: usize,
-    pub policies_allow_upload: bool,
-    pub policies_url: Option<Endpoint>,
-    pub policies_refresh_frequency: Option<u32>,
-    pub host_labels_url: Option<Endpoint>,
-    pub host_labels_refresh_frequency: Option<u32>,
+    pub allow_upload: bool,
+
+    pub policies: Metadata<OfPolicies>,
+    pub host_labels: Metadata<OfHostLabels>,
+}
+
+impl<T> From<T> for PoliciesMetadata
+where
+    T: Deref<Target = PolicyStore>,
+{
+    fn from(store: T) -> Self {
+        PoliciesMetadata {
+            allow_upload: store.allow_upload,
+            policies: store.policies.clone(),
+            host_labels: store.host_labels.clone(),
+        }
+    }
 }
 
 #[derive(Serialize)]
 pub struct PoliciesDownload {
-    pub policies: String,
-    pub sha256: String,
-    pub uploaded_at: DateTime<Utc>,
+    pub policies: Metadata<OfPolicies>,
 }
 
 pub fn build_request(req: &CheckRequest) -> Result<Request, ServiceError> {
