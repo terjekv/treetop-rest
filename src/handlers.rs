@@ -1,13 +1,10 @@
 use crate::errors::ServiceError;
-use crate::models::{
-    CheckRequest, CheckResponse, CheckResponseBrief, PoliciesDownload, PoliciesMetadata,
-    build_request,
-};
+use crate::models::{CheckResponse, CheckResponseBrief, PoliciesDownload, PoliciesMetadata};
 use crate::state::SharedPolicyStore;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
 use serde::Deserialize;
 use std::collections::HashMap;
-use treetop_core::UserPolicies;
+use treetop_core::{Request, UserPolicies};
 #[derive(Deserialize)]
 struct Upload {
     policies: String,
@@ -25,22 +22,20 @@ pub fn init(cfg: &mut web::ServiceConfig) {
 
 pub async fn check(
     store: web::Data<SharedPolicyStore>,
-    req: web::Json<CheckRequest>,
+    req: web::Json<Request>,
 ) -> Result<web::Json<CheckResponseBrief>, ServiceError> {
     let store = store.lock()?;
-    let request = build_request(&req)?;
-    match store.engine.evaluate(&request) {
+    match store.engine.evaluate(&req) {
         Ok(full_decision) => Ok(web::Json(full_decision.into())),
         Err(e) => Err(ServiceError::EvaluationError(e.to_string())),
     }
 }
 pub async fn check_detailed(
     store: web::Data<SharedPolicyStore>,
-    req: web::Json<CheckRequest>,
+    req: web::Json<Request>,
 ) -> Result<web::Json<CheckResponse>, ServiceError> {
     let store = store.lock()?;
-    let request = build_request(&req)?;
-    match store.engine.evaluate(&request) {
+    match store.engine.evaluate(&req) {
         Ok(decision) => Ok(web::Json(CheckResponse { decision })),
         Err(e) => Err(ServiceError::EvaluationError(e.to_string())),
     }

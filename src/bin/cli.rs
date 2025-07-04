@@ -9,7 +9,8 @@ use rustyline::{Context, Editor, Helper};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::IpAddr;
-use treetop_core::{Resource, ResourceKind};
+use std::str::FromStr;
+use treetop_core::{Action, Principal, Request, Resource, ResourceKind, User};
 use treetop_rest::models::PoliciesMetadata;
 use treetop_rest::state::{Metadata, OfPolicies};
 
@@ -161,13 +162,6 @@ impl CliDisplay for PoliciesMetadata {
     }
 }
 
-#[derive(Serialize)]
-struct CheckRequest {
-    principal: String,
-    action: String,
-    resource: Resource,
-}
-
 #[derive(Deserialize)]
 struct CheckResponse {
     decision: String,
@@ -279,7 +273,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Some(_) => {
                             let args = std::iter::once("policy-cli").chain(parts.into_iter());
                             if let Ok(parsed) = Cli::try_parse_from(args) {
-                                execute_command(parsed.command, &base_url, &client).await?;
+                                match execute_command(parsed.command, &base_url, &client).await {
+                                    Ok(_) => {}
+                                    Err(e) => eprintln!("Error executing command: {e}"),
+                                }
                             } else {
                                 eprintln!("Unknown or invalid command");
                             }
@@ -327,31 +324,32 @@ async fn execute_command(
             resource_data,
             detailed,
         } => {
-            let resource = match Resource::from_colon_string(&format!(
-                "{resource_type}:{resource_data}"
-            )) {
-                Ok(res) => res,
-                Err(e) => {
-                    eprintln!("Error parsing resource: {e}");
-                    return Ok(());
-                }
-            };
+            let resource =
+                match Resource::from_colon_string(&format!("{resource_type}:{resource_data}")) {
+                    Ok(res) => res,
+                    Err(e) => {
+                        eprintln!("Error parsing resource: {e}");
+                        return Ok(());
+                    }
+                };
 
-            let req = CheckRequest {
-                principal,
-                action,
+            let req = Request {
+                principal: Principal::User(User::from_str(&principal)?),
+                action: Action::from_str(&action)?,
                 resource,
             };
+
             if let Some(detailed) = detailed
-                && detailed {
-                    let resp = client
-                        .post(format!("{base_url}/check_detailed"))
-                        .json(&req)
-                        .send()
-                        .await?;
-                    handle_response::<CheckResponseDetailed>(resp).await;
-                    return Ok(());
-                }
+                && detailed
+            {
+                let resp = client
+                    .post(format!("{base_url}/check_detailed"))
+                    .json(&req)
+                    .send()
+                    .await?;
+                handle_response::<CheckResponseDetailed>(resp).await;
+                return Ok(());
+            }
             let resp = client
                 .post(format!("{base_url}/check"))
                 .json(&req)

@@ -1,13 +1,10 @@
 use std::ops::Deref;
 
 use serde::{Deserialize, Serialize};
-use treetop_core::{Action, Decision, Groups, Request, Resource, User};
+use treetop_core::Decision;
 use url::Url;
 
-use crate::{
-    errors::ServiceError,
-    state::{Metadata, OfHostLabels, OfPolicies, PolicyStore},
-};
+use crate::state::{Metadata, OfHostLabels, OfPolicies, PolicyStore};
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct Endpoint {
@@ -43,13 +40,6 @@ impl std::str::FromStr for Endpoint {
             Err(e) => Err(e),
         }
     }
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct CheckRequest {
-    pub principal: String,
-    pub action: String,
-    pub resource: Resource,
 }
 
 #[derive(Serialize)]
@@ -105,13 +95,4 @@ where
 #[derive(Serialize)]
 pub struct PoliciesDownload {
     pub policies: Metadata<OfPolicies>,
-}
-
-pub fn build_request(req: &CheckRequest) -> Result<Request, ServiceError> {
-    Ok(Request {
-        principal: User::new(&req.principal, None),
-        action: Action::new(&req.action, None),
-        groups: Groups(vec![]),
-        resource: req.resource.clone(),
-    })
 }
