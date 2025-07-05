@@ -100,9 +100,9 @@ impl Completer for CLIHelper {
 #[derive(Parser, Debug)]
 #[clap(name = "policy-cli", about = "CLI (and REPL) for Policy Service API")]
 struct Cli {
-    #[clap(long, default_value = "127.0.0.1")]
+    #[clap(long, default_value = "127.0.0.1", env = "CLI_HOST")]
     host: String,
-    #[clap(long, default_value = "9999")]
+    #[clap(long, default_value = "9999", env = "CLI_PORT")]
     port: u16,
     #[clap(subcommand)]
     command: Commands,
@@ -263,7 +263,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rl.set_helper(Some(CLIHelper));
         println!("Policy CLI REPL. Type 'help' for commands, 'exit' to quit.");
         loop {
-            match rl.readline("policy> ") {
+            match rl.readline(&format!("{}@{}> ", cli.host, cli.port)) {
                 Ok(input) => {
                     rl.add_history_entry(input.as_str())?;
                     let parts: Vec<&str> = input.split_whitespace().collect();
