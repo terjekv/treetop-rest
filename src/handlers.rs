@@ -1,11 +1,15 @@
 use crate::errors::ServiceError;
-use crate::models::{CheckResponse, CheckResponseBrief, PoliciesDownload, PoliciesMetadata};
+use crate::models::{
+    CheckResponse, CheckResponseBrief, PoliciesDownload, PoliciesMetadata, UserPolicies,
+};
 use crate::state::SharedPolicyStore;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
 use serde::Deserialize;
 use std::collections::HashMap;
-use treetop_core::{Request, UserPolicies};
-#[derive(Deserialize)]
+use treetop_core::Request;
+use utoipa::{OpenApi, ToSchema};
+
+#[derive(Deserialize, ToSchema)]
 struct Upload {
     policies: String,
 }
@@ -20,6 +24,31 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         .route("/api/v1/policies/{user}", web::get().to(list_policies));
 }
 
+#[derive(OpenApi)]
+#[openapi(
+    tags(
+        (name = "Treetop REST API", description = "API for Treetop policy management and evaluation")
+    ),
+    paths(
+        check,
+        check_detailed,
+        get_policies,
+        upload_policies,
+        list_policies,
+        get_status
+    ),
+)]
+pub struct ApiDoc;
+
+#[utoipa::path(
+        post,
+        path = "/api/v1/check",
+        responses(
+            (status = 200, description = "Check performed successfully", body = CheckResponseBrief),
+            (status = 400, description = "Bad request", body = ServiceError),
+            (status = 500, description = "Internal server error", body = ServiceError)
+        ),
+    )]
 pub async fn check(
     store: web::Data<SharedPolicyStore>,
     req: web::Json<Request>,
@@ -30,6 +59,16 @@ pub async fn check(
         Err(e) => Err(ServiceError::EvaluationError(e.to_string())),
     }
 }
+
+#[utoipa::path(
+        post,
+        path = "/api/v1/check_detailed",
+        responses(
+            (status = 200, description = "Check performed successfully", body = CheckResponse),
+            (status = 400, description = "Bad request", body = ServiceError),
+            (status = 500, description = "Internal server error", body = ServiceError)
+        ),
+    )]
 pub async fn check_detailed(
     store: web::Data<SharedPolicyStore>,
     req: web::Json<Request>,
@@ -41,6 +80,15 @@ pub async fn check_detailed(
     }
 }
 
+#[utoipa::path(
+        get,
+        path = "/api/v1/policies",
+        responses(
+            (status = 200, description = "Policies retrieved successfully", body = PoliciesDownload),
+            (status = 400, description = "Bad request", body = ServiceError),
+            (status = 500, description = "Internal server error", body = ServiceError)
+        ),
+    )]
 pub async fn get_policies(
     query: web::Query<HashMap<String, String>>,
     store: web::Data<SharedPolicyStore>,
@@ -59,6 +107,16 @@ pub async fn get_policies(
     }
 }
 
+#[utoipa::path(
+        post,
+        path = "/api/v1/policies",
+        request_body = Upload,
+        responses(
+            (status = 200, description = "Policies uploaded successfully", body = PoliciesMetadata),
+            (status = 400, description = "Bad request", body = ServiceError),
+            (status = 500, description = "Internal server error", body = ServiceError)
+        ),
+    )]
 pub async fn upload_policies(
     req: HttpRequest,
     body: web::Bytes,
@@ -99,6 +157,15 @@ pub async fn upload_policies(
     }))
 }
 
+#[utoipa::path(
+        get,
+        path = "/api/v1/policies/{user}",
+        responses(
+            (status = 200, description = "Policies for user retrieved successfully", body = UserPolicies),
+            (status = 400, description = "Bad request", body = ServiceError),
+            (status = 500, description = "Internal server error", body = ServiceError)
+        ),
+    )]
 pub async fn list_policies(
     store: web::Data<SharedPolicyStore>,
     user: web::Path<String>,
@@ -106,9 +173,18 @@ pub async fn list_policies(
     let store = store.lock()?;
     println!("Listing policies for user: {user}");
     let policies = store.engine.list_policies_for_user(&user, vec![])?;
-    Ok(web::Json(policies))
+    Ok(web::Json(policies.into()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/status",
+    responses(
+        (status = 200, description = "Service status retrieved successfully", body = PoliciesMetadata),
+        (status = 400, description = "Bad request", body = ServiceError),
+        (status = 500, description = "Internal server error", body = ServiceError)
+    ),
+)]
 pub async fn get_status(
     store: web::Data<SharedPolicyStore>,
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {

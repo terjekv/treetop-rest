@@ -5,10 +5,11 @@ use std::{
     sync::{MutexGuard, PoisonError},
 };
 use treetop_core::PolicyError;
+use utoipa::ToSchema;
 
 use crate::state::PolicyStore;
 
-#[derive(Debug)]
+#[derive(Debug, ToSchema)]
 #[allow(dead_code)]
 pub enum ServiceError {
     LockPoison(String),

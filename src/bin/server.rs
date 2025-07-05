@@ -8,6 +8,9 @@ use treetop_rest::fetcher::host_name_label::HostLabelAdapter;
 use treetop_rest::fetcher::policy::PolicyFetchAdapter;
 use treetop_rest::state::PolicyStore;
 
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init();
@@ -49,6 +52,10 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
+            .service(SwaggerUi::new("/swagger-ui/{_:.*}").url(
+                "/api-docs/openapi.json",
+                treetop_rest::handlers::ApiDoc::openapi(),
+            ))
             .app_data(actix_web::web::Data::new(store.clone()))
             .configure(treetop_rest::handlers::init)
     })

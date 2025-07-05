@@ -2,15 +2,18 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use tracing::debug;
 use treetop_core::{PolicyEngine, initialize_host_patterns};
+use utoipa::ToSchema;
 
 use crate::{errors::ServiceError, models::Endpoint};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OfPolicies;
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OfHostLabels;
 
 pub trait MetadataParser {
@@ -40,7 +43,7 @@ pub trait MetadataParser {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Metadata<T> {
     pub timestamp: DateTime<Utc>,
     pub sha256: String,
@@ -49,11 +52,12 @@ pub struct Metadata<T> {
     pub refresh_frequency: Option<u32>,
     pub entries: usize,
     pub content: String,
-    _marker: std::marker::PhantomData<T>,
+    #[serde(skip)]
+    _marker: PhantomData<T>,
 }
 
-impl<T> std::fmt::Display for Metadata<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T> Display for Metadata<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         let source = match &self.source {
             Some(s) => s.as_str(),
             None => "None",
@@ -92,7 +96,7 @@ impl<T: MetadataParser> Metadata<T> {
                 refresh_frequency,
                 entries: 0,
                 content: String::new(),
-                _marker: std::marker::PhantomData,
+                _marker: PhantomData,
             });
         }
 
@@ -122,7 +126,7 @@ impl<T: MetadataParser> Metadata<T> {
             refresh_frequency,
             entries,
             content,
-            _marker: std::marker::PhantomData,
+            _marker: PhantomData,
         })
     }
 }

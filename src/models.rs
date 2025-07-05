@@ -1,13 +1,17 @@
 use std::ops::Deref;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use treetop_core::Decision;
 use url::Url;
 
+use utoipa::ToSchema;
+
 use crate::state::{Metadata, OfHostLabels, OfPolicies, PolicyStore};
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, ToSchema)]
 pub struct Endpoint {
+    #[schema(value_type = String, example = "https://example.com/api")]
     url: Url,
 }
 
@@ -42,18 +46,18 @@ impl std::str::FromStr for Endpoint {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct CheckResponse {
     pub decision: Decision,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub enum DecisionBrief {
     Allow,
     Deny,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct CheckResponseBrief {
     pub decision: DecisionBrief,
 }
@@ -71,7 +75,7 @@ impl From<Decision> for CheckResponseBrief {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct PoliciesMetadata {
     pub allow_upload: bool,
 
@@ -92,7 +96,26 @@ where
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct PoliciesDownload {
     pub policies: Metadata<OfPolicies>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct UserPolicies {
+    pub user: String,
+    pub policies: Vec<Value>,
+}
+
+impl From<treetop_core::UserPolicies> for UserPolicies {
+    fn from(user_policies: treetop_core::UserPolicies) -> Self {
+        UserPolicies {
+            user: user_policies.user().to_string(),
+            policies: user_policies
+                .policies()
+                .into_iter()
+                .map(|p| p.to_json().unwrap()) // Yuck.
+                .collect(),
+        }
+    }
 }
