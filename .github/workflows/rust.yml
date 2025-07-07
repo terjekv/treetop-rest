@@ -1,6 +1,10 @@
 # .github/workflows/ci-and-release.yml
 name: CI & Release
 
+permissions:
+  contents: read
+  packages: write
+
 on:
   push:
     branches: [ "main" ]
@@ -11,7 +15,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   IMAGE_NAME: treetop-rest
-  GHCR_REGISTRY: ghcr.io/${{ github.repository }}
+  GHCR_REGISTRY: ghcr.io/${{ github.repository_owner }}/treetop-rest
   DOCKERHUB_REGISTRY: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/treetop-rest
 
 jobs:
@@ -69,11 +73,11 @@ jobs:
         run: |
           docker build \
             --file Dockerfile \
-            --tag $GHCR_REGISTRY/terjekv/${{ env.IMAGE_NAME }}:develop \
-            --tag $DOCKERHUB_REGISTRY/terjekv/${{ env.IMAGE_NAME }}:develop \
+            --tag $GHCR_REGISTRY:develop \
+            --tag $DOCKERHUB_REGISTRY:develop \
             .
-          docker push $GHCR_REGISTRY/terjekv/${{ env.IMAGE_NAME }}:develop
-          docker push $DOCKERHUB_REGISTRY/terjekv/${{ env.IMAGE_NAME }}:develop
+          docker push $GHCR_REGISTRY:develop
+          docker push $DOCKERHUB_REGISTRY:develop
 
   publish-release:
     name: "Release: container + binaries"
@@ -105,11 +109,11 @@ jobs:
           for REG in $GHCR_REGISTRY $DOCKERHUB_REGISTRY; do
             docker build \
               --file Dockerfile \
-              --tag $REG/${{ env.IMAGE_NAME }}:${{ env.TAG }} \
-              --tag $REG/${{ env.IMAGE_NAME }}:latest \
+              --tag $REG/:${{ env.TAG }} \
+              --tag $REG/:latest \
               .
-            docker push $REG/${{ env.IMAGE_NAME }}:${{ env.TAG }}
-            docker push $REG/${{ env.IMAGE_NAME }}:latest
+            docker push $REG/:${{ env.TAG }}
+            docker push $REG/:latest
           done
 
       # C) Cross-compile server & cli for Linux x86_64 + ARM (musl)
