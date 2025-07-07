@@ -69,11 +69,11 @@ jobs:
         run: |
           docker build \
             --file Dockerfile \
-            --tag $GHCR_REGISTRY/${{ env.IMAGE_NAME }}:develop \
-            --tag $DOCKERHUB_REGISTRY:develop \
+            --tag $GHCR_REGISTRY/terjekv/${{ env.IMAGE_NAME }}:develop \
+            --tag $DOCKERHUB_REGISTRY/terjekv/${{ env.IMAGE_NAME }}:develop \
             .
-          docker push $GHCR_REGISTRY/${{ env.IMAGE_NAME }}:develop
-          docker push $DOCKERHUB_REGISTRY:develop
+          docker push $GHCR_REGISTRY/terjekv/${{ env.IMAGE_NAME }}:develop
+          docker push $DOCKERHUB_REGISTRY/terjekv/${{ env.IMAGE_NAME }}:develop
 
   publish-release:
     name: "Release: container + binaries"
