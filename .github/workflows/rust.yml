@@ -1,24 +1,147 @@
-name: Rust
+# .github/workflows/ci-and-release.yml
+name: CI & Release
 
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*.*.*" ]
   pull_request:
     branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
+  IMAGE_NAME: treetop-rest
+  GHCR_REGISTRY: ghcr.io/${{ github.repository }}
+  DOCKERHUB_REGISTRY: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/treetop-rest
 
 jobs:
   build:
-
+    name: Build - Test - Clippy
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
-    - name: Run clippy
-      run: cargo clippy --verbose
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Cache Cargo registry/index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache Cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build
+        run: cargo build --verbose
+      - name: Run tests
+        run: cargo test --verbose
+      - name: Run clippy
+        run: cargo clippy --verbose
+
+  publish-develop:
+    name: Publish “develop” image
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1) Login to both registries
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 2) Build & tag as develop
+      - name: Build & push “develop” image
+        run: |
+          docker build \
+            --file Dockerfile \
+            --tag $GHCR_REGISTRY/${{ env.IMAGE_NAME }}:develop \
+            --tag $DOCKERHUB_REGISTRY:develop \
+            .
+          docker push $GHCR_REGISTRY/${{ env.IMAGE_NAME }}:develop
+          docker push $DOCKERHUB_REGISTRY:develop
+
+  publish-release:
+    name: "Release: container + binaries"
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    env:
+      TAG: ${{ github.ref_name }}      # e.g. “v1.2.3”
+    steps:
+      - uses: actions/checkout@v4
+
+      # A) Login to registries
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # B) Build & push server container under both $TAG and “latest”
+      - name: Build & push server images
+        run: |
+          for REG in $GHCR_REGISTRY $DOCKERHUB_REGISTRY; do
+            docker build \
+              --file Dockerfile \
+              --tag $REG/${{ env.IMAGE_NAME }}:${{ env.TAG }} \
+              --tag $REG/${{ env.IMAGE_NAME }}:latest \
+              .
+            docker push $REG/${{ env.IMAGE_NAME }}:${{ env.TAG }}
+            docker push $REG/${{ env.IMAGE_NAME }}:latest
+          done
+
+      # C) Cross-compile server & cli for Linux x86_64 + ARM (musl)
+      - name: Install musl toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+
+      - name: Build native binaries
+        run: |
+          cargo build --release --target x86_64-unknown-linux-musl
+          cargo build --release --target aarch64-unknown-linux-musl
+
+      - name: Package artifacts
+        run: |
+          mkdir release-artifacts
+          for TGT in x86_64 aarch64; do
+            BIN_X=target/${TGT}-unknown-linux-musl/release
+            tar czf release-artifacts/server-${TGT}.tar.gz -C $BIN_X server
+            tar czf release-artifacts/cli-${TGT}.tar.gz    -C $BIN_X cli
+          done
+
+      # D) Create GH Release & upload all four .tar.gz’s
+      - name: Create GitHub Release & upload binaries
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ env.TAG }}
+          name: Release ${{ env.TAG }}
+          artifacts: |
+            release-artifacts/server-x86_64.tar.gz
+            release-artifacts/server-aarch64.tar.gz
+            release-artifacts/cli-x86_64.tar.gz
+            release-artifacts/cli-aarch64.tar.gz
+
