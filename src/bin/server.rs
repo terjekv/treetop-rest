@@ -1,7 +1,9 @@
-use actix_web::{App, HttpServer, middleware::Logger};
+use actix_web::{App, HttpServer};
 use clap::Parser;
 use std::sync::{Arc, Mutex};
 use tracing::warn;
+use tracing_actix_web::TracingLogger;
+use tracing_subscriber::EnvFilter;
 use treetop_core::initialize_host_patterns;
 use treetop_rest::config::Config;
 use treetop_rest::fetcher::host_name_label::HostLabelAdapter;
@@ -13,7 +15,11 @@ use utoipa_swagger_ui::SwaggerUi;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .json()
+        .init();
+
     let config = Config::parse();
 
     initialize_host_patterns(vec![]);
@@ -51,7 +57,7 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
-            .wrap(Logger::default())
+            .wrap(TracingLogger::default())
             .service(SwaggerUi::new("/swagger-ui/{_:.*}").url(
                 "/api-docs/openapi.json",
                 treetop_rest::handlers::ApiDoc::openapi(),
