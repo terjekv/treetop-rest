@@ -113,7 +113,7 @@ impl From<treetop_core::UserPolicies> for UserPolicies {
             user: user_policies.user().to_string(),
             policies: user_policies
                 .policies()
-                .into_iter()
+                .iter()
                 .map(|p| p.to_json().unwrap()) // Yuck.
                 .collect(),
         }

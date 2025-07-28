@@ -8,6 +8,7 @@ use treetop_core::initialize_host_patterns;
 use treetop_rest::config::Config;
 use treetop_rest::fetcher::host_name_label::HostLabelAdapter;
 use treetop_rest::fetcher::policy::PolicyFetchAdapter;
+use treetop_rest::middeware::TracingMiddleware;
 use treetop_rest::state::PolicyStore;
 
 use utoipa::OpenApi;
@@ -58,6 +59,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .wrap(TracingLogger::default())
+            .wrap(TracingMiddleware)
             .service(SwaggerUi::new("/swagger-ui/{_:.*}").url(
                 "/api-docs/openapi.json",
                 treetop_rest::handlers::ApiDoc::openapi(),

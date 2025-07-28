@@ -3146,11 +3146,13 @@ dependencies = [
 name = "treetop-rest"
 version = "0.0.1"
 dependencies = [
+ "actix-service",
  "actix-web",
  "chrono",
  "clap",
  "env_logger",
  "futures",
+ "futures-util",
  "regex",
  "reqwest",
  "rustyline",

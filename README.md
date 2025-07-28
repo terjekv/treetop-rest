@@ -73,10 +73,14 @@ To check a request, you can use:
 $ curl -X POST http://localhost:9999/api/v1/check \
   -H "Content-Type: application/json" \
   -d '{
-    "action": "create_host",
-    "principal": "alice",
-        "resource_name": "host.example.com",
-        "resource_ip": "10.0.0.1"
+    "principal": { "User": { "id": { "id": "alice", "namespace": [] }, "groups": [] } },
+    "action": { "id": { "id": "create_host", "namespace": [] } },
+    "resource": {
+      "Host": {
+        "name": "hostname.example.com",
+        "ip":   "10.0.0.1"
+      }
+    }
   }'
 ```
 
