@@ -5,8 +5,8 @@ use sha2::{Digest, Sha256};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
-use tracing::debug;
-use treetop_core::{PolicyEngine, initialize_host_patterns};
+use tracing::{debug, trace};
+use treetop_core::{LABEL_REGISTRY, Labeler, PolicyEngine, RegexLabeler};
 use utoipa::ToSchema;
 
 use crate::{errors::ServiceError, models::Endpoint};
@@ -14,7 +14,7 @@ use crate::{errors::ServiceError, models::Endpoint};
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OfPolicies;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct OfHostLabels;
+pub struct OfLabels;
 
 pub trait MetadataParser {
     /// Count the number of entries in the content.
@@ -132,6 +132,14 @@ impl<T: MetadataParser> Metadata<T> {
 }
 
 #[derive(Deserialize)]
+struct Label {
+    kind: String,
+    field: String,
+    output: String,
+    patterns: Vec<RawPattern>,
+}
+
+#[derive(Deserialize)]
 struct RawPattern {
     name: String,
     regex: String,
@@ -159,49 +167,69 @@ impl MetadataParser for OfPolicies {
 ///     { "name": "test.com", "regex": "^test\\.com$" }
 /// ]
 /// ```
-impl MetadataParser for OfHostLabels {
+impl MetadataParser for OfLabels {
     fn count_entries(content: &str) -> Result<usize, ServiceError> {
-        let raw: Vec<RawPattern> = serde_json::from_str(content)?;
+        let raw: Vec<Label> = serde_json::from_str(content)?;
         Ok(raw.len())
     }
 
     fn process_content(content: &str) -> Result<(), ServiceError> {
-        let raw: Vec<RawPattern> = serde_json::from_str(content)?;
-        let mut patterns: Vec<(String, Regex)> = Vec::new();
+        let labels: Vec<Label> = serde_json::from_str(content)?;
 
-        for r in &raw {
-            if r.name.is_empty() || r.regex.is_empty() {
-                tracing::error!(
-                    message = "Invalid host pattern: name or regex is empty",
-                    name = &r.name,
-                    regex = &r.regex
-                );
-                return Err(ServiceError::InvalidJsonPayload(
-                    "Invalid host pattern: name or regex is empty".to_string(),
-                ));
+        let mut labels_for_registry: Vec<Arc<dyn Labeler>> = Vec::new();
+
+        for label in labels {
+            let mut patterns: Vec<(String, Regex)> = Vec::new();
+
+            for r in &label.patterns {
+                if r.name.is_empty() || r.regex.is_empty() {
+                    tracing::error!(
+                        message = "Invalid pattern: name or regex is empty",
+                        name = &r.name,
+                        regex = &r.regex
+                    );
+                    return Err(ServiceError::InvalidJsonPayload(
+                        "Invalid pattern: name or regex is empty".to_string(),
+                    ));
+                }
+
+                let regex = match Regex::new(&r.regex) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::error!(
+                            message = "Invalid regex in pattern",
+                            name = &r.name,
+                            regex = &r.regex,
+                            error = %e
+                        );
+                        return Err(ServiceError::InvalidJsonPayload(format!(
+                            "Invalid regex in pattern: {e}"
+                        )));
+                    }
+                };
+
+                patterns.push((r.name.clone(), regex));
             }
 
-            let regex = match Regex::new(&r.regex) {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::error!(
-                        message = "Invalid regex in host pattern",
-                        name = &r.name,
-                        regex = &r.regex,
-                        error = %e
-                    );
-                    return Err(ServiceError::InvalidJsonPayload(format!(
-                        "Invalid regex in host pattern: {e}"
-                    )));
-                }
-            };
+            debug!(
+                update = "Updating pattern",
+                kind = label.kind,
+                field = label.field,
+                output = label.output,
+                count = patterns.len()
+            );
+            trace!(patterns = ?patterns);
 
-            patterns.push((r.name.clone(), regex));
+            labels_for_registry.push(Arc::new(RegexLabeler::new(
+                label.kind,
+                label.field,
+                label.output,
+                patterns,
+            )));
         }
 
-        debug!(update = "Updating host patterns", count = patterns.len(), patterns = ?patterns);
+        LABEL_REGISTRY.load(labels_for_registry);
 
-        initialize_host_patterns(patterns);
         Ok(())
     }
 }
@@ -212,7 +240,7 @@ pub struct PolicyStore {
     pub upload_token: Option<String>,
 
     pub policies: Metadata<OfPolicies>,
-    pub host_labels: Metadata<OfHostLabels>,
+    pub labels: Metadata<OfLabels>,
 }
 
 impl Default for PolicyStore {
@@ -224,7 +252,7 @@ impl Default for PolicyStore {
             allow_upload: false,
             upload_token: None,
             policies: Metadata::<OfPolicies>::new(String::new(), None, None).unwrap(),
-            host_labels: Metadata::<OfHostLabels>::new(String::new(), None, None).unwrap(),
+            labels: Metadata::<OfLabels>::new(String::new(), None, None).unwrap(),
         }
     }
 }
@@ -239,7 +267,7 @@ impl PolicyStore {
             allow_upload: false,
             upload_token: None,
             policies: Metadata::<OfPolicies>::new(String::new(), None, None)?,
-            host_labels: Metadata::<OfHostLabels>::new(String::new(), None, None)?,
+            labels: Metadata::<OfLabels>::new(String::new(), None, None)?,
         })
     }
 
@@ -260,19 +288,18 @@ impl PolicyStore {
         Ok(())
     }
 
-    pub fn set_host_labels(
+    pub fn set_labels(
         &mut self,
         labels: &str,
         source: Option<Endpoint>,
         refresh_frequency: Option<u32>,
     ) -> Result<(), ServiceError> {
-        let old_metadata = self.host_labels.clone();
+        let old_metadata = self.labels.clone();
         let source = source.or(old_metadata.source);
         let refresh_frequency = refresh_frequency.or(old_metadata.refresh_frequency);
 
-        let metadata =
-            Metadata::<OfHostLabels>::new(labels.to_string(), source, refresh_frequency)?;
-        self.host_labels = metadata;
+        let metadata = Metadata::<OfLabels>::new(labels.to_string(), source, refresh_frequency)?;
+        self.labels = metadata;
         Ok(())
     }
 }

@@ -153,7 +153,7 @@ pub async fn upload_policies(
     Ok(web::Json(PoliciesMetadata {
         allow_upload: guard.allow_upload,
         policies: guard.policies.clone(),
-        host_labels: guard.host_labels.clone(),
+        labels: guard.labels.clone(),
     }))
 }
 

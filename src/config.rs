@@ -30,10 +30,10 @@ pub struct Config {
     pub update_frequency: Option<u32>,
 
     /// Optional URL to fetch host labels from
-    #[clap(long, default_value = None, env = "APP_HOST_LABELS_URL")]
-    pub host_labels_url: Option<Endpoint>,
+    #[clap(long, default_value = None, env = "APP_LABELS_URL")]
+    pub labels_url: Option<Endpoint>,
 
     /// Update frequency in seconds for fetching host labels (default is 60 seconds)
-    #[clap(long, default_value = None, env = "APP_HOST_LABELS_UPDATE_FREQUENCY")]
-    pub host_labels_refresh: Option<u32>,
+    #[clap(long, default_value = None, env = "APP_LABELS_UPDATE_FREQUENCY")]
+    pub labels_refresh: Option<u32>,
 }

@@ -7,7 +7,7 @@ use url::Url;
 
 use utoipa::ToSchema;
 
-use crate::state::{Metadata, OfHostLabels, OfPolicies, PolicyStore};
+use crate::state::{Metadata, OfLabels, OfPolicies, PolicyStore};
 
 #[derive(Deserialize, Serialize, Clone, Debug, ToSchema)]
 pub struct Endpoint {
@@ -80,7 +80,7 @@ pub struct PoliciesMetadata {
     pub allow_upload: bool,
 
     pub policies: Metadata<OfPolicies>,
-    pub host_labels: Metadata<OfHostLabels>,
+    pub labels: Metadata<OfLabels>,
 }
 
 impl<T> From<T> for PoliciesMetadata
@@ -91,7 +91,7 @@ where
         PoliciesMetadata {
             allow_upload: store.allow_upload,
             policies: store.policies.clone(),
-            host_labels: store.host_labels.clone(),
+            labels: store.labels.clone(),
         }
     }
 }

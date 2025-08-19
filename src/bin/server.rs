@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use tracing::warn;
 use tracing_actix_web::TracingLogger;
 use tracing_subscriber::EnvFilter;
-use treetop_core::initialize_host_patterns;
 use treetop_rest::config::Config;
 use treetop_rest::fetcher::host_name_label::HostLabelAdapter;
 use treetop_rest::fetcher::policy::PolicyFetchAdapter;
@@ -22,8 +21,6 @@ async fn main() -> std::io::Result<()> {
         .init();
 
     let config = Config::parse();
-
-    initialize_host_patterns(vec![]);
 
     let store = Arc::new(Mutex::new(PolicyStore::new().unwrap()));
 
@@ -46,12 +43,12 @@ async fn main() -> std::io::Result<()> {
         PolicyFetchAdapter::new(store.clone()).spawn(url, freq);
     }
 
-    if let Some(hurl) = config.host_labels_url.clone() {
-        let freq = config.host_labels_refresh.unwrap_or(60) as u64;
+    if let Some(hurl) = config.labels_url.clone() {
+        let freq = config.labels_refresh.unwrap_or(60) as u64;
         {
             let mut s = store.lock().unwrap();
-            s.host_labels.source = Some(hurl.clone());
-            s.host_labels.refresh_frequency = Some(freq as u32);
+            s.labels.source = Some(hurl.clone());
+            s.labels.refresh_frequency = Some(freq as u32);
         }
         HostLabelAdapter::new(store.clone()).spawn(hurl, freq);
     }

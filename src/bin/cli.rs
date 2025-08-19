@@ -1,3 +1,4 @@
+use anyhow::{Context as AnyContext, Result};
 use clap::{Parser, Subcommand};
 use reqwest::Client;
 use rustyline::completion::{Completer, Pair};
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::IpAddr;
 use std::str::FromStr;
-use treetop_core::{Action, Principal, Request, Resource, ResourceKind, User};
+use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
 use treetop_rest::models::PoliciesMetadata;
 use treetop_rest::state::{Metadata, OfPolicies};
 
@@ -29,7 +30,8 @@ const CHECK_FLAGS: &[&str] = &[
     "--principal",
     "--action",
     "--resource-type",
-    "--resource-data",
+    "--resource-id",
+    "--resource-attribute",
     "--detailed",
 ];
 const GET_POLICIES_FLAGS: &[&str] = &["--raw"];
@@ -104,8 +106,63 @@ struct Cli {
     host: String,
     #[clap(long, default_value = "9999", env = "CLI_PORT")]
     port: u16,
+    /// Print raw JSON responses
+    #[arg(long)]
+    json: bool,
     #[clap(subcommand)]
     command: Commands,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum InputAttrValue {
+    Ip(IpAddr),
+    Long(i64),
+    Bool(bool),
+    String(String),
+}
+
+impl From<InputAttrValue> for AttrValue {
+    fn from(v: InputAttrValue) -> Self {
+        match v {
+            InputAttrValue::Ip(ip) => AttrValue::Ip(ip.to_string()),
+            InputAttrValue::Long(i) => AttrValue::Long(i),
+            InputAttrValue::Bool(b) => AttrValue::Bool(b),
+            InputAttrValue::String(s) => AttrValue::String(s),
+        }
+    }
+}
+
+impl FromStr for InputAttrValue {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if let Ok(ip) = s.parse::<IpAddr>() {
+            return Ok(Self::Ip(ip));
+        }
+        if let Ok(i) = s.parse::<i64>() {
+            return Ok(Self::Long(i));
+        }
+        if let Ok(b) = s.parse::<bool>() {
+            return Ok(Self::Bool(b));
+        }
+        // allow wrapping quotes to keep commas/spaces intact
+        let unquoted = s
+            .strip_prefix('"')
+            .and_then(|t| t.strip_suffix('"'))
+            .unwrap_or(s);
+        Ok(Self::String(unquoted.to_string()))
+    }
+}
+
+fn parse_kv(s: &str) -> Result<(String, InputAttrValue), String> {
+    let (k, v) = s
+        .split_once('=')
+        .ok_or_else(|| format!("missing '=' in `{s}`"))?;
+    let k = k.trim();
+    if k.is_empty() {
+        return Err("attribute key is empty".into());
+    }
+    Ok((k.to_string(), v.parse()?))
 }
 
 #[derive(Subcommand, Debug)]
@@ -122,10 +179,13 @@ enum Commands {
         action: String,
         #[clap(long = "resource-type")]
         resource_type: String,
-        #[clap(long = "resource-data")]
-        resource_data: String,
+        /// Repeatable: --resource-attribute key=value (quotes allowed around value)
+        #[arg(long = "resource-attribute", value_parser = parse_kv)]
+        attrs: Vec<(String, InputAttrValue)>,
+        #[clap(long = "resource-id")]
+        resource_id: String,
         #[clap(long = "detailed")]
-        detailed: Option<bool>,
+        detailed: bool,
     },
     /// Download policies (JSON by default, use --raw for plain text)
     GetPolicies {
@@ -157,7 +217,7 @@ impl CliDisplay for PoliciesMetadata {
 {}
  Host labels:
 {}",
-            self.allow_upload, self.policies, self.host_labels,
+            self.allow_upload, self.policies, self.labels,
         )
     }
 }
@@ -214,49 +274,12 @@ struct ErrorResponse {
     error: String,
 }
 
-trait FromColonString {
-    fn from_colon_string(s: &str) -> Result<Resource, String>;
-}
-
-impl FromColonString for Resource {
-    fn from_colon_string(s: &str) -> Result<Resource, String> {
-        let (tag, data) = s
-            .split_once(':')
-            .ok_or_else(|| format!("expected `<kind>:<payload>`, got {s:?}"))?;
-
-        let kind = tag
-            .parse::<ResourceKind>()
-            .map_err(|_| format!("unknown resource kind {tag:?}"))?;
-
-        match kind {
-            ResourceKind::Host => {
-                let (name, ip_str) = data
-                    .split_once(':')
-                    .ok_or_else(|| format!("host needs `name:ip`, got {data:?}"))?;
-                let ip = ip_str
-                    .parse::<IpAddr>()
-                    .map_err(|e| format!("invalid IP `{ip_str}`: {e}"))?;
-                Ok(Resource::Host {
-                    name: name.to_string(),
-                    ip,
-                })
-            }
-            ResourceKind::Photo => Ok(Resource::Photo {
-                id: data.to_string(),
-            }),
-            ResourceKind::Generic => Ok(Resource::Generic {
-                kind: tag.to_string(),
-                id: data.to_string(),
-            }),
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let base_url = format!("http://{}:{}/api/v1", cli.host, cli.port);
     let client = Client::new();
+    let json = cli.json;
 
     if let Commands::Repl = cli.command {
         let mut rl = Editor::new()?;
@@ -269,19 +292,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let parts: Vec<&str> = input.split_whitespace().collect();
                     match parts.first().copied() {
                         Some("exit") | Some("quit") => break,
-                        Some("help") => print_help(),
+                        Some("help") | None => print_help(),
                         Some(_) => {
                             let args = std::iter::once("policy-cli").chain(parts.into_iter());
-                            if let Ok(parsed) = Cli::try_parse_from(args) {
-                                match execute_command(parsed.command, &base_url, &client).await {
-                                    Ok(_) => {}
-                                    Err(e) => eprintln!("Error executing command: {e}"),
+                            match Cli::try_parse_from(args) {
+                                Ok(parsed) => {
+                                    match execute_command(parsed.command, &base_url, &client, json)
+                                        .await
+                                    {
+                                        Ok(_) => {}
+                                        Err(e) => eprintln!("Error executing command: {e}"),
+                                    }
                                 }
-                            } else {
-                                eprintln!("Unknown or invalid command");
+                                Err(e) => eprintln!("Error parsing command: {e}"),
                             }
                         }
-                        None => {}
                     }
                 }
                 Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
@@ -292,21 +317,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
-        execute_command(cli.command, &base_url, &client).await?;
+        execute_command(cli.command, &base_url, &client, json).await?;
     }
     Ok(())
 }
 
 fn print_help() {
-    println!(
-        "Available commands:\n  status\n  check --principal <P> --action <A> --resource-type <N> --resource-data <DATA>\n  get-policies [--raw]\n  upload --file <PATH> [--raw]\n  list-policies <USER>\n  help\n  exit"
-    );
+    use clap::CommandFactory;
+    let mut cmd = Cli::command();
+    cmd.print_long_help().ok();
+    println!();
 }
-
 async fn execute_command(
     command: Commands,
     base_url: &str,
     client: &Client,
+    json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         Commands::Repl => {
@@ -315,39 +341,42 @@ async fn execute_command(
         }
         Commands::Status => {
             let resp = client.get(format!("{base_url}/status")).send().await?;
-            handle_response::<PoliciesMetadata>(resp).await;
+            handle_response::<PoliciesMetadata>(resp, json).await?;
         }
         Commands::Check {
             principal,
             action,
             resource_type,
-            resource_data,
+            resource_id,
+            attrs,
             detailed,
         } => {
-            let resource =
-                match Resource::from_colon_string(&format!("{resource_type}:{resource_data}")) {
-                    Ok(res) => res,
-                    Err(e) => {
-                        eprintln!("Error parsing resource: {e}");
-                        return Ok(());
-                    }
-                };
+            let mut resource = Resource::new(&resource_type, &resource_id);
+            for (k, v) in attrs {
+                resource = resource.with_attr(k, AttrValue::from(v));
+            }
+
+            let principal = Principal::User(
+                User::from_str(&principal)
+                    .with_context(|| format!("invalid --principal `{principal}`"))?,
+            );
+
+            let action = Action::from_str(&action)
+                .with_context(|| format!("invalid --action `{action}`"))?;
 
             let req = Request {
-                principal: Principal::User(User::from_str(&principal)?),
-                action: Action::from_str(&action)?,
+                principal,
+                action,
                 resource,
             };
 
-            if let Some(detailed) = detailed
-                && detailed
-            {
+            if detailed {
                 let resp = client
                     .post(format!("{base_url}/check_detailed"))
                     .json(&req)
                     .send()
                     .await?;
-                handle_response::<CheckResponseDetailed>(resp).await;
+                handle_response::<CheckResponseDetailed>(resp, json).await?;
                 return Ok(());
             }
             let resp = client
@@ -355,7 +384,7 @@ async fn execute_command(
                 .json(&req)
                 .send()
                 .await?;
-            handle_response::<CheckResponse>(resp).await;
+            handle_response::<CheckResponse>(resp, json).await?;
         }
         Commands::GetPolicies { raw } => {
             let url = if raw {
@@ -367,7 +396,7 @@ async fn execute_command(
             if raw && resp.status().is_success() {
                 println!("{}", resp.text().await?);
             } else {
-                handle_response::<PoliciesDownload>(resp).await;
+                handle_response::<PoliciesDownload>(resp, json).await?;
             }
         }
         Commands::Upload { file, raw, token } => {
@@ -391,26 +420,40 @@ async fn execute_command(
                     .send()
                     .await?
             };
-            handle_response::<PoliciesMetadata>(resp).await;
+            handle_response::<PoliciesMetadata>(resp, json).await?;
         }
         Commands::ListPolicies { user } => {
             let resp = client
                 .get(format!("{base_url}/policies/{user}"))
                 .send()
                 .await?;
-            handle_response::<UserPolicies>(resp).await;
+            handle_response::<UserPolicies>(resp, json).await?;
         }
     }
     Ok(())
 }
 
-async fn handle_response<T: serde::de::DeserializeOwned + CliDisplay>(resp: reqwest::Response) {
-    if resp.status().is_success() {
-        if let Ok(data) = resp.json::<T>().await {
+async fn handle_response<T>(resp: reqwest::Response, json: bool) -> Result<()>
+where
+    T: serde::de::DeserializeOwned + CliDisplay,
+{
+    let status = resp.status();
+    if status.is_success() {
+        if json {
+            let v = resp.json::<serde_json::Value>().await?;
+            println!("{}", serde_json::to_string_pretty(&v)?);
+        } else {
+            let data = resp
+                .json::<T>()
+                .await
+                .with_context(|| format!("Failed to parse successful response ({status})"))?;
             println!("{}", data.display());
         }
+        Ok(())
     } else {
         handle_error(resp).await;
+        // Make non-2xx fail the command:
+        anyhow::bail!("request failed with status {status}")
     }
 }
 

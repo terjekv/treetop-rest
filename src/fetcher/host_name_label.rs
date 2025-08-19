@@ -18,7 +18,7 @@ impl HostLabelAdapter {
 impl Fetchable for HostLabelAdapter {
     fn update_store(&mut self, body: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut s = self.store.lock().unwrap();
-        s.set_host_labels(body, None, None)?;
+        s.set_labels(body, None, None)?;
         Ok(())
     }
 
@@ -35,8 +35,8 @@ impl HostLabelAdapter {
     /// Spawn the background loop
     pub fn spawn(self, url: Endpoint, refresh_secs: u64) {
         let adapter = self;
-        adapter.store.lock().unwrap().host_labels.source = Some(url.clone());
-        adapter.store.lock().unwrap().host_labels.refresh_frequency = Some(refresh_secs as u32);
+        adapter.store.lock().unwrap().labels.source = Some(url.clone());
+        adapter.store.lock().unwrap().labels.refresh_frequency = Some(refresh_secs as u32);
         GenericFetcher::new(adapter, url.to_string(), refresh_secs).spawn();
     }
 }

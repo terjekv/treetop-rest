@@ -56,8 +56,8 @@ The server supports the following environment variables:
 - `APP_ALLOW_UPLOAD`: Whether to allow manually uploading policies to the server. If set to `true`, you can upload policies via `POST` to the `/api/v1/policies` endpoint with the content type `text/plain`. You will need to provide the upload token in the header `X-Upload-Token`. This token is printed in the logs at the `warn` level when the server starts. (default: `false`)
 - `APP_POLICY_URL`: An optional URL for fetching the policy file (in Cedar format) (default: `None`).
 - `APP_POLICY_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the policy file from the `APP_POLICY_URL` (default: `60`).
-- `APP_HOST_LABEL_URL`: An optional URL for fetching the host label file (in JSON format) (default: `None`).
-- `APP_HOST_LABEL_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the host label file from the `APP_HOST_LABEL_URL` (default: `60`).
+- `APP_LABEL_URL`: An optional URL for fetching the label file (in JSON format) (default: `None`).
+- `APP_LABEL_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the label file from the `APP_LABEL_URL` (default: `60`).
 
 ### Client interaction
 
@@ -93,9 +93,9 @@ $ cargo run --bin cli -- upload --file testdata/default.cedar --raw --token <you
 Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db
 Uploaded at: 2025-06-23T22:59:05.014440Z
 Size: 843 bytes
-$ cargo run --bin cli -- check --principal alice --action create_host --resource-type host --resource-data hostname.example.com:10.0.0.1
+$ cargo run --bin cli -- check --principal alice --action create_host --resource-type host --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
-     Running `target/debug/cli check --principal alice --action create_host --resource-type host --resource-data hostname.example.com:10.0.0.1`
+     Running `target/debug/cli check --principal alice --action create_host --resource-type host --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1`
 Allow
 ```
 
@@ -112,7 +112,7 @@ policy> upload --file testdata/default.cedar --raw --token <your-upload-token>
 Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db
 Uploaded at: 2025-06-23T22:25:50.285684Z
 Size: 843 bytes
-policy> check --principal alice --action create_host --resource-type host --resource-data hostname.example.com:10.0.0.1
+policy> check --principal alice --action create_host --resource-type host --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
 Allow
 policy> status
 Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db
@@ -125,7 +125,7 @@ Refresh: 5 seconds
 
 ## Development
 
-There is also a `docker-compose.yml` to set up a minialist web server to host cedar policies. This will automatically set up a web server hosting the `testdata` folder. Currently, this will `http://localhost:8080/default.cedar` and `http://localhost:8080/host_labels.json`.
+There is also a `docker-compose.yml` to set up a minialist web server to host cedar policies. This will automatically set up a web server hosting the `testdata` folder. Currently, this will `http://localhost:8080/default.cedar` and `http://localhost:8080/labels.json`.
 
 ```bash
 docker-compose up
