@@ -79,7 +79,7 @@ where
                 let mut res = fut.await?;
                 
                 let elapsed_time = start_time.elapsed();
-                info!(message = "Request end", request_id = %request_id, correlation_id = ?correlation_id, method = &method, path = &path, run_time = ?elapsed_time);
+                info!(message = "Request end", request_id = %request_id, correlation_id = ?correlation_id, method = &method, path = &path, run_time = ?elapsed_time, status_code = ?res.status());
 
                 res.headers_mut().insert(
                     REQUEST_ID,

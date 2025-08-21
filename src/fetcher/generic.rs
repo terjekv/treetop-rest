@@ -7,6 +7,7 @@ use tracing::{debug, error, info};
 pub trait Fetchable {
     fn update_store(&mut self, body: &str) -> Result<(), Box<dyn Error>>;
     fn current_hash(&self) -> Option<&String>;
+    #[allow(dead_code)]
     fn set_hash(&mut self, new: String);
 }
 
@@ -80,10 +81,11 @@ impl<T: Fetchable + Send + 'static> GenericFetcher<T> {
         };
 
         if let Some(old_hash) = self.inner.current_hash()
-            && old_hash == &new_hash {
-                debug!(message = "body unchanged", url = &self.url);
-                return Ok(());
-            }
+            && old_hash == &new_hash
+        {
+            debug!(message = "body unchanged", url = &self.url);
+            return Ok(());
+        }
 
         // 3. Update store and record hash
         self.inner.update_store(&body)?;

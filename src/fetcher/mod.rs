@@ -1,3 +1,6 @@
-pub mod generic;
-pub mod host_name_label;
-pub mod policy;
+mod generic;
+mod labels;
+mod policy;
+
+pub use labels::LabelFetchAdapter;
+pub use policy::PolicyFetchAdapter;

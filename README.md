@@ -25,14 +25,24 @@ Note, these endpoints are currently in development and may change in the future.
 
 ```json
 {
-    "action": "action to check against",
-    "principal": "user or entity making the request",
-    "resource_name": "name of the resource",
-    "resource_ip": "IP address of the resource"
+  "principal": {
+    "User": {
+      "id": { "id": "alice", "namespace": [] },
+      "groups": []
+    }
+  },
+  "action": {
+    "id": { "id": "dns_view", "namespace": [] }
+  },
+  "resource": {
+    "Host": {
+      "id": "host.example.com",
+      "name": "host.example.com",
+      "ip": "10.0.0.1"
+    }
+  }
 }
 ```
-
-The check endpoint will change in the future to support resource types in a more structured way.
 
 ### Return values for the endpoints
 

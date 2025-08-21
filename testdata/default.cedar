@@ -35,6 +35,13 @@ when
 };
 
 permit (
+    principal == User::"bob",
+    action == Action::"create_host",
+    resource is Host
+)
+when { resource.ip.isInRange(ip("10.0.0.0/24")) };
+
+permit (
     principal == User::"alice",
     action == Action::"only_here",
     resource

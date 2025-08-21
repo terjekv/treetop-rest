@@ -36,4 +36,8 @@ pub struct Config {
     /// Update frequency in seconds for fetching host labels (default is 60 seconds)
     #[clap(long, default_value = None, env = "APP_LABELS_UPDATE_FREQUENCY")]
     pub labels_refresh: Option<u32>,
+
+    #[clap(long)]
+    /// Print version information and exit
+    pub version: bool,
 }

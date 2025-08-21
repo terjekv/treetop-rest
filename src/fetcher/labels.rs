@@ -4,18 +4,18 @@ use crate::state::PolicyStore;
 use std::sync::{Arc, Mutex};
 
 /// Adapter that replaces the global host‐labels
-pub struct HostLabelAdapter {
+pub struct LabelFetchAdapter {
     store: Arc<Mutex<PolicyStore>>,
     hash: Option<String>,
 }
 
-impl HostLabelAdapter {
+impl LabelFetchAdapter {
     pub fn new(store: Arc<Mutex<PolicyStore>>) -> Self {
         Self { store, hash: None }
     }
 }
 
-impl Fetchable for HostLabelAdapter {
+impl Fetchable for LabelFetchAdapter {
     fn update_store(&mut self, body: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut s = self.store.lock().unwrap();
         s.set_labels(body, None, None)?;
@@ -31,7 +31,7 @@ impl Fetchable for HostLabelAdapter {
     }
 }
 
-impl HostLabelAdapter {
+impl LabelFetchAdapter {
     /// Spawn the background loop
     pub fn spawn(self, url: Endpoint, refresh_secs: u64) {
         let adapter = self;

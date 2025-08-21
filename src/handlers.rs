@@ -1,10 +1,12 @@
+use crate::build_info::build_info;
 use crate::errors::ServiceError;
 use crate::models::{
     CheckResponse, CheckResponseBrief, PoliciesDownload, PoliciesMetadata, UserPolicies,
 };
 use crate::state::SharedPolicyStore;
+
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use treetop_core::Request;
 use utoipa::{OpenApi, ToSchema};
@@ -17,6 +19,8 @@ struct Upload {
 /// Configure routes for the service.
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.route("/api/v1/status", web::get().to(get_status))
+        .route("/api/v1/health", web::get().to(health))
+        .route("/api/v1/version", web::get().to(version))
         .route("/api/v1/check", web::post().to(check))
         .route("/api/v1/check_detailed", web::post().to(check_detailed))
         .route("/api/v1/policies", web::get().to(get_policies))
@@ -35,10 +39,56 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         get_policies,
         upload_policies,
         list_policies,
-        get_status
+        get_status,
+        health,
+        version,
     ),
 )]
 pub struct ApiDoc;
+
+#[derive(Serialize, ToSchema)]
+pub struct HealthOK {}
+
+#[utoipa::path(
+        post,
+        path = "/api/v1/health",
+        responses(
+            (status = 200, description = "All systems OK", body = HealthOK),
+        ),
+    )]
+pub async fn health() -> Result<web::Json<HealthOK>, ServiceError> {
+    Ok(web::Json(HealthOK {}))
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct Core {
+    pub version: String,
+    pub cedar: &'static str,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct VersionInfo {
+    pub version: String,
+    pub core: Core,
+}
+
+#[utoipa::path(
+        post,
+        path = "/api/v1/version",
+        responses(
+            (status = 200, description = "Version information", body = VersionInfo),
+        ),
+    )]
+pub async fn version() -> Result<web::Json<VersionInfo>, ServiceError> {
+    let build_info = build_info();
+    Ok(web::Json(VersionInfo {
+        version: build_info.version.clone(),
+        core: Core {
+            version: build_info.core.clone(),
+            cedar: build_info.cedar,
+        },
+    }))
+}
 
 #[utoipa::path(
         post,

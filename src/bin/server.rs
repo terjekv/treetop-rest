@@ -1,12 +1,12 @@
 use actix_web::{App, HttpServer};
 use clap::Parser;
 use std::sync::{Arc, Mutex};
-use tracing::warn;
+use tracing::{info, warn};
 use tracing_actix_web::TracingLogger;
 use tracing_subscriber::EnvFilter;
+use treetop_rest::build_info::build_info;
 use treetop_rest::config::Config;
-use treetop_rest::fetcher::host_name_label::HostLabelAdapter;
-use treetop_rest::fetcher::policy::PolicyFetchAdapter;
+use treetop_rest::fetcher::{LabelFetchAdapter, PolicyFetchAdapter};
 use treetop_rest::middeware::TracingMiddleware;
 use treetop_rest::state::PolicyStore;
 
@@ -22,7 +22,24 @@ async fn main() -> std::io::Result<()> {
 
     let config = Config::parse();
 
+    if config.version {
+        println!(
+            "Treetop REST API version: {} (core: {}, cedar: {})",
+            build_info().version,
+            build_info().core,
+            build_info().cedar
+        );
+        return Ok(());
+    }
+
     let store = Arc::new(Mutex::new(PolicyStore::new().unwrap()));
+
+    info!(
+        message = "Initializing server",
+        version = build_info().version,
+        core = build_info().core,
+        cedar = build_info().cedar
+    );
 
     if config.allow_upload {
         store.lock().unwrap().allow_upload = true;
@@ -50,7 +67,7 @@ async fn main() -> std::io::Result<()> {
             s.labels.source = Some(hurl.clone());
             s.labels.refresh_frequency = Some(freq as u32);
         }
-        HostLabelAdapter::new(store.clone()).spawn(hurl, freq);
+        LabelFetchAdapter::new(store.clone()).spawn(hurl, freq);
     }
 
     HttpServer::new(move || {
