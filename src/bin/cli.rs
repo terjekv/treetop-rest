@@ -366,12 +366,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let args = std::iter::once("policy-cli").chain(parts.into_iter());
                             match Cli::try_parse_from(args) {
                                 Ok(parsed) => {
-                                    match execute_command(
-                                        parsed.command,
-                                        &mut ctx,
-                                    )
-                                    .await
-                                    {
+                                    match execute_command(parsed.command, &mut ctx).await {
                                         Ok(_) => {}
                                         Err(e) => eprintln!("{}: {}", error("Error"), e),
                                     }
@@ -394,8 +389,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Warning: Failed to save command history: {}", e);
         }
     } else {
-        execute_command(cli.command, &mut ctx)
-        .await?;
+        execute_command(cli.command, &mut ctx).await?;
     }
     Ok(())
 }
