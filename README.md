@@ -107,13 +107,13 @@ Or you can use the CLI client provided in this repository. To run the CLI client
 $ cargo run --bin cli -- upload --file testdata/default.cedar --raw --token <your-upload-token>
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
      Running `target/debug/cli upload --file testdata/default.cedar --raw`
-Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db
+Policies SHA256: c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219
 Uploaded at: 2025-06-23T22:59:05.014440Z
 Size: 843 bytes
 $ cargo run --bin cli -- check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
   Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
   Running `target/debug/cli check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1`
-Allow
+Allow (c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
 ```
 
 The CLI client can also be run in REPL mode:
@@ -126,19 +126,70 @@ Then you can enter commands with tab expansion and history support. For example:
 
 ```bash
 policy> upload --file testdata/default.cedar --raw --token <your-upload-token>
-Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db
+Policies SHA256: c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219
 Uploaded at: 2025-06-23T22:25:50.285684Z
 Size: 843 bytes
 policy> check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
-Allow
+Allow (c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
 policy> status
-Policies SHA256: 196e425f5af97dc2bc572534355b124a86089c50e3500dbfe5717ce79e5ca0db
-Timestamp: 2025-06-24T09:33:24.491238Z
-Size: 843 bytes
-Allow Upload: true
-URL: http://localhost:8080/default.cedar
-Refresh: 5 seconds
+
+treetop-cli
+  Version:        0.0.1
+  Built:          2025-12-16T22:04:42.072904000Z
+  Git:            1e6d78a
+
+Server
+  Version:        0.0.0+g1e6d78a
+  Core:           0.0.12
+  Cedar:          4.8.2
+
+Policies
+  Hash:           c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219
+  Updated:        2025-12-16 22:04:47.321459 UTC
+  Entries:        9
+  Size:           2951 bytes
+  Source:         http://localhost:8080/dns.cedar
+  Refresh:        every 60s
+  Allow upload:   yes
+
+Labels
+  Hash:           763bcf2b17126b1546bf3ced29fab4ea661d9f5cd504689eddfef05babcc1eb3
+  Updated:        2025-12-16 22:04:47.321034 UTC
+  Entries:        1
+  Size:           573 bytes
+  Source:         http://localhost:8080/labels.json
+  Refresh:        every 60s
 ```
+
+The REPL keeps the last values you used with `check` so you can recall them without retyping.
+After any `check`, run `show` to see them:
+
+```bash
+policy> check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
+Allow (c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
+policy> show
+
+Current Settings:
+  Server:         127.0.0.1:9090
+  JSON output:    off
+  Debug mode:     off
+  Timing:         off
+
+Last Used Values:
+  Principal:      DNS::User::alice[admins]
+  Action:         DNS::Action::delete_host
+  Resource Type:  Host
+  Resource ID:    hostname.example.com
+  Attributes:
+                  name=hostname.example.com
+                  ip=10.0.0.1
+
+Files:
+  History:        /Users/alice/Library/Application Support/treetop-rest/cli_history
+```
+
+In the REPL, you can omit `--principal`, `--action`, `--resource-type`, `--resource-id`, and any `--resource-attribute`
+flags on subsequent `check` commands; missing fields reuse the last values shown by `show`.
 
 ### Check command syntax
 

@@ -6,7 +6,6 @@
 // Top-level commands
 pub const COMMANDS_MAIN: &[&str] = &[
     "status",
-    "version",
     "check",
     "get-policies",
     "upload",
@@ -14,6 +13,8 @@ pub const COMMANDS_MAIN: &[&str] = &[
     "json",
     "debug",
     "timing",
+    "show",
+    "version",
     "history",
     "help",
     "exit",

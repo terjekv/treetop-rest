@@ -60,13 +60,13 @@ pub async fn health() -> Result<web::Json<HealthOK>, ServiceError> {
     Ok(web::Json(HealthOK {}))
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, Deserialize)]
 pub struct Core {
     pub version: String,
-    pub cedar: &'static str,
+    pub cedar: String,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, Deserialize)]
 pub struct VersionInfo {
     pub version: String,
     pub core: Core,
@@ -88,7 +88,7 @@ pub async fn version(
         version: build_info.version.clone(),
         core: Core {
             version: build_info.core.clone(),
-            cedar: build_info.cedar,
+            cedar: build_info.cedar.to_string(),
         },
         policies: store.lock()?.engine.current_version(),
     }))
