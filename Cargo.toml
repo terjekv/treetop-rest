@@ -58,9 +58,9 @@ vergen-gitcl = { version = "1", features = [
 ] }
 
 [[bin]]
-name = "server"
+name = "treetop-server"
 path = "src/bin/server.rs"
 
 [[bin]]
-name = "cli"
+name = "treetop-cli"
 path = "src/bin/cli.rs"
