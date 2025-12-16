@@ -2,6 +2,7 @@ use anyhow::{Context as AnyContext, Result};
 use clap::{Parser, Subcommand};
 use reqwest::Client;
 use rustyline::completion::{Completer, Pair};
+use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
@@ -54,9 +55,15 @@ struct Cli {
     host: String,
     #[clap(long, default_value = "9999", env = "CLI_PORT")]
     port: u16,
-    /// Print raw JSON bodies sent to and responses received from the server
+    /// Print JSON responses
     #[arg(long)]
     json: bool,
+    /// Print JSON requests and responses (superset of --json)
+    #[arg(long)]
+    debug: bool,
+    /// Print command execution timing
+    #[arg(long)]
+    timing: bool,
     #[clap(subcommand)]
     command: Commands,
 }
@@ -151,8 +158,12 @@ enum Commands {
     },
     /// List policies relevant to a user
     ListPolicies { user: String },
-    /// Toggle display of JSON traffic to and from the server
+    /// Toggle display of JSON responses
     Json,
+    /// Toggle debug mode - shows both requests and responses
+    Debug,
+    /// Toggle command execution timing display
+    Timing,
 }
 
 trait CliDisplay {
@@ -224,11 +235,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let base_url = format!("http://{}:{}/api/v1", cli.host, cli.port);
     let client = Client::new();
-    let mut json = cli.json;
+    let mut show_json = cli.json || cli.debug;
+    let mut show_debug = cli.debug;
+    let mut show_timing = cli.timing;
 
     if let Commands::Repl = cli.command {
         let mut rl = Editor::new()?;
         rl.set_helper(Some(CLIHelper));
+
+        // Set up history file in data directory
+        let history_path = dirs::data_dir()
+            .map(|p| p.join("treetop-rest"))
+            .unwrap_or_else(|| "treetop-rest".into())
+            .join("cli_history");
+
+        // Ensure the data directory exists
+        if let Some(parent) = history_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        // Load existing history (ignore errors if file doesn't exist)
+        let _ = rl.load_history(&history_path);
+
+        // Set maximum history size (1000 entries)
+        rl.set_max_history_size(1000)?;
+
         println!("Policy CLI REPL. Type 'help' for commands, 'exit' to quit.");
         loop {
             match rl.readline(&format!("{}@{}> ", cli.host, cli.port)) {
@@ -238,6 +269,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match parts.first().copied() {
                         Some("exit") | Some("quit") => break,
                         Some("help") | None => print_help(),
+                        Some("history") => {
+                            for (idx, entry) in rl.history().iter().enumerate() {
+                                println!("{:4}: {}", idx + 1, entry);
+                            }
+                        }
                         Some(_) => {
                             let args = std::iter::once("policy-cli").chain(parts.into_iter());
                             match Cli::try_parse_from(args) {
@@ -246,7 +282,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         parsed.command,
                                         &base_url,
                                         &client,
-                                        &mut json,
+                                        &mut show_json,
+                                        &mut show_debug,
+                                        &mut show_timing,
                                     )
                                     .await
                                     {
@@ -266,8 +304,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+
+        // Save history before exiting
+        if let Err(e) = rl.save_history(&history_path) {
+            eprintln!("Warning: Failed to save command history: {}", e);
+        }
     } else {
-        execute_command(cli.command, &base_url, &client, &mut json).await?;
+        execute_command(
+            cli.command,
+            &base_url,
+            &client,
+            &mut show_json,
+            &mut show_debug,
+            &mut show_timing,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -278,14 +329,17 @@ fn print_help() {
     cmd.print_long_help().ok();
     println!();
     println!("REPL-only commands:");
+    println!("  history       Show command history");
     println!("  exit, quit    Exit the REPL");
-    println!("  help          Show this help");
 }
+
 async fn execute_command(
     command: Commands,
     base_url: &str,
     client: &Client,
-    json: &mut bool,
+    show_json: &mut bool,
+    show_debug: &mut bool,
+    show_timing: &mut bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let now = std::time::Instant::now();
     match command {
@@ -295,7 +349,7 @@ async fn execute_command(
         }
         Commands::Status => {
             let resp = client.get(format!("{base_url}/status")).send().await?;
-            handle_response::<PoliciesMetadata>(resp, *json).await?;
+            handle_response::<PoliciesMetadata>(resp, *show_json, *show_debug).await?;
         }
         Commands::Check {
             principal,
@@ -324,9 +378,9 @@ async fn execute_command(
                 resource,
             };
 
-            if *json {
+            if *show_debug {
                 match serde_json::to_string_pretty(&req) {
-                    Ok(body) => eprintln!("{}", body),
+                    Ok(body) => eprintln!("DEBUG request:\n{}", body),
                     Err(err) => eprintln!("Failed to serialize request: {err}"),
                 }
             }
@@ -336,14 +390,14 @@ async fn execute_command(
                     .json(&req)
                     .send()
                     .await?;
-                handle_response::<CheckResponse>(resp, *json).await?;
+                handle_response::<CheckResponse>(resp, *show_json, *show_debug).await?;
             } else {
                 let resp = client
                     .post(format!("{base_url}/check"))
                     .json(&req)
                     .send()
                     .await?;
-                handle_response::<CheckResponseBrief>(resp, *json).await?;
+                handle_response::<CheckResponseBrief>(resp, *show_json, *show_debug).await?;
             }
         }
         Commands::GetPolicies { raw } => {
@@ -356,7 +410,7 @@ async fn execute_command(
             if raw && resp.status().is_success() {
                 println!("{}", resp.text().await?);
             } else {
-                handle_response::<PoliciesDownload>(resp, *json).await?;
+                handle_response::<PoliciesDownload>(resp, *show_json, *show_debug).await?;
             }
         }
         Commands::Upload { file, raw, token } => {
@@ -380,33 +434,59 @@ async fn execute_command(
                     .send()
                     .await?
             };
-            handle_response::<PoliciesMetadata>(resp, *json).await?;
+            handle_response::<PoliciesMetadata>(resp, *show_json, *show_debug).await?;
         }
         Commands::ListPolicies { user } => {
             let resp = client
                 .get(format!("{base_url}/policies/{user}"))
                 .send()
                 .await?;
-            handle_response::<UserPolicies>(resp, *json).await?;
+            handle_response::<UserPolicies>(resp, *show_json, *show_debug).await?;
         }
         Commands::Json => {
-            *json = !*json;
-            println!("JSON output: {}", if *json { "on" } else { "off" });
+            *show_json = !*show_json;
+            println!("JSON responses: {}", if *show_json { "on" } else { "off" });
+        }
+        Commands::Debug => {
+            *show_debug = !*show_debug;
+            println!(
+                "Debug mode (requests + responses): {}",
+                if *show_debug { "on" } else { "off" }
+            );
+        }
+        Commands::Timing => {
+            *show_timing = !*show_timing;
+            println!(
+                "Timing display: {}",
+                if *show_timing { "on" } else { "off" }
+            );
         }
     }
-    println!("Time: {:?} microseconds", now.elapsed().as_micros());
+
+    if *show_timing {
+        println!("Time: {:?} microseconds", now.elapsed().as_micros());
+    }
     Ok(())
 }
 
-async fn handle_response<T>(resp: reqwest::Response, json: bool) -> Result<()>
+async fn handle_response<T>(
+    resp: reqwest::Response,
+    show_json: bool,
+    show_debug: bool,
+) -> Result<()>
 where
     T: serde::de::DeserializeOwned + CliDisplay,
 {
     let status = resp.status();
     let body = resp.text().await?;
 
+    if show_debug {
+        eprintln!("DEBUG response status: {status}");
+        eprintln!("DEBUG response body:\n{}", body);
+    }
+
     if status.is_success() {
-        if json {
+        if show_json {
             match serde_json::from_str::<serde_json::Value>(&body) {
                 Ok(v) => println!("{}", serde_json::to_string_pretty(&v)?),
                 Err(_) => println!("{}", body),

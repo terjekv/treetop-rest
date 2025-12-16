@@ -12,6 +12,9 @@ pub const COMMANDS_MAIN: &[&str] = &[
     "upload",
     "list-policies",
     "json",
+    "debug",
+    "timing",
+    "history",
     "help",
     "exit",
 ];
