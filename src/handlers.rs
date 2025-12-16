@@ -8,7 +8,7 @@ use crate::state::SharedPolicyStore;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use treetop_core::Request;
+use treetop_core::{PolicyVersion, Request};
 use utoipa::{OpenApi, ToSchema};
 
 #[derive(Deserialize, ToSchema)]
@@ -70,6 +70,7 @@ pub struct Core {
 pub struct VersionInfo {
     pub version: String,
     pub core: Core,
+    pub policies: PolicyVersion,
 }
 
 #[utoipa::path(
@@ -79,7 +80,9 @@ pub struct VersionInfo {
             (status = 200, description = "Version information", body = VersionInfo),
         ),
     )]
-pub async fn version() -> Result<web::Json<VersionInfo>, ServiceError> {
+pub async fn version(
+    store: web::Data<SharedPolicyStore>,
+) -> Result<web::Json<VersionInfo>, ServiceError> {
     let build_info = build_info();
     Ok(web::Json(VersionInfo {
         version: build_info.version.clone(),
@@ -87,6 +90,7 @@ pub async fn version() -> Result<web::Json<VersionInfo>, ServiceError> {
             version: build_info.core.clone(),
             cedar: build_info.cedar,
         },
+        policies: store.lock()?.engine.current_version(),
     }))
 }
 
@@ -125,7 +129,7 @@ pub async fn check_detailed(
 ) -> Result<web::Json<CheckResponse>, ServiceError> {
     let store = store.lock()?;
     match store.engine.evaluate(&req) {
-        Ok(decision) => Ok(web::Json(CheckResponse { decision })),
+        Ok(decision) => Ok(web::Json(CheckResponse::from(decision))),
         Err(e) => Err(ServiceError::EvaluationError(e.to_string())),
     }
 }

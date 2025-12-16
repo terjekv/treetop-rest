@@ -305,3 +305,223 @@ impl PolicyStore {
 }
 
 pub type SharedPolicyStore = Arc<Mutex<PolicyStore>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Endpoint;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_metadata_empty() {
+        let metadata = Metadata::<OfPolicies>::new(String::new(), None, None).unwrap();
+        assert_eq!(metadata.size, 0);
+        assert_eq!(metadata.entries, 0);
+        assert!(metadata.content.is_empty());
+        assert!(metadata.sha256.is_empty());
+    }
+
+    #[test]
+    fn test_metadata_policies_count() {
+        let dsl = r#"
+permit (
+    principal == User::"alice",
+    action == Action::"view",
+    resource == Photo::"photo.jpg"
+);
+
+forbid (
+    principal == User::"bob",
+    action == Action::"delete",
+    resource == Photo::"photo.jpg"
+);
+"#;
+        let metadata = Metadata::<OfPolicies>::new(dsl.to_string(), None, None).unwrap();
+        assert_eq!(metadata.entries, 2);
+        assert_eq!(metadata.size, dsl.len());
+        assert!(!metadata.sha256.is_empty());
+    }
+
+    #[test]
+    fn test_metadata_with_source() {
+        let dsl = "permit (principal, action, resource);";
+        let endpoint = Endpoint::from_str("https://example.com/policies").unwrap();
+        let metadata =
+            Metadata::<OfPolicies>::new(dsl.to_string(), Some(endpoint.clone()), Some(60)).unwrap();
+
+        assert_eq!(metadata.entries, 1);
+        assert_eq!(
+            metadata.source.unwrap().as_str(),
+            "https://example.com/policies"
+        );
+        assert_eq!(metadata.refresh_frequency, Some(60));
+    }
+
+    #[test]
+    fn test_metadata_labels_valid() {
+        let labels_json = r#"[
+    {
+        "kind": "Host",
+        "field": "name",
+        "output": "nameLabels",
+        "patterns": [
+            {
+                "name": "example_domain",
+                "regex": "example\\.com$"
+            }
+        ]
+    }
+]"#;
+        let metadata = Metadata::<OfLabels>::new(labels_json.to_string(), None, None).unwrap();
+        assert_eq!(metadata.entries, 1);
+        assert!(!metadata.sha256.is_empty());
+    }
+
+    #[test]
+    fn test_metadata_labels_invalid_json() {
+        let invalid_json = "{ not valid json }";
+        let result = Metadata::<OfLabels>::new(invalid_json.to_string(), None, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_metadata_labels_empty_pattern() {
+        let labels_json = r#"[
+    {
+        "kind": "Host",
+        "field": "name",
+        "output": "nameLabels",
+        "patterns": [
+            {
+                "name": "",
+                "regex": "test"
+            }
+        ]
+    }
+]"#;
+        let result = Metadata::<OfLabels>::new(labels_json.to_string(), None, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_metadata_labels_invalid_regex() {
+        let labels_json = r#"[
+    {
+        "kind": "Host",
+        "field": "name",
+        "output": "nameLabels",
+        "patterns": [
+            {
+                "name": "bad_pattern",
+                "regex": "[invalid(regex"
+            }
+        ]
+    }
+]"#;
+        let result = Metadata::<OfLabels>::new(labels_json.to_string(), None, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_policy_store_default() {
+        let store = PolicyStore::default();
+        assert!(!store.allow_upload);
+        assert!(store.upload_token.is_none());
+        assert_eq!(store.policies.entries, 0);
+        assert_eq!(store.labels.entries, 0);
+    }
+
+    #[test]
+    fn test_policy_store_new() {
+        let store = PolicyStore::new().unwrap();
+        assert!(!store.allow_upload);
+        assert!(store.upload_token.is_none());
+        assert_eq!(store.policies.entries, 0);
+    }
+
+    #[test]
+    fn test_policy_store_set_dsl() {
+        let mut store = PolicyStore::new().unwrap();
+        let dsl = r#"
+permit (
+    principal == User::"alice",
+    action == Action::"view",
+    resource == Photo::"photo.jpg"
+);
+"#;
+        let result = store.set_dsl(dsl, None, None);
+        assert!(result.is_ok());
+        assert_eq!(store.policies.entries, 1);
+        assert_eq!(store.policies.content, dsl);
+    }
+
+    #[test]
+    fn test_policy_store_set_dsl_invalid() {
+        let mut store = PolicyStore::new().unwrap();
+        let invalid_dsl = "this is not valid Cedar DSL";
+        let result = store.set_dsl(invalid_dsl, None, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_policy_store_set_labels() {
+        let mut store = PolicyStore::new().unwrap();
+        let labels_json = r#"[
+    {
+        "kind": "Host",
+        "field": "name",
+        "output": "nameLabels",
+        "patterns": [
+            {
+                "name": "example",
+                "regex": "example\\.com$"
+            }
+        ]
+    }
+]"#;
+        let result = store.set_labels(labels_json, None, None);
+        assert!(result.is_ok());
+        assert_eq!(store.labels.entries, 1);
+    }
+
+    #[test]
+    fn test_policy_store_preserves_source() {
+        let mut store = PolicyStore::new().unwrap();
+        let endpoint = Endpoint::from_str("https://example.com/policies").unwrap();
+
+        // Set initial DSL with source
+        let dsl1 = "permit (principal, action, resource);";
+        store
+            .set_dsl(dsl1, Some(endpoint.clone()), Some(60))
+            .unwrap();
+
+        assert_eq!(
+            store.policies.source.as_ref().unwrap().as_str(),
+            "https://example.com/policies"
+        );
+        assert_eq!(store.policies.refresh_frequency, Some(60));
+
+        // Update DSL without providing source - should preserve it
+        let dsl2 = "forbid (principal, action, resource);";
+        store.set_dsl(dsl2, None, None).unwrap();
+
+        assert_eq!(
+            store.policies.source.as_ref().unwrap().as_str(),
+            "https://example.com/policies"
+        );
+        assert_eq!(store.policies.refresh_frequency, Some(60));
+    }
+
+    #[test]
+    fn test_metadata_display() {
+        let dsl = "permit (principal, action, resource);";
+        let endpoint = Endpoint::from_str("https://example.com/api").unwrap();
+        let metadata =
+            Metadata::<OfPolicies>::new(dsl.to_string(), Some(endpoint), Some(120)).unwrap();
+
+        let display = format!("{}", metadata);
+        assert!(display.contains("https://example.com/api"));
+        assert!(display.contains("120"));
+        assert!(display.contains(&metadata.sha256));
+    }
+}

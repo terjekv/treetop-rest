@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use treetop_core::Decision;
+use treetop_core::{Decision, PermitPolicy, PolicyVersion};
 use url::Url;
 
 use utoipa::ToSchema;
@@ -46,30 +46,49 @@ impl std::str::FromStr for Endpoint {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct CheckResponse {
-    pub decision: Decision,
+    pub policy: Option<PermitPolicy>,
+    pub version: PolicyVersion,
 }
 
-#[derive(Serialize, ToSchema)]
+impl From<Decision> for CheckResponse {
+    fn from(decision: Decision) -> Self {
+        match decision {
+            Decision::Allow { policy, version } => CheckResponse {
+                policy: Some(policy),
+                version,
+            },
+            Decision::Deny { version } => CheckResponse {
+                policy: None,
+                version,
+            },
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
 pub enum DecisionBrief {
     Allow,
     Deny,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct CheckResponseBrief {
     pub decision: DecisionBrief,
+    pub version: PolicyVersion,
 }
 
 impl From<Decision> for CheckResponseBrief {
     fn from(decision: Decision) -> Self {
         match decision {
-            Decision::Allow { .. } => CheckResponseBrief {
+            Decision::Allow { version, .. } => CheckResponseBrief {
                 decision: DecisionBrief::Allow,
+                version,
             },
-            Decision::Deny => CheckResponseBrief {
+            Decision::Deny { version, .. } => CheckResponseBrief {
                 decision: DecisionBrief::Deny,
+                version,
             },
         }
     }
@@ -117,5 +136,37 @@ impl From<treetop_core::UserPolicies> for UserPolicies {
                 .map(|p| p.to_json().unwrap()) // Yuck.
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_endpoint_new() {
+        let url = Url::parse("https://example.com/api").unwrap();
+        let endpoint = Endpoint::new(url.clone());
+        assert_eq!(endpoint.as_str(), "https://example.com/api");
+        assert_eq!(endpoint.url(), &url);
+    }
+
+    #[test]
+    fn test_endpoint_from_str() {
+        let endpoint = Endpoint::from_str("https://example.com/api").unwrap();
+        assert_eq!(endpoint.as_str(), "https://example.com/api");
+    }
+
+    #[test]
+    fn test_endpoint_from_str_invalid() {
+        let result = Endpoint::from_str("not a valid url");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_endpoint_display() {
+        let endpoint = Endpoint::from_str("https://example.com/api").unwrap();
+        assert_eq!(format!("{}", endpoint), "https://example.com/api");
     }
 }

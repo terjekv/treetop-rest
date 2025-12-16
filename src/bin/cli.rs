@@ -12,30 +12,11 @@ use std::fs;
 use std::net::IpAddr;
 use std::str::FromStr;
 use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
-use treetop_rest::models::PoliciesMetadata;
+use treetop_rest::models::{CheckResponse, CheckResponseBrief, DecisionBrief, PoliciesMetadata};
 use treetop_rest::state::{Metadata, OfPolicies};
 
-// Top-level commands
-const COMMANDS_MAIN: &[&str] = &[
-    "status",
-    "check",
-    "get-policies",
-    "upload",
-    "list-policies",
-    "help",
-    "exit",
-];
-// Flags per command (use kebab-case to match clap defaults)
-const CHECK_FLAGS: &[&str] = &[
-    "--principal",
-    "--action",
-    "--resource-type",
-    "--resource-id",
-    "--resource-attribute",
-    "--detailed",
-];
-const GET_POLICIES_FLAGS: &[&str] = &["--raw"];
-const UPLOAD_FLAGS: &[&str] = &["--file", "--raw", "--token"];
+// Re-export the completion logic from the library
+use treetop_rest::cli::*;
 
 struct CLIHelper;
 impl Helper for CLIHelper {}
@@ -54,48 +35,15 @@ impl Completer for CLIHelper {
         pos: usize,
         _ctx: &Context<'_>,
     ) -> Result<(usize, Vec<Pair>), ReadlineError> {
-        // Determine start of current token
-        let start = line[..pos].rfind(' ').map_or(0, |i| i + 1);
-        let word = &line[start..pos];
-        // Split the input into tokens before the current word
-        let prefix = &line[..start].trim();
-        let tokens: Vec<&str> = if prefix.is_empty() {
-            vec![]
-        } else {
-            prefix.split_whitespace().collect()
-        };
-
-        // Decide suggestions based on first token
-        let base = if tokens.is_empty() {
-            COMMANDS_MAIN
-        } else {
-            match tokens[0] {
-                "check" => CHECK_FLAGS,
-                "get-policies" => GET_POLICIES_FLAGS,
-                "upload" => UPLOAD_FLAGS,
-                _ => &[],
-            }
-        };
-
-        // Filter out flags/commands that have already been used
-        let used = tokens.to_vec();
-        let candidates = base
-            .iter()
-            .filter(|&&item| !used.contains(&item))
-            .cloned()
-            .collect::<Vec<&str>>();
-
-        // Build completion pairs matching the current word
-        let mut matches = Vec::new();
-        for s in candidates {
-            if s.starts_with(word) {
-                matches.push(Pair {
-                    display: s.to_string(),
-                    replacement: s.to_string(),
-                });
-            }
-        }
-        Ok((start, matches))
+        let (start, matches) = complete_line(line, pos);
+        let pairs = matches
+            .into_iter()
+            .map(|s| Pair {
+                display: s.clone(),
+                replacement: s,
+            })
+            .collect();
+        Ok((start, pairs))
     }
 }
 
@@ -106,7 +54,7 @@ struct Cli {
     host: String,
     #[clap(long, default_value = "9999", env = "CLI_PORT")]
     port: u16,
-    /// Print raw JSON responses
+    /// Print raw JSON bodies sent to and responses received from the server
     #[arg(long)]
     json: bool,
     #[clap(subcommand)]
@@ -203,6 +151,8 @@ enum Commands {
     },
     /// List policies relevant to a user
     ListPolicies { user: String },
+    /// Toggle display of JSON traffic to and from the server
+    Json,
 }
 
 trait CliDisplay {
@@ -222,28 +172,23 @@ impl CliDisplay for PoliciesMetadata {
     }
 }
 
-#[derive(Deserialize)]
-struct CheckResponse {
-    decision: String,
-}
-impl CliDisplay for CheckResponse {
+impl CliDisplay for CheckResponseBrief {
     fn display(&self) -> String {
-        self.decision.clone()
+        match self.decision {
+            DecisionBrief::Allow => format!("Allow ({})", self.version.hash),
+            DecisionBrief::Deny => format!("Deny ({})", self.version.hash),
+        }
     }
 }
 
-#[derive(Deserialize)]
-struct CheckResponseDetailed {
-    decision: treetop_core::Decision,
-}
-
-impl CliDisplay for CheckResponseDetailed {
+impl CliDisplay for CheckResponse {
     fn display(&self) -> String {
-        match &self.decision {
-            treetop_core::Decision::Allow { policy } => {
-                format!("Allow\n--- Matching policy ---\n{}\n---", policy.literal)
-            }
-            treetop_core::Decision::Deny => "Deny".to_string(),
+        match &self.policy {
+            Some(policy) => format!(
+                "Allow ({})\n--- Matching policy ---\n{}\n---",
+                self.version.hash, policy.literal
+            ),
+            None => format!("Deny ({})", self.version.hash),
         }
     }
 }
@@ -279,7 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let base_url = format!("http://{}:{}/api/v1", cli.host, cli.port);
     let client = Client::new();
-    let json = cli.json;
+    let mut json = cli.json;
 
     if let Commands::Repl = cli.command {
         let mut rl = Editor::new()?;
@@ -297,8 +242,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let args = std::iter::once("policy-cli").chain(parts.into_iter());
                             match Cli::try_parse_from(args) {
                                 Ok(parsed) => {
-                                    match execute_command(parsed.command, &base_url, &client, json)
-                                        .await
+                                    match execute_command(
+                                        parsed.command,
+                                        &base_url,
+                                        &client,
+                                        &mut json,
+                                    )
+                                    .await
                                     {
                                         Ok(_) => {}
                                         Err(e) => eprintln!("Error executing command: {e}"),
@@ -317,7 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
-        execute_command(cli.command, &base_url, &client, json).await?;
+        execute_command(cli.command, &base_url, &client, &mut json).await?;
     }
     Ok(())
 }
@@ -327,13 +277,17 @@ fn print_help() {
     let mut cmd = Cli::command();
     cmd.print_long_help().ok();
     println!();
+    println!("REPL-only commands:");
+    println!("  exit, quit    Exit the REPL");
+    println!("  help          Show this help");
 }
 async fn execute_command(
     command: Commands,
     base_url: &str,
     client: &Client,
-    json: bool,
+    json: &mut bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let now = std::time::Instant::now();
     match command {
         Commands::Repl => {
             // REPL is handled in the main function
@@ -341,7 +295,7 @@ async fn execute_command(
         }
         Commands::Status => {
             let resp = client.get(format!("{base_url}/status")).send().await?;
-            handle_response::<PoliciesMetadata>(resp, json).await?;
+            handle_response::<PoliciesMetadata>(resp, *json).await?;
         }
         Commands::Check {
             principal,
@@ -370,21 +324,27 @@ async fn execute_command(
                 resource,
             };
 
+            if *json {
+                match serde_json::to_string_pretty(&req) {
+                    Ok(body) => eprintln!("{}", body),
+                    Err(err) => eprintln!("Failed to serialize request: {err}"),
+                }
+            }
             if detailed {
                 let resp = client
                     .post(format!("{base_url}/check_detailed"))
                     .json(&req)
                     .send()
                     .await?;
-                handle_response::<CheckResponseDetailed>(resp, json).await?;
-                return Ok(());
+                handle_response::<CheckResponse>(resp, *json).await?;
+            } else {
+                let resp = client
+                    .post(format!("{base_url}/check"))
+                    .json(&req)
+                    .send()
+                    .await?;
+                handle_response::<CheckResponseBrief>(resp, *json).await?;
             }
-            let resp = client
-                .post(format!("{base_url}/check"))
-                .json(&req)
-                .send()
-                .await?;
-            handle_response::<CheckResponse>(resp, json).await?;
         }
         Commands::GetPolicies { raw } => {
             let url = if raw {
@@ -396,7 +356,7 @@ async fn execute_command(
             if raw && resp.status().is_success() {
                 println!("{}", resp.text().await?);
             } else {
-                handle_response::<PoliciesDownload>(resp, json).await?;
+                handle_response::<PoliciesDownload>(resp, *json).await?;
             }
         }
         Commands::Upload { file, raw, token } => {
@@ -420,16 +380,21 @@ async fn execute_command(
                     .send()
                     .await?
             };
-            handle_response::<PoliciesMetadata>(resp, json).await?;
+            handle_response::<PoliciesMetadata>(resp, *json).await?;
         }
         Commands::ListPolicies { user } => {
             let resp = client
                 .get(format!("{base_url}/policies/{user}"))
                 .send()
                 .await?;
-            handle_response::<UserPolicies>(resp, json).await?;
+            handle_response::<UserPolicies>(resp, *json).await?;
+        }
+        Commands::Json => {
+            *json = !*json;
+            println!("JSON output: {}", if *json { "on" } else { "off" });
         }
     }
+    println!("Time: {:?} microseconds", now.elapsed().as_micros());
     Ok(())
 }
 
@@ -438,30 +403,43 @@ where
     T: serde::de::DeserializeOwned + CliDisplay,
 {
     let status = resp.status();
+    let body = resp.text().await?;
+
     if status.is_success() {
         if json {
-            let v = resp.json::<serde_json::Value>().await?;
-            println!("{}", serde_json::to_string_pretty(&v)?);
-        } else {
-            let data = resp
-                .json::<T>()
-                .await
-                .with_context(|| format!("Failed to parse successful response ({status})"))?;
-            println!("{}", data.display());
+            match serde_json::from_str::<serde_json::Value>(&body) {
+                Ok(v) => println!("{}", serde_json::to_string_pretty(&v)?),
+                Err(_) => println!("{}", body),
+            }
+            return Ok(());
         }
-        Ok(())
+
+        match serde_json::from_str::<T>(&body) {
+            Ok(data) => {
+                println!("{}", data.display());
+                Ok(())
+            }
+            Err(parse_err) => {
+                eprintln!("Failed to parse successful response ({status}): {parse_err}");
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+                    println!("{}", serde_json::to_string_pretty(&v)?);
+                } else {
+                    println!("{}", body);
+                }
+                anyhow::bail!("failed to parse successful response ({status})")
+            }
+        }
     } else {
-        handle_error(resp).await;
+        // Best-effort error handling using the already-consumed body
+        if let Ok(err) = serde_json::from_str::<ErrorResponse>(&body) {
+            eprintln!("Error: {}", err.error);
+        } else {
+            eprintln!("Unexpected error: {status}");
+            if !body.trim().is_empty() {
+                eprintln!("Body: {body}");
+            }
+        }
         // Make non-2xx fail the command:
         anyhow::bail!("request failed with status {status}")
-    }
-}
-
-async fn handle_error(resp: reqwest::Response) {
-    let status = resp.status();
-    if let Ok(err) = resp.json::<ErrorResponse>().await {
-        eprintln!("Error: {}", err.error);
-    } else {
-        eprintln!("Unexpected error: {status}");
     }
 }
