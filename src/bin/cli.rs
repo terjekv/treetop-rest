@@ -49,7 +49,7 @@ impl Completer for CLIHelper {
 }
 
 #[derive(Parser, Debug)]
-#[clap(name = "policy-cli", about = "CLI (and REPL) for Policy Service API")]
+#[clap(name = "treetop-cli", about = "CLI (and REPL) for the Treeptop API")]
 struct Cli {
     #[clap(long, default_value = "127.0.0.1", env = "CLI_HOST")]
     host: String,
