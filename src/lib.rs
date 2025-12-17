@@ -6,4 +6,5 @@ pub mod fetcher;
 pub mod handlers;
 pub mod middeware;
 pub mod models;
+pub mod style;
 pub mod state;

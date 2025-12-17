@@ -17,39 +17,10 @@ use std::str::FromStr;
 use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
 use treetop_rest::models::{CheckResponse, CheckResponseBrief, DecisionBrief, PoliciesMetadata};
 use treetop_rest::state::{Metadata, OfPolicies};
+use treetop_rest::style::{error, status_flag, success, title, version, warning, yes_no};
 
 // Re-export the completion logic from the library
 use treetop_rest::cli::*;
-
-// Colored status strings for toggle commands
-lazy_static::lazy_static! {
-    static ref STATUS_ON: String = "on".green().to_string();
-    static ref STATUS_OFF: String = "off".red().to_string();
-    static ref STATUS_YES: String = "yes".green().to_string();
-    static ref STATUS_NO: String = "no".red().to_string();
-}
-
-// Helper to format section titles
-fn title(s: &str) -> colored::ColoredString {
-    s.cyan().bold()
-}
-
-// Semantic color helpers
-fn success(s: &str) -> colored::ColoredString {
-    s.green()
-}
-
-fn error(s: &str) -> colored::ColoredString {
-    s.red()
-}
-
-fn warning(s: &str) -> colored::ColoredString {
-    s.yellow()
-}
-
-fn version(s: &str) -> colored::ColoredString {
-    s.green()
-}
 
 // Structure to hold last used values
 #[derive(Default, Clone)]
@@ -348,7 +319,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Set maximum history size (1000 entries)
         rl.set_max_history_size(1000)?;
 
-        println!("Policy CLI REPL. Type 'help' for commands, 'exit' to quit.");
+        println!("Treetop CLI REPL. Type 'help' for commands, 'exit/quit' to quit.");
         loop {
             match rl.readline(&format!("{}@{}> ", cli.host, cli.port)) {
                 Ok(input) => {
@@ -400,17 +371,212 @@ fn print_help() {
     cmd.print_long_help().ok();
     println!();
     println!("{}:", title("REPL-only commands"));
-    println!("  {:<10}  Toggle JSON response output", "json".green());
-    println!(
-        "  {:<10}  Toggle debug mode (requests + responses)",
-        "debug".green()
+    help_line_outputter("json", "Toggle JSON response output");
+    help_line_outputter("debug", "Toggle debug mode (requests + responses)");
+    help_line_outputter("timing", "Toggle command timing display");
+    help_line_outputter("history", "Show command history");
+    help_line_outputter("show", "Show current settings");
+    help_line_outputter("version", "Show version information");
+    help_line_outputter("exit, quit", "Exit the REPL");
+    help_line_outputter("help", "Show this help");
+}
+
+fn help_line_outputter(key: &str, desc: &str) -> () {
+    println!("  {:<10} {}", key.green(), desc)
+}
+
+async fn handle_check(
+    ctx: &mut ExecContext,
+    principal: Option<String>,
+    action: Option<String>,
+    resource_type: Option<String>,
+    resource_id: Option<String>,
+    attrs: Vec<(String, InputAttrValue)>,
+    detailed: bool,
+) -> Result<()> {
+    let principal = principal
+        .or_else(|| ctx.last_used.principal.clone())
+        .ok_or_else(|| anyhow::anyhow!("--principal is required (no previous value)"))?;
+    let action = action
+        .or_else(|| ctx.last_used.action.clone())
+        .ok_or_else(|| anyhow::anyhow!("--action is required (no previous value)"))?;
+    let resource_type = resource_type
+        .or_else(|| ctx.last_used.resource_type.clone())
+        .ok_or_else(|| anyhow::anyhow!("--resource-type is required (no previous value)"))?;
+    let resource_id = resource_id
+        .or_else(|| ctx.last_used.resource_id.clone())
+        .ok_or_else(|| anyhow::anyhow!("--resource-id is required (no previous value)"))?;
+
+    let resolved_attrs = if attrs.is_empty() {
+        ctx.last_used.attrs.clone()
+    } else {
+        attrs
+    };
+
+    ctx.last_used.principal = Some(principal.clone());
+    ctx.last_used.action = Some(action.clone());
+    ctx.last_used.resource_type = Some(resource_type.clone());
+    ctx.last_used.resource_id = Some(resource_id.clone());
+    ctx.last_used.attrs = resolved_attrs.clone();
+
+    let mut resource = Resource::new(&resource_type, &resource_id);
+    for (k, v) in &resolved_attrs {
+        resource = resource.with_attr(k.clone(), AttrValue::from(v.clone()));
+    }
+
+    let principal = Principal::User(
+        User::from_str(&principal).with_context(|| format!("invalid --principal `{principal}`"))?,
     );
-    println!("  {:<10}  Toggle command timing display", "timing".green());
-    println!("  {:<10}  Show command history", "history".green());
-    println!("  {:<10}  Show current settings", "show".green());
-    println!("  {:<10}  Show version information", "version".green());
-    println!("  {:<10}  Exit the REPL", "exit, quit".green());
-    println!("  {:<10}  Show this help", "help".green());
+
+    let action =
+        Action::from_str(&action).with_context(|| format!("invalid --action `{action}`"))?;
+
+    let req = Request {
+        principal,
+        action,
+        resource,
+    };
+
+    if ctx.show_debug {
+        match serde_json::to_string_pretty(&req) {
+            Ok(body) => eprintln!("{}\n{}", warning("DEBUG request:"), body),
+            Err(err) => eprintln!("{}: {}", error("Failed to serialize request"), err),
+        }
+    }
+
+    if detailed {
+        let resp = ctx
+            .client
+            .post(format!("{}/check_detailed", ctx.base_url))
+            .json(&req)
+            .send()
+            .await?;
+        handle_response::<CheckResponse>(resp, ctx.show_json, ctx.show_debug).await?
+    } else {
+        let resp = ctx
+            .client
+            .post(format!("{}/check", ctx.base_url))
+            .json(&req)
+            .send()
+            .await?;
+        handle_response::<CheckResponseBrief>(resp, ctx.show_json, ctx.show_debug).await?
+    }
+
+    Ok(())
+}
+
+async fn handle_get_policies(ctx: &ExecContext, raw: bool) -> Result<()> {
+    let url = if raw {
+        format!("{}/policies?format=raw", ctx.base_url)
+    } else {
+        format!("{}/policies", ctx.base_url)
+    };
+    let resp = ctx.client.get(&url).send().await?;
+    if raw && resp.status().is_success() {
+        println!("{}", resp.text().await?);
+    } else {
+        handle_response::<PoliciesDownload>(resp, ctx.show_json, ctx.show_debug).await?;
+    }
+    Ok(())
+}
+
+async fn handle_upload(
+    ctx: &ExecContext,
+    file: std::path::PathBuf,
+    raw: bool,
+    token: String,
+) -> Result<()> {
+    let content = fs::read_to_string(&file)?;
+    let resp = if raw {
+        ctx.client
+            .post(format!("{}/policies", ctx.base_url))
+            .header("Content-Type", "text/plain")
+            .header("X-Upload-Token", token)
+            .body(content)
+            .send()
+            .await?
+    } else {
+        #[derive(Serialize)]
+        struct Upload {
+            policies: String,
+        }
+        ctx.client
+            .post(format!("{}/policies", ctx.base_url))
+            .json(&Upload { policies: content })
+            .send()
+            .await?
+    };
+    handle_response::<PoliciesMetadata>(resp, ctx.show_json, ctx.show_debug).await?;
+    Ok(())
+}
+
+async fn handle_list_policies(ctx: &ExecContext, user: &str) -> Result<()> {
+    let resp = ctx
+        .client
+        .get(format!("{}/policies/{user}", ctx.base_url))
+        .send()
+        .await?;
+    handle_response::<UserPolicies>(resp, ctx.show_json, ctx.show_debug).await?;
+    Ok(())
+}
+
+fn toggle_json(ctx: &mut ExecContext) {
+    ctx.show_json = !ctx.show_json;
+    println!("JSON responses: {}", status_flag(ctx.show_json));
+}
+
+fn toggle_debug(ctx: &mut ExecContext) {
+    ctx.show_debug = !ctx.show_debug;
+    println!(
+        "Debug mode (requests + responses): {}",
+        status_flag(ctx.show_debug)
+    );
+}
+
+fn toggle_timing(ctx: &mut ExecContext) {
+    ctx.show_timing = !ctx.show_timing;
+    println!("Timing display: {}", status_flag(ctx.show_timing));
+}
+
+fn settings_outputter(key: &str, value: &str) -> () {
+    println!("  {:<15} {}", key, value)
+}
+
+fn show_settings(ctx: &ExecContext) {
+    println!("\n{}", title("Current Settings:"));
+
+    settings_outputter("Server:", &format!("{}:{}", ctx.host, ctx.port));
+    settings_outputter("JSON output:", status_flag(ctx.show_json));
+    settings_outputter("Debug mode:", status_flag(ctx.show_debug));
+    settings_outputter("Timing:", status_flag(ctx.show_timing));
+
+    if ctx.last_used.principal.is_some() || ctx.last_used.action.is_some() {
+        println!("\n{}", title("Last Used Values:"));
+        if let Some(p) = &ctx.last_used.principal {
+            settings_outputter("Principal:", p);
+        }
+        if let Some(a) = &ctx.last_used.action {
+            settings_outputter("Action:", a);
+        }
+        if let Some(rt) = &ctx.last_used.resource_type {
+            settings_outputter("Resource Type:", rt);
+        }
+        if let Some(rid) = &ctx.last_used.resource_id {
+            settings_outputter("Resource ID:", rid);
+        }
+        if !ctx.last_used.attrs.is_empty() {
+            settings_outputter("Attributes:", "");
+            for (k, v) in &ctx.last_used.attrs {
+                settings_outputter("", &format!("{k}={v}"));
+            }
+        }
+    }
+
+    if let Some(data_dir) = dirs::data_dir() {
+        let history_path = data_dir.join("treetop-rest").join("cli_history");
+        println!("\n{}", title("Files:"));
+        settings_outputter("History:", &history_path.display().to_string());
+    }
 }
 
 async fn execute_command(
@@ -434,217 +600,37 @@ async fn execute_command(
             attrs,
             detailed,
         } => {
-            let principal = principal
-                .or_else(|| ctx.last_used.principal.clone())
-                .ok_or_else(|| anyhow::anyhow!("--principal is required (no previous value)"))?;
-            let action = action
-                .or_else(|| ctx.last_used.action.clone())
-                .ok_or_else(|| anyhow::anyhow!("--action is required (no previous value)"))?;
-            let resource_type = resource_type
-                .or_else(|| ctx.last_used.resource_type.clone())
-                .ok_or_else(|| {
-                    anyhow::anyhow!("--resource-type is required (no previous value)")
-                })?;
-            let resource_id = resource_id
-                .or_else(|| ctx.last_used.resource_id.clone())
-                .ok_or_else(|| anyhow::anyhow!("--resource-id is required (no previous value)"))?;
-
-            // Prefer current attrs; if none provided, reuse last ones
-            let resolved_attrs = if attrs.is_empty() {
-                ctx.last_used.attrs.clone()
-            } else {
-                attrs
-            };
-
-            // Store last used values
-            ctx.last_used.principal = Some(principal.clone());
-            ctx.last_used.action = Some(action.clone());
-            ctx.last_used.resource_type = Some(resource_type.clone());
-            ctx.last_used.resource_id = Some(resource_id.clone());
-            ctx.last_used.attrs = resolved_attrs.clone();
-
-            let mut resource = Resource::new(&resource_type, &resource_id);
-            for (k, v) in &resolved_attrs {
-                resource = resource.with_attr(k.clone(), AttrValue::from(v.clone()));
-            }
-
-            let principal = Principal::User(
-                User::from_str(&principal)
-                    .with_context(|| format!("invalid --principal `{principal}`"))?,
-            );
-
-            let action = Action::from_str(&action)
-                .with_context(|| format!("invalid --action `{action}`"))?;
-
-            let req = Request {
+            handle_check(
+                ctx,
                 principal,
                 action,
-                resource,
-            };
-
-            if ctx.show_debug {
-                match serde_json::to_string_pretty(&req) {
-                    Ok(body) => eprintln!("{}\n{}", warning("DEBUG request:"), body),
-                    Err(err) => eprintln!("{}: {}", "Failed to serialize request".red(), err),
-                }
-            }
-            if detailed {
-                let resp = ctx
-                    .client
-                    .post(format!("{}/check_detailed", ctx.base_url))
-                    .json(&req)
-                    .send()
-                    .await?;
-                handle_response::<CheckResponse>(resp, ctx.show_json, ctx.show_debug).await?;
-            } else {
-                let resp = ctx
-                    .client
-                    .post(format!("{}/check", ctx.base_url))
-                    .json(&req)
-                    .send()
-                    .await?;
-                handle_response::<CheckResponseBrief>(resp, ctx.show_json, ctx.show_debug).await?;
-            }
+                resource_type,
+                resource_id,
+                attrs,
+                detailed,
+            )
+            .await?;
         }
         Commands::GetPolicies { raw } => {
-            let url = if raw {
-                format!("{}/policies?format=raw", ctx.base_url)
-            } else {
-                format!("{}/policies", ctx.base_url)
-            };
-            let resp = ctx.client.get(&url).send().await?;
-            if raw && resp.status().is_success() {
-                println!("{}", resp.text().await?);
-            } else {
-                handle_response::<PoliciesDownload>(resp, ctx.show_json, ctx.show_debug).await?;
-            }
+            handle_get_policies(ctx, raw).await?;
         }
         Commands::Upload { file, raw, token } => {
-            let content = fs::read_to_string(&file)?;
-            let resp = if raw {
-                ctx.client
-                    .post(format!("{}/policies", ctx.base_url))
-                    .header("Content-Type", "text/plain")
-                    .header("X-Upload-Token", token)
-                    .body(content)
-                    .send()
-                    .await?
-            } else {
-                #[derive(Serialize)]
-                struct Upload {
-                    policies: String,
-                }
-                ctx.client
-                    .post(format!("{}/policies", ctx.base_url))
-                    .json(&Upload { policies: content })
-                    .send()
-                    .await?
-            };
-            handle_response::<PoliciesMetadata>(resp, ctx.show_json, ctx.show_debug).await?;
+            handle_upload(ctx, file, raw, token).await?;
         }
         Commands::ListPolicies { user } => {
-            let resp = ctx
-                .client
-                .get(format!("{}/policies/{user}", ctx.base_url))
-                .send()
-                .await?;
-            handle_response::<UserPolicies>(resp, ctx.show_json, ctx.show_debug).await?;
+            handle_list_policies(ctx, &user).await?;
         }
         Commands::Json => {
-            ctx.show_json = !ctx.show_json;
-            println!(
-                "JSON responses: {}",
-                if ctx.show_json {
-                    &*STATUS_ON
-                } else {
-                    &*STATUS_OFF
-                }
-            );
+            toggle_json(ctx);
         }
         Commands::Debug => {
-            ctx.show_debug = !ctx.show_debug;
-            println!(
-                "Debug mode (requests + responses): {}",
-                if ctx.show_debug {
-                    &*STATUS_ON
-                } else {
-                    &*STATUS_OFF
-                }
-            );
+            toggle_debug(ctx);
         }
         Commands::Timing => {
-            ctx.show_timing = !ctx.show_timing;
-            println!(
-                "Timing display: {}",
-                if ctx.show_timing {
-                    &*STATUS_ON
-                } else {
-                    &*STATUS_OFF
-                }
-            );
+            toggle_timing(ctx);
         }
         Commands::Show => {
-            println!("\n{}", title("Current Settings:"));
-            println!("  {:<15} {}:{}", "Server:", ctx.host, ctx.port);
-            println!(
-                "  {:<15} {}",
-                "JSON output:",
-                if ctx.show_json {
-                    &*STATUS_ON
-                } else {
-                    &*STATUS_OFF
-                }
-            );
-            println!(
-                "  {:<15} {}",
-                "Debug mode:",
-                if ctx.show_debug {
-                    &*STATUS_ON
-                } else {
-                    &*STATUS_OFF
-                }
-            );
-            println!(
-                "  {:<15} {}",
-                "Timing:",
-                if ctx.show_timing {
-                    &*STATUS_ON
-                } else {
-                    &*STATUS_OFF
-                }
-            );
-
-            if ctx.last_used.principal.is_some() || ctx.last_used.action.is_some() {
-                println!("\n{}", title("Last Used Values:"));
-                if let Some(p) = &ctx.last_used.principal {
-                    println!("  {:<15} {}", "Principal:", p);
-                }
-                if let Some(a) = &ctx.last_used.action {
-                    println!("  {:<15} {}", "Action:", a);
-                }
-                if let Some(rt) = &ctx.last_used.resource_type {
-                    println!("  {:<15} {}", "Resource Type:", rt);
-                }
-                if let Some(rid) = &ctx.last_used.resource_id {
-                    println!("  {:<15} {}", "Resource ID:", rid);
-                }
-                if !ctx.last_used.attrs.is_empty() {
-                    println!("  {:<15} {}", "Attributes:", "");
-                    for (k, v) in &ctx.last_used.attrs {
-                        println!("  {:<15} {}", "", format!("{k}={v}"));
-                    }
-                }
-            }
-
-            if let Some(data_dir) = dirs::data_dir() {
-                let history_path = data_dir.join("treetop-rest").join("cli_history");
-                println!("\n{}", title("Files:"));
-                println!(
-                    "  {:<15} {}",
-                    "History:",
-                    history_path.display().to_string()
-                );
-            }
+            show_settings(ctx);
         }
         Commands::Version => {
             show_status_and_version(ctx).await?;
@@ -696,72 +682,46 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
     };
 
     println!("\n{}", title("treetop-cli"));
-    println!(
-        "  {:<15} {}",
-        "Version:",
-        version(env!("CARGO_PKG_VERSION"))
-    );
-    println!("  {:<15} {}", "Built:", env!("VERGEN_BUILD_TIMESTAMP"));
-    println!("  {:<15} {}", "Git:", env!("VERGEN_GIT_DESCRIBE"));
+    settings_outputter("Version", &version(env!("CARGO_PKG_VERSION")));
+    settings_outputter("Built:", env!("VERGEN_BUILD_TIMESTAMP"));
+    settings_outputter("Git:", env!("VERGEN_GIT_DESCRIBE"));
 
     println!("\n{}", title("Server"));
     if let Some(info) = version_info {
-        println!("  {:<15} {}", "Version:", version(&info.version));
-        println!("  {:<15} {}", "Core:", info.core.version);
-        println!("  {:<15} {}", "Cedar:", info.core.cedar);
+        settings_outputter("Version:", &version(&info.version));
+        settings_outputter("Core:", &info.core.version);
+        settings_outputter("Cedar:", &info.core.cedar);
     } else {
-        println!("  {}", warning("Version: unavailable"));
+        settings_outputter("Version:", &warning("unavailable"));
     }
 
+    let p = &metadata.policies;
     println!("\n{}", title("Policies"));
-    println!("  {:<15} {}", "Hash:", metadata.policies.sha256);
-    println!(
-        "  {:<15} {}",
-        "Updated:",
-        metadata.policies.timestamp.to_string()
-    );
-    println!("  {:<15} {}", "Entries:", metadata.policies.entries);
-    println!(
-        "  {:<15} {}",
-        "Size:",
-        format!("{} bytes", metadata.policies.size).white()
-    );
+    settings_outputter("Hash:", &p.sha256);
+    settings_outputter("Updated:", &p.timestamp.to_string());
+    settings_outputter("Entries:", &p.entries.to_string());
+    settings_outputter("Size:", &format!("{} bytes", p.size).white());
 
-    if let Some(src) = &metadata.policies.source {
-        println!("  {:<15} {}", "Source:", src.to_string());
+    if let Some(src) = &p.source {
+        settings_outputter("Source:", &src.to_string());
     }
-    if let Some(freq) = metadata.policies.refresh_frequency {
-        println!("  {:<15} every {}s", "Refresh:", freq);
+    if let Some(freq) = p.refresh_frequency {
+        settings_outputter("Refresh:", &format!("every {}s", freq));
     }
 
-    println!(
-        "  {:<15} {}",
-        "Allow upload:",
-        if metadata.allow_upload {
-            &*STATUS_YES
-        } else {
-            &*STATUS_NO
-        }
-    );
+    settings_outputter("Allow upload:", &yes_no(metadata.allow_upload));
 
+    let l = &metadata.labels;
     println!("\n{}", title("Labels"));
-    println!("  {:<15} {}", "Hash:", metadata.labels.sha256);
-    println!(
-        "  {:<15} {}",
-        "Updated:",
-        metadata.labels.timestamp.to_string()
-    );
-    println!("  {:<15} {}", "Entries:", metadata.labels.entries);
-    println!(
-        "  {:<15} {}",
-        "Size:",
-        format!("{} bytes", metadata.labels.size).white()
-    );
-    if let Some(src) = &metadata.labels.source {
-        println!("  {:<15} {}", "Source:", src.to_string());
+    settings_outputter("Hash:", &l.sha256);
+    settings_outputter("Updated:", &l.timestamp.to_string());
+    settings_outputter("Entries:", &l.entries.to_string());
+    settings_outputter("Size:", &format!("{} bytes", l.size).white());
+    if let Some(src) = &l.source {
+        settings_outputter("Source:", &src.to_string());
     }
-    if let Some(freq) = metadata.labels.refresh_frequency {
-        println!("  {:<15} every {}s", "Refresh:", freq);
+    if let Some(freq) = l.refresh_frequency {
+        settings_outputter("Refresh:", &format!("every {}s", freq));
     }
 
     Ok(())
