@@ -1,41 +1,24 @@
 use anyhow::{Context as AnyContext, Result};
 use clap::{Parser, Subcommand};
 use colored::*;
-use reqwest::Client;
-use rustyline::completion::{Completer, Pair};
-use rustyline::config::Configurer;
-use rustyline::error::ReadlineError;
-use rustyline::highlight::Highlighter;
-use rustyline::hint::Hinter;
-use rustyline::validate::Validator;
-use rustyline::{Context, Editor, Helper};
-use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::fs;
-use std::net::IpAddr;
 use std::str::FromStr;
+use std::sync::Arc;
 use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
-use treetop_rest::models::{CheckResponse, CheckResponseBrief, DecisionBrief, PoliciesMetadata};
-use treetop_rest::state::{Metadata, OfPolicies};
-use treetop_rest::style::{error, status_flag, success, title, version, warning, yes_no};
+use treetop_rest::cli::style::{
+    error, help_line, settings_line, status_flag, title, version, warning, yes_no,
+};
+use treetop_rest::cli::{
+    ApiClient, CliDisplay, ErrorResponse, InputAttrValue, LastUsedValues, PoliciesDownload,
+    UserPolicies, repl::run_repl,
+};
+use treetop_rest::models::{CheckResponse, CheckResponseBrief, PoliciesMetadata};
 
-// Re-export the completion logic from the library
-use treetop_rest::cli::*;
-
-// Structure to hold last used values
-#[derive(Default, Clone)]
-struct LastUsedValues {
-    principal: Option<String>,
-    action: Option<String>,
-    resource_type: Option<String>,
-    resource_id: Option<String>,
-    attrs: Vec<(String, InputAttrValue)>,
-}
+// Completion is handled inside the REPL module now
 
 // Consolidated execution context for commands
 struct ExecContext {
-    base_url: String,
-    client: Client,
+    api: ApiClient,
     show_json: bool,
     show_debug: bool,
     show_timing: bool,
@@ -44,34 +27,7 @@ struct ExecContext {
     port: u16,
 }
 
-struct CLIHelper;
-impl Helper for CLIHelper {}
-impl Validator for CLIHelper {}
-impl Highlighter for CLIHelper {}
-impl Hinter for CLIHelper {
-    type Hint = String;
-}
-
-impl Completer for CLIHelper {
-    type Candidate = Pair;
-
-    fn complete(
-        &self,
-        line: &str,
-        pos: usize,
-        _ctx: &Context<'_>,
-    ) -> Result<(usize, Vec<Pair>), ReadlineError> {
-        let (start, matches) = complete_line(line, pos);
-        let pairs = matches
-            .into_iter()
-            .map(|s| Pair {
-                display: s.clone(),
-                replacement: s,
-            })
-            .collect();
-        Ok((start, pairs))
-    }
-}
+// REPL logic moved to treetop_rest::cli::repl
 
 #[derive(Parser, Debug)]
 #[clap(name = "treetop-cli", about = "CLI (and REPL) for the Treeptop API")]
@@ -91,58 +47,6 @@ struct Cli {
     timing: bool,
     #[clap(subcommand)]
     command: Commands,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum InputAttrValue {
-    Ip(IpAddr),
-    Long(i64),
-    Bool(bool),
-    String(String),
-}
-
-impl fmt::Display for InputAttrValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            InputAttrValue::Ip(ip) => write!(f, "{ip}"),
-            InputAttrValue::Long(i) => write!(f, "{i}"),
-            InputAttrValue::Bool(b) => write!(f, "{b}"),
-            InputAttrValue::String(s) => write!(f, "{s}"),
-        }
-    }
-}
-
-impl From<InputAttrValue> for AttrValue {
-    fn from(v: InputAttrValue) -> Self {
-        match v {
-            InputAttrValue::Ip(ip) => AttrValue::Ip(ip.to_string()),
-            InputAttrValue::Long(i) => AttrValue::Long(i),
-            InputAttrValue::Bool(b) => AttrValue::Bool(b),
-            InputAttrValue::String(s) => AttrValue::String(s),
-        }
-    }
-}
-
-impl FromStr for InputAttrValue {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.trim();
-        if let Ok(ip) = s.parse::<IpAddr>() {
-            return Ok(Self::Ip(ip));
-        }
-        if let Ok(i) = s.parse::<i64>() {
-            return Ok(Self::Long(i));
-        }
-        if let Ok(b) = s.parse::<bool>() {
-            return Ok(Self::Bool(b));
-        }
-        // allow wrapping quotes to keep commas/spaces intact
-        let unquoted = s
-            .strip_prefix('"')
-            .and_then(|t| t.strip_suffix('"'))
-            .unwrap_or(s);
-        Ok(Self::String(unquoted.to_string()))
-    }
 }
 
 fn parse_kv(s: &str) -> Result<(String, InputAttrValue), String> {
@@ -210,86 +114,12 @@ enum Commands {
     Version,
 }
 
-trait CliDisplay {
-    fn display(&self) -> String;
-}
-
-impl CliDisplay for PoliciesMetadata {
-    fn display(&self) -> String {
-        format!(
-            "Allow upload: {}
- Policies:
-{}
- Host labels:
-{}",
-            self.allow_upload, self.policies, self.labels,
-        )
-    }
-}
-
-impl CliDisplay for CheckResponseBrief {
-    fn display(&self) -> String {
-        match self.decision {
-            DecisionBrief::Allow => {
-                format!("{} ({})", success("Allow"), self.version.hash)
-            }
-            DecisionBrief::Deny => {
-                format!("{} ({})", error("Deny"), self.version.hash)
-            }
-        }
-    }
-}
-
-impl CliDisplay for CheckResponse {
-    fn display(&self) -> String {
-        match &self.policy {
-            Some(policy) => format!(
-                "{} ({})\n{}\n{}\n{}",
-                success("Allow"),
-                self.version.hash,
-                "--- Matching policy ---".cyan(),
-                policy.literal,
-                "---".cyan()
-            ),
-            None => format!("{} ({})", error("Deny"), self.version.hash),
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct PoliciesDownload {
-    policies: Metadata<OfPolicies>,
-}
-impl CliDisplay for PoliciesDownload {
-    fn display(&self) -> String {
-        format!(
-            "Metadata:\n{}\nContent:\n{}",
-            self.policies, self.policies.content
-        )
-    }
-}
-
-#[derive(Deserialize, Clone)]
-struct UserPolicies(serde_json::Value);
-impl CliDisplay for UserPolicies {
-    fn display(&self) -> String {
-        serde_json::to_string_pretty(&self.0).unwrap()
-    }
-}
-
-#[derive(Deserialize, Clone)]
-struct ErrorResponse {
-    error: String,
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let base_url = format!("http://{}:{}/api/v1", cli.host, cli.port);
-    let client = Client::new();
+    let api = ApiClient::from_host_port(&cli.host, cli.port);
     let mut ctx = ExecContext {
-        base_url,
-        client,
+        api,
         show_json: cli.json || cli.debug,
         show_debug: cli.debug,
         show_timing: cli.timing,
@@ -299,66 +129,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if let Commands::Repl = cli.command {
-        let mut rl = Editor::new()?;
-        rl.set_helper(Some(CLIHelper));
-
-        // Set up history file in data directory
-        let history_path = dirs::data_dir()
-            .map(|p| p.join("treetop-rest"))
-            .unwrap_or_else(|| "treetop-rest".into())
-            .join("cli_history");
-
-        // Ensure the data directory exists
-        if let Some(parent) = history_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // Load existing history (ignore errors if file doesn't exist)
-        let _ = rl.load_history(&history_path);
-
-        // Set maximum history size (1000 entries)
-        rl.set_max_history_size(1000)?;
-
-        println!("Treetop CLI REPL. Type 'help' for commands, 'exit/quit' to quit.");
-        loop {
-            match rl.readline(&format!("{}@{}> ", cli.host, cli.port)) {
-                Ok(input) => {
-                    rl.add_history_entry(input.as_str())?;
-                    let parts: Vec<&str> = input.split_whitespace().collect();
-                    match parts.first().copied() {
-                        Some("exit") | Some("quit") => break,
-                        Some("help") | None => print_help(),
-                        Some("history") => {
-                            for (idx, entry) in rl.history().iter().enumerate() {
-                                println!("{:4}: {}", idx + 1, entry);
+        let ctx_arc = Arc::new(tokio::sync::Mutex::new(ctx));
+        run_repl(
+            &cli.host,
+            cli.port,
+            {
+                let ctx_arc = ctx_arc.clone();
+                move |input: String| {
+                    let ctx_arc_inner = ctx_arc.clone();
+                    async move {
+                        let parts: Vec<&str> = input.split_whitespace().collect();
+                        let args = std::iter::once("policy-cli").chain(parts.into_iter());
+                        match Cli::try_parse_from(args) {
+                            Ok(parsed) => {
+                                let mut guard = ctx_arc_inner.lock().await;
+                                execute_command(parsed.command, &mut guard).await
                             }
-                        }
-                        Some(_) => {
-                            let args = std::iter::once("policy-cli").chain(parts.into_iter());
-                            match Cli::try_parse_from(args) {
-                                Ok(parsed) => {
-                                    match execute_command(parsed.command, &mut ctx).await {
-                                        Ok(_) => {}
-                                        Err(e) => eprintln!("{}: {}", error("Error"), e),
-                                    }
-                                }
-                                Err(e) => eprintln!("{}: {}", error("Error"), e),
+                            Err(e) => {
+                                eprintln!("{}: {}", error("Error"), e);
+                                Ok(())
                             }
                         }
                     }
                 }
-                Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
-                Err(err) => {
-                    eprintln!("Error: {err}");
-                    break;
-                }
-            }
-        }
-
-        // Save history before exiting
-        if let Err(e) = rl.save_history(&history_path) {
-            eprintln!("Warning: Failed to save command history: {}", e);
-        }
+            },
+            print_help,
+        )
+        .await?;
     } else {
         execute_command(cli.command, &mut ctx).await?;
     }
@@ -371,18 +168,14 @@ fn print_help() {
     cmd.print_long_help().ok();
     println!();
     println!("{}:", title("REPL-only commands"));
-    help_line_outputter("json", "Toggle JSON response output");
-    help_line_outputter("debug", "Toggle debug mode (requests + responses)");
-    help_line_outputter("timing", "Toggle command timing display");
-    help_line_outputter("history", "Show command history");
-    help_line_outputter("show", "Show current settings");
-    help_line_outputter("version", "Show version information");
-    help_line_outputter("exit, quit", "Exit the REPL");
-    help_line_outputter("help", "Show this help");
-}
-
-fn help_line_outputter(key: &str, desc: &str) -> () {
-    println!("  {:<10} {}", key.green(), desc)
+    help_line("json", "Toggle JSON response output");
+    help_line("debug", "Toggle debug mode (requests + responses)");
+    help_line("timing", "Toggle command timing display");
+    help_line("history", "Show command history");
+    help_line("show", "Show current settings");
+    help_line("version", "Show version information");
+    help_line("exit, quit", "Exit the REPL");
+    help_line("help", "Show this help");
 }
 
 async fn handle_check(
@@ -445,20 +238,10 @@ async fn handle_check(
     }
 
     if detailed {
-        let resp = ctx
-            .client
-            .post(format!("{}/check_detailed", ctx.base_url))
-            .json(&req)
-            .send()
-            .await?;
+        let resp = ctx.api.post_check(true, &req).await?;
         handle_response::<CheckResponse>(resp, ctx.show_json, ctx.show_debug).await?
     } else {
-        let resp = ctx
-            .client
-            .post(format!("{}/check", ctx.base_url))
-            .json(&req)
-            .send()
-            .await?;
+        let resp = ctx.api.post_check(false, &req).await?;
         handle_response::<CheckResponseBrief>(resp, ctx.show_json, ctx.show_debug).await?
     }
 
@@ -466,12 +249,7 @@ async fn handle_check(
 }
 
 async fn handle_get_policies(ctx: &ExecContext, raw: bool) -> Result<()> {
-    let url = if raw {
-        format!("{}/policies?format=raw", ctx.base_url)
-    } else {
-        format!("{}/policies", ctx.base_url)
-    };
-    let resp = ctx.client.get(&url).send().await?;
+    let resp = ctx.api.get_policies(raw).await?;
     if raw && resp.status().is_success() {
         println!("{}", resp.text().await?);
     } else {
@@ -488,34 +266,16 @@ async fn handle_upload(
 ) -> Result<()> {
     let content = fs::read_to_string(&file)?;
     let resp = if raw {
-        ctx.client
-            .post(format!("{}/policies", ctx.base_url))
-            .header("Content-Type", "text/plain")
-            .header("X-Upload-Token", token)
-            .body(content)
-            .send()
-            .await?
+        ctx.api.post_policies_raw(&token, content).await?
     } else {
-        #[derive(Serialize)]
-        struct Upload {
-            policies: String,
-        }
-        ctx.client
-            .post(format!("{}/policies", ctx.base_url))
-            .json(&Upload { policies: content })
-            .send()
-            .await?
+        ctx.api.post_policies_json(content).await?
     };
     handle_response::<PoliciesMetadata>(resp, ctx.show_json, ctx.show_debug).await?;
     Ok(())
 }
 
 async fn handle_list_policies(ctx: &ExecContext, user: &str) -> Result<()> {
-    let resp = ctx
-        .client
-        .get(format!("{}/policies/{user}", ctx.base_url))
-        .send()
-        .await?;
+    let resp = ctx.api.get_user_policies(user).await?;
     handle_response::<UserPolicies>(resp, ctx.show_json, ctx.show_debug).await?;
     Ok(())
 }
@@ -538,36 +298,32 @@ fn toggle_timing(ctx: &mut ExecContext) {
     println!("Timing display: {}", status_flag(ctx.show_timing));
 }
 
-fn settings_outputter(key: &str, value: &str) -> () {
-    println!("  {:<15} {}", key, value)
-}
-
 fn show_settings(ctx: &ExecContext) {
     println!("\n{}", title("Current Settings:"));
 
-    settings_outputter("Server:", &format!("{}:{}", ctx.host, ctx.port));
-    settings_outputter("JSON output:", status_flag(ctx.show_json));
-    settings_outputter("Debug mode:", status_flag(ctx.show_debug));
-    settings_outputter("Timing:", status_flag(ctx.show_timing));
+    settings_line("Server:", &format!("{}:{}", ctx.host, ctx.port));
+    settings_line("JSON output:", status_flag(ctx.show_json));
+    settings_line("Debug mode:", status_flag(ctx.show_debug));
+    settings_line("Timing:", status_flag(ctx.show_timing));
 
     if ctx.last_used.principal.is_some() || ctx.last_used.action.is_some() {
         println!("\n{}", title("Last Used Values:"));
         if let Some(p) = &ctx.last_used.principal {
-            settings_outputter("Principal:", p);
+            settings_line("Principal:", p);
         }
         if let Some(a) = &ctx.last_used.action {
-            settings_outputter("Action:", a);
+            settings_line("Action:", a);
         }
         if let Some(rt) = &ctx.last_used.resource_type {
-            settings_outputter("Resource Type:", rt);
+            settings_line("Resource Type:", rt);
         }
         if let Some(rid) = &ctx.last_used.resource_id {
-            settings_outputter("Resource ID:", rid);
+            settings_line("Resource ID:", rid);
         }
         if !ctx.last_used.attrs.is_empty() {
-            settings_outputter("Attributes:", "");
+            settings_line("Attributes:", "");
             for (k, v) in &ctx.last_used.attrs {
-                settings_outputter("", &format!("{k}={v}"));
+                settings_line("", &format!("{k}={v}"));
             }
         }
     }
@@ -575,14 +331,11 @@ fn show_settings(ctx: &ExecContext) {
     if let Some(data_dir) = dirs::data_dir() {
         let history_path = data_dir.join("treetop-rest").join("cli_history");
         println!("\n{}", title("Files:"));
-        settings_outputter("History:", &history_path.display().to_string());
+        settings_line("History:", &history_path.display().to_string());
     }
 }
 
-async fn execute_command(
-    command: Commands,
-    ctx: &mut ExecContext,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()> {
     let now = std::time::Instant::now();
     match command {
         Commands::Repl => {
@@ -638,14 +391,13 @@ async fn execute_command(
     }
 
     if ctx.show_timing {
-        println!("{} {:?} microseconds", "Time:", now.elapsed().as_micros());
+        println!("Time: {:?} microseconds", now.elapsed().as_micros());
     }
     Ok(())
 }
 
 async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
-    let status_url = format!("{}/status", ctx.base_url);
-    let status_resp = ctx.client.get(&status_url).send().await?;
+    let status_resp = ctx.api.get_status().await?;
     let status_code = status_resp.status();
     let status_body = status_resp.text().await?;
 
@@ -672,8 +424,7 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
     let metadata: PoliciesMetadata =
         serde_json::from_str(&status_body).with_context(|| "failed to parse /status response")?;
 
-    let version_url = format!("{}/version", ctx.base_url);
-    let version_info = match ctx.client.get(&version_url).send().await {
+    let version_info = match ctx.api.get_version().await {
         Ok(resp) if resp.status().is_success() => resp
             .json::<treetop_rest::handlers::VersionInfo>()
             .await
@@ -682,46 +433,46 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
     };
 
     println!("\n{}", title("treetop-cli"));
-    settings_outputter("Version", &version(env!("CARGO_PKG_VERSION")));
-    settings_outputter("Built:", env!("VERGEN_BUILD_TIMESTAMP"));
-    settings_outputter("Git:", env!("VERGEN_GIT_DESCRIBE"));
+    settings_line("Version", &version(env!("CARGO_PKG_VERSION")));
+    settings_line("Built:", env!("VERGEN_BUILD_TIMESTAMP"));
+    settings_line("Git:", env!("VERGEN_GIT_DESCRIBE"));
 
     println!("\n{}", title("Server"));
     if let Some(info) = version_info {
-        settings_outputter("Version:", &version(&info.version));
-        settings_outputter("Core:", &info.core.version);
-        settings_outputter("Cedar:", &info.core.cedar);
+        settings_line("Version:", &version(&info.version));
+        settings_line("Core:", &info.core.version);
+        settings_line("Cedar:", &info.core.cedar);
     } else {
-        settings_outputter("Version:", &warning("unavailable"));
+        settings_line("Version:", &warning("unavailable"));
     }
 
     let p = &metadata.policies;
     println!("\n{}", title("Policies"));
-    settings_outputter("Hash:", &p.sha256);
-    settings_outputter("Updated:", &p.timestamp.to_string());
-    settings_outputter("Entries:", &p.entries.to_string());
-    settings_outputter("Size:", &format!("{} bytes", p.size).white());
+    settings_line("Hash:", &p.sha256);
+    settings_line("Updated:", &p.timestamp.to_string());
+    settings_line("Entries:", &p.entries.to_string());
+    settings_line("Size:", &format!("{} bytes", p.size).white());
 
     if let Some(src) = &p.source {
-        settings_outputter("Source:", &src.to_string());
+        settings_line("Source:", &src.to_string());
     }
     if let Some(freq) = p.refresh_frequency {
-        settings_outputter("Refresh:", &format!("every {}s", freq));
+        settings_line("Refresh:", &format!("every {}s", freq));
     }
 
-    settings_outputter("Allow upload:", &yes_no(metadata.allow_upload));
+    settings_line("Allow upload:", yes_no(metadata.allow_upload));
 
     let l = &metadata.labels;
     println!("\n{}", title("Labels"));
-    settings_outputter("Hash:", &l.sha256);
-    settings_outputter("Updated:", &l.timestamp.to_string());
-    settings_outputter("Entries:", &l.entries.to_string());
-    settings_outputter("Size:", &format!("{} bytes", l.size).white());
+    settings_line("Hash:", &l.sha256);
+    settings_line("Updated:", &l.timestamp.to_string());
+    settings_line("Entries:", &l.entries.to_string());
+    settings_line("Size:", &format!("{} bytes", l.size).white());
     if let Some(src) = &l.source {
-        settings_outputter("Source:", &src.to_string());
+        settings_line("Source:", &src.to_string());
     }
     if let Some(freq) = l.refresh_frequency {
-        settings_outputter("Refresh:", &format!("every {}s", freq));
+        settings_line("Refresh:", &format!("every {}s", freq));
     }
 
     Ok(())

@@ -45,11 +45,7 @@ pub fn complete_line(line: &str, pos: usize) -> (usize, Vec<String>) {
     let word = &line[start..pos];
     // Split the input into tokens before the current word
     let prefix = &line[..start].trim();
-    let tokens: Vec<&str> = if prefix.is_empty() {
-        vec![]
-    } else {
-        prefix.split_whitespace().collect()
-    };
+    let tokens: Vec<&str> = if prefix.is_empty() { vec![] } else { prefix.split_whitespace().collect() };
 
     // Decide suggestions based on first token
     let base = if tokens.is_empty() {
@@ -110,9 +106,7 @@ mod tests {
     fn test_repeatable_flag_remains() {
         let (start, completions) = complete_line("check --resource-attribute key=val --", 37);
         assert_eq!(start, 35);
-        // --resource-attribute should still be in the list because it's repeatable
         assert!(completions.contains(&"--resource-attribute".to_string()));
-        // But it hasn't filtered other unused flags yet - they're all available
         assert!(completions.contains(&"--detailed".to_string()));
     }
 }

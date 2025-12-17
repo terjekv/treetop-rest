@@ -7,4 +7,3 @@ pub mod handlers;
 pub mod middeware;
 pub mod models;
 pub mod state;
-pub mod style;
