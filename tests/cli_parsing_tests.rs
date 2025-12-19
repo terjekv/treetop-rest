@@ -19,8 +19,8 @@ fn get_completions(line: &str, pos: usize) -> Vec<String> {
 }
 
 #[rstest]
-#[case("", 0, vec!["status", "version", "check", "get-policies", "upload", "list-policies", "help", "exit"])]
-#[case("s", 1, vec!["status"])]
+#[case("", 0, vec!["status", "check", "get-policies", "upload", "list-policies", "json", "debug", "timing", "show", "version", "history", "help", "exit"])]
+#[case("s", 1, vec!["status", "show"])]
 #[case("st", 2, vec!["status"])]
 #[case("sta", 3, vec!["status"])]
 #[case("c", 1, vec!["check"])]
@@ -141,7 +141,7 @@ fn test_multiple_commands_starting_with_same_letter() {
     // Should include both 'status' and others
     assert!(completions.contains(&"status".to_string()));
     assert!(completions.contains(&"check".to_string()));
-    assert!(completions.len() == 8); // All main commands
+    assert!(completions.len() == treetop_rest::cli::completion::COMMANDS_MAIN.len()); // All main commands
 }
 
 // Test command parsing by checking clap would accept these

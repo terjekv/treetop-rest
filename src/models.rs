@@ -49,6 +49,7 @@ impl std::str::FromStr for Endpoint {
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct CheckResponse {
     pub policy: Option<PermitPolicy>,
+    pub desicion: DecisionBrief,
     pub version: PolicyVersion,
 }
 
@@ -57,10 +58,12 @@ impl From<Decision> for CheckResponse {
         match decision {
             Decision::Allow { policy, version } => CheckResponse {
                 policy: Some(policy),
+                desicion: DecisionBrief::Allow,
                 version,
             },
             Decision::Deny { version } => CheckResponse {
                 policy: None,
+                desicion: DecisionBrief::Deny,
                 version,
             },
         }
