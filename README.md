@@ -3,6 +3,8 @@
 This is a REST server providing a REST API for [Treetop](https://github.com/terjekv/treetop-core),
 a policy management framework. A CLI interface to the REST API is also provided.
 
+See [docs/api.md](docs/api.md) for the full HTTP API reference.
+
 ## Endpoints
 
 Note, these endpoints are currently in development and may change in the future. This API is not yet
