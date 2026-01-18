@@ -438,10 +438,10 @@ fn extract_metric_value(metrics: &str, metric_name: &str) -> f64 {
         // Look for lines starting with the metric name
         if line.starts_with(metric_name) {
             // Split by whitespace and get the last part (the value)
-            if let Some(value_str) = line.split_whitespace().last() {
-                if let Ok(value) = value_str.parse::<f64>() {
-                    return value;
-                }
+            if let Some(value_str) = line.split_whitespace().last()
+                && let Ok(value) = value_str.parse::<f64>()
+            {
+                return value;
             }
         }
     }

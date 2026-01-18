@@ -19,7 +19,7 @@ fn get_completions(line: &str, pos: usize) -> Vec<String> {
 }
 
 #[rstest]
-#[case("", 0, vec!["status", "check", "get-policies", "upload", "list-policies", "json", "debug", "timing", "show", "version", "history", "help", "exit"])]
+#[case("", 0, vec!["status", "check", "get-policies", "upload", "list-policies", "json", "debug", "timing", "show", "version", "history", "metrics", "help", "exit"])]
 #[case("s", 1, vec!["status", "show"])]
 #[case("st", 2, vec!["status"])]
 #[case("sta", 3, vec!["status"])]

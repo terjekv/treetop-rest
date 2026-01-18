@@ -241,7 +241,7 @@ fn test_batch_evaluation() {
     let guard = store.lock().unwrap();
 
     // Create a batch of requests
-    let requests = vec![
+    let requests = [
         Request {
             principal: Principal::User(User::from_str("alice").unwrap()),
             action: Action::from_str("view").unwrap(),
@@ -277,7 +277,7 @@ fn test_batch_with_mixed_results() {
     let guard = store.lock().unwrap();
 
     // Create a batch with some valid and some potentially invalid requests
-    let requests = vec![
+    let requests = [
         Request {
             principal: Principal::User(User::from_str("alice").unwrap()),
             action: Action::from_str("only_here").unwrap(),
