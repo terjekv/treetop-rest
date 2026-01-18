@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use treetop_core::{Decision, PermitPolicy, PolicyVersion};
+use treetop_core::{Decision, PermitPolicy, PolicyVersion, Request};
 use url::Url;
 
 use utoipa::ToSchema;
@@ -140,6 +140,58 @@ impl From<treetop_core::UserPolicies> for UserPolicies {
                 .collect(),
         }
     }
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct BatchCheckRequest {
+    /// List of authorization requests to evaluate
+    pub requests: Vec<Request>,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum BatchResult<T> {
+    Success { 
+        #[serde(rename = "result")]
+        data: T 
+    },
+    Error { 
+        #[serde(rename = "error")]
+        message: String 
+    },
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct IndexedResult<T> {
+    /// Index of the request in the original batch
+    pub index: usize,
+    /// Result of the evaluation (success or error)
+    #[serde(flatten)]
+    pub result: BatchResult<T>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct BatchCheckResponse {
+    /// Results for each request in the same order as input
+    pub results: Vec<IndexedResult<CheckResponseBrief>>,
+    /// Policy version used for all evaluations
+    pub version: PolicyVersion,
+    /// Number of successful evaluations
+    pub successful: usize,
+    /// Number of failed evaluations
+    pub failed: usize,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct BatchCheckDetailedResponse {
+    /// Detailed results for each request in the same order as input
+    pub results: Vec<IndexedResult<CheckResponse>>,
+    /// Policy version used for all evaluations
+    pub version: PolicyVersion,
+    /// Number of successful evaluations
+    pub successful: usize,
+    /// Number of failed evaluations
+    pub failed: usize,
 }
 
 #[cfg(test)]

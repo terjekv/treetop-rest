@@ -240,3 +240,276 @@ Example response:
   }
 }
 ```
+
+## Batch API
+
+The batch API allows you to evaluate multiple authorization requests in a single HTTP call with parallel processing
+on the server side.
+
+### Features
+
+- **Parallel Processing**: All requests are evaluated in parallel using Rayon for maximum throughput
+- **Consistent Snapshot**: All requests in a batch are evaluated against the same policy version
+- **Individual Results**: Each request's result is tracked separately with success/failure status
+- **Index Tracking**: Results maintain the same order as the input requests with explicit index values
+
+### POST /api/v1/batch_check - Brief Results
+
+Process multiple authorization requests and return brief results (decision + version only).
+
+**Request:**
+
+```json
+{
+  "requests": [
+    {
+      "principal": "User::\"alice\"",
+      "action": "view",
+      "resource": {
+        "type": "Photo",
+        "id": "photo1.jpg"
+      }
+    },
+    {
+      "principal": "User::\"bob\"",
+      "action": "edit",
+      "resource": {
+        "type": "Photo",
+        "id": "photo2.jpg"
+      }
+    }
+  ]
+}
+```
+
+**Response:**
+
+```json
+{
+  "results": [
+    {
+      "index": 0,
+      "status": "success",
+      "result": {
+        "decision": "Allow",
+        "version": {
+          "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
+          "loaded_at": "2025-12-19T00:14:38.577289000Z"
+        }
+      }
+    },
+    {
+      "index": 1,
+      "status": "error",
+      "error": "Evaluation failed: invalid resource"
+    }
+  ],
+  "version": {
+    "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
+    "loaded_at": "2025-12-19T00:14:38.577289000Z"
+  },
+  "successful": 1,
+  "failed": 1
+}
+```
+
+### POST /api/v1/batch_check_detailed - Detailed Results
+
+Process multiple authorization requests and return detailed results (includes policy information).
+
+**Request:**
+Same as `/batch_check`
+
+**Response:**
+
+```json
+{
+  "results": [
+    {
+      "index": 0,
+      "status": "success",
+      "result": {
+        "policy": {
+          "literal": "permit (...)",
+          "json": {...}
+        },
+        "desicion": "Allow",
+        "version": {
+          "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
+          "loaded_at": "2025-12-19T00:14:38.577289000Z"
+        }
+      }
+    },
+    {
+      "index": 1,
+      "status": "error",
+      "error": "Evaluation failed: invalid resource"
+    }
+  ],
+  "version": {
+    "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
+    "loaded_at": "2025-12-19T00:14:38.577289000Z"
+  },
+  "successful": 1,
+  "failed": 1
+}
+```
+
+### Result Structure
+
+#### Success Result
+
+```json
+{
+  "index": 0,
+  "status": "success",
+  "result": { /* CheckResponse data */ }
+}
+```
+
+#### Error Result
+
+```json
+{
+  "index": 1,
+  "status": "error",
+  "error": "Error message string"
+}
+```
+
+### Usage Examples
+
+#### curl Example
+
+```bash
+curl -X POST http://localhost:9999/api/v1/batch_check \
+  -H "Content-Type: application/json" \
+  -d '{
+    "requests": [
+      {
+        "principal": "User::\"alice\"",
+        "action": "view",
+        "resource": {
+          "type": "Photo",
+          "id": "vacation.jpg"
+        }
+      },
+      {
+        "principal": "User::\"alice\"",
+        "action": "delete",
+        "resource": {
+          "type": "Photo",
+          "id": "vacation.jpg"
+        }
+      }
+    ]
+  }'
+```
+
+#### Python Example
+
+```python
+import requests
+
+response = requests.post(
+    "http://localhost:9999/api/v1/batch_check",
+    json={
+        "requests": [
+            {
+                "principal": 'User::"alice"',
+                "action": "view",
+                "resource": {
+                    "type": "Photo",
+                    "id": "vacation.jpg"
+                }
+            },
+            {
+                "principal": 'User::"bob"',
+                "action": "edit",
+                "resource": {
+                    "type": "Photo",
+                    "id": "vacation.jpg"
+                }
+            }
+        ]
+    }
+)
+
+data = response.json()
+print(f"Successful: {data['successful']}, Failed: {data['failed']}")
+
+for result in data['results']:
+    index = result['index']
+    if result['status'] == 'success':
+        decision = result['result']['decision']
+        print(f"Request {index}: {decision}")
+    else:
+        error = result['error']
+        print(f"Request {index}: Error - {error}")
+```
+
+#### JavaScript/TypeScript Example
+
+```typescript
+const response = await fetch('http://localhost:9999/api/v1/batch_check', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    requests: [
+      {
+        principal: 'User::"alice"',
+        action: 'view',
+        resource: {
+          type: 'Photo',
+          id: 'vacation.jpg'
+        }
+      },
+      {
+        principal: 'User::"bob"',
+        action: 'edit',
+        resource: {
+          type: 'Photo',
+          id: 'vacation.jpg'
+        }
+      }
+    ]
+  })
+});
+
+const data = await response.json();
+console.log(`Successful: ${data.successful}, Failed: ${data.failed}`);
+
+data.results.forEach(result => {
+  if (result.status === 'success') {
+    console.log(`Request ${result.index}: ${result.result.decision}`);
+  } else {
+    console.log(`Request ${result.index}: Error - ${result.error}`);
+  }
+});
+```
+
+### Performance Considerations
+
+1. **Parallel Execution**: Requests are processed in parallel across available CPU cores using Rayon
+2. **Lock Management**: The policy store lock is acquired once and released before parallel processing begins
+3. **Engine Snapshot**: A snapshot of the PolicyEngine is cloned for consistent evaluation
+
+### Best Practices
+
+1. **Batch Size**: For optimal performance, batch request counts per call depending on your use case and server capacity
+2. **Error Handling**: Check both the HTTP status code and individual result statuses
+3. **Consistency**: All requests in a batch are guaranteed to be evaluated against the same policy version
+4. **Indexing**: Use the `index` field in results to correlate responses with requests
+
+### Comparison with Single Request API
+
+| Feature | Single Request | Batch Request |
+| ------- | ------------- | ------------- |
+| Requests per call | 1 | Multiple |
+| HTTP overhead | Per request | Once per batch |
+| Lock acquisition | Per request | Once per batch |
+| Policy version | Per request | Consistent across batch |
+| Parallel processing | No | Yes (Rayon) |
+| Result tracking | Single result | Indexed results with success/error |

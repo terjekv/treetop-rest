@@ -234,3 +234,110 @@ fn test_store_content_size() {
     assert_eq!(guard.policies.size, TEST_POLICIES.len());
     assert_eq!(guard.labels.size, TEST_LABELS.len());
 }
+
+#[test]
+fn test_batch_evaluation() {
+    let store = create_store_with_test_data();
+    let guard = store.lock().unwrap();
+
+    // Create a batch of requests
+    let requests = vec![
+        Request {
+            principal: Principal::User(User::from_str("alice").unwrap()),
+            action: Action::from_str("view").unwrap(),
+            resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+        },
+        Request {
+            principal: Principal::User(User::from_str("alice").unwrap()),
+            action: Action::from_str("edit").unwrap(),
+            resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+        },
+        Request {
+            principal: Principal::User(User::from_str("alice").unwrap()),
+            action: Action::from_str("delete").unwrap(),
+            resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+        },
+    ];
+
+    // Evaluate all requests
+    let results: Vec<_> = requests
+        .iter()
+        .map(|req| guard.engine.evaluate(req))
+        .collect();
+
+    // First should be Allow, others should be Deny
+    assert!(matches!(results[0], Ok(Decision::Allow { .. })));
+    assert!(matches!(results[1], Ok(Decision::Deny { .. })));
+    assert!(matches!(results[2], Ok(Decision::Deny { .. })));
+}
+
+#[test]
+fn test_batch_with_mixed_results() {
+    let store = create_store_with_test_data();
+    let guard = store.lock().unwrap();
+
+    // Create a batch with some valid and some potentially invalid requests
+    let requests = vec![
+        Request {
+            principal: Principal::User(User::from_str("alice").unwrap()),
+            action: Action::from_str("only_here").unwrap(),
+            resource: Resource::new("AnyType", "anyid"),
+        },
+        Request {
+            principal: Principal::User(User::from_str("bob").unwrap()),
+            action: Action::from_str("only_here").unwrap(),
+            resource: Resource::new("AnyType", "anyid"),
+        },
+        Request {
+            principal: Principal::User(User::from_str("bob").unwrap()),
+            action: Action::from_str("create_host").unwrap(),
+            resource: Resource::new("Host", "myhost.example.com")
+                .with_attr("ip", AttrValue::Ip("10.0.0.5".to_string())),
+        },
+    ];
+
+    let results: Vec<_> = requests
+        .iter()
+        .map(|req| guard.engine.evaluate(req))
+        .collect();
+
+    // Verify all evaluations completed successfully
+    assert_eq!(results.len(), 3);
+    assert!(results.iter().all(|r| r.is_ok()));
+
+    // Check expected outcomes
+    assert!(matches!(results[0], Ok(Decision::Allow { .. }))); // alice only_here
+    assert!(matches!(results[1], Ok(Decision::Deny { .. }))); // bob only_here
+    assert!(matches!(results[2], Ok(Decision::Allow { .. }))); // bob create_host with valid IP
+}
+
+#[test]
+fn test_batch_consistency() {
+    let store = create_store_with_test_data();
+    let guard = store.lock().unwrap();
+
+    // Capture the policy version
+    let version = guard.engine.current_version();
+
+    // Create multiple identical requests
+    let request = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    // Evaluate the same request multiple times
+    let results: Vec<_> = (0..5).map(|_| guard.engine.evaluate(&request)).collect();
+
+    // All results should be identical and match the same version
+    for result in &results {
+        assert!(result.is_ok());
+        if let Ok(Decision::Allow {
+            version: result_version,
+            ..
+        }) = result
+        {
+            assert_eq!(*result_version, version);
+        }
+    }
+}

@@ -1,11 +1,13 @@
 use crate::build_info::build_info;
 use crate::errors::ServiceError;
 use crate::models::{
-    CheckResponse, CheckResponseBrief, PoliciesDownload, PoliciesMetadata, UserPolicies,
+    BatchCheckDetailedResponse, BatchCheckRequest, BatchCheckResponse, BatchResult, CheckResponse,
+    CheckResponseBrief, IndexedResult, PoliciesDownload, PoliciesMetadata, UserPolicies,
 };
 use crate::state::SharedPolicyStore;
 
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use treetop_core::{PolicyVersion, Request};
@@ -23,6 +25,11 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         .route("/api/v1/version", web::get().to(version))
         .route("/api/v1/check", web::post().to(check))
         .route("/api/v1/check_detailed", web::post().to(check_detailed))
+        .route("/api/v1/batch_check", web::post().to(batch_check))
+        .route(
+            "/api/v1/batch_check_detailed",
+            web::post().to(batch_check_detailed),
+        )
         .route("/api/v1/policies", web::get().to(get_policies))
         .route("/api/v1/policies", web::post().to(upload_policies))
         .route("/api/v1/policies/{user}", web::get().to(list_policies));
@@ -36,6 +43,8 @@ pub fn init(cfg: &mut web::ServiceConfig) {
     paths(
         check,
         check_detailed,
+        batch_check,
+        batch_check_detailed,
         get_policies,
         upload_policies,
         list_policies,
@@ -132,6 +141,112 @@ pub async fn check_detailed(
         Ok(decision) => Ok(web::Json(CheckResponse::from(decision))),
         Err(e) => Err(ServiceError::EvaluationError(e.to_string())),
     }
+}
+
+#[utoipa::path(
+        post,
+        path = "/api/v1/batch_check",
+        request_body = BatchCheckRequest,
+        responses(
+            (status = 200, description = "Batch check performed successfully", body = BatchCheckResponse),
+            (status = 400, description = "Bad request", body = ServiceError),
+            (status = 500, description = "Internal server error", body = ServiceError)
+        ),
+    )]
+pub async fn batch_check(
+    store: web::Data<SharedPolicyStore>,
+    req: web::Json<BatchCheckRequest>,
+) -> Result<web::Json<BatchCheckResponse>, ServiceError> {
+    let store = store.lock()?;
+    let engine_snapshot = store.engine.clone();
+    let version = engine_snapshot.current_version();
+
+    // Release the lock before parallel processing
+    drop(store);
+
+    // Process in parallel using rayon
+    let results: Vec<IndexedResult<CheckResponseBrief>> = req
+        .requests
+        .par_iter()
+        .enumerate()
+        .map(|(index, request)| {
+            let result = match engine_snapshot.evaluate(request) {
+                Ok(decision) => BatchResult::Success {
+                    data: CheckResponseBrief::from(decision),
+                },
+                Err(e) => BatchResult::Error {
+                    message: e.to_string(),
+                },
+            };
+            IndexedResult { index, result }
+        })
+        .collect();
+
+    let successful = results
+        .iter()
+        .filter(|r| matches!(r.result, BatchResult::Success { .. }))
+        .count();
+    let failed = results.len() - successful;
+
+    Ok(web::Json(BatchCheckResponse {
+        results,
+        version,
+        successful,
+        failed,
+    }))
+}
+
+#[utoipa::path(
+        post,
+        path = "/api/v1/batch_check_detailed",
+        request_body = BatchCheckRequest,
+        responses(
+            (status = 200, description = "Batch check performed successfully", body = BatchCheckDetailedResponse),
+            (status = 400, description = "Bad request", body = ServiceError),
+            (status = 500, description = "Internal server error", body = ServiceError)
+        ),
+    )]
+pub async fn batch_check_detailed(
+    store: web::Data<SharedPolicyStore>,
+    req: web::Json<BatchCheckRequest>,
+) -> Result<web::Json<BatchCheckDetailedResponse>, ServiceError> {
+    let store = store.lock()?;
+    let engine_snapshot = store.engine.clone();
+    let version = engine_snapshot.current_version();
+
+    // Release the lock before parallel processing
+    drop(store);
+
+    // Process in parallel using rayon
+    let results: Vec<IndexedResult<CheckResponse>> = req
+        .requests
+        .par_iter()
+        .enumerate()
+        .map(|(index, request)| {
+            let result = match engine_snapshot.evaluate(request) {
+                Ok(decision) => BatchResult::Success {
+                    data: CheckResponse::from(decision),
+                },
+                Err(e) => BatchResult::Error {
+                    message: e.to_string(),
+                },
+            };
+            IndexedResult { index, result }
+        })
+        .collect();
+
+    let successful = results
+        .iter()
+        .filter(|r| matches!(r.result, BatchResult::Success { .. }))
+        .count();
+    let failed = results.len() - successful;
+
+    Ok(web::Json(BatchCheckDetailedResponse {
+        results,
+        version,
+        successful,
+        failed,
+    }))
 }
 
 #[utoipa::path(
