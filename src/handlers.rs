@@ -7,9 +7,11 @@ use crate::models::{
 use crate::state::SharedPolicyStore;
 
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
+use prometheus::Registry;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use treetop_core::{PolicyVersion, Request};
 use utoipa::{OpenApi, ToSchema};
 
@@ -32,7 +34,8 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         )
         .route("/api/v1/policies", web::get().to(get_policies))
         .route("/api/v1/policies", web::post().to(upload_policies))
-        .route("/api/v1/policies/{user}", web::get().to(list_policies));
+        .route("/api/v1/policies/{user}", web::get().to(list_policies))
+        .route("/metrics", web::get().to(metrics));
 }
 
 #[derive(OpenApi)]
@@ -51,6 +54,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         get_status,
         health,
         version,
+        metrics,
     ),
 )]
 pub struct ApiDoc;
@@ -358,4 +362,20 @@ pub async fn get_status(
     store: web::Data<SharedPolicyStore>,
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
     Ok(web::Json(store.lock()?.into()))
+}
+
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    responses(
+        (status = 200, description = "Prometheus metrics"),
+    ),
+)]
+pub async fn metrics(registry: web::Data<Arc<Registry>>) -> Result<HttpResponse, ServiceError> {
+    match crate::metrics::encode_registry(&registry) {
+        Ok(buf) => Ok(HttpResponse::Ok()
+            .content_type("text/plain; version=0.0.4")
+            .body(buf)),
+        Err(e) => Err(ServiceError::EvaluationError(e.to_string())),
+    }
 }

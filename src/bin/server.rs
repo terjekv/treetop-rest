@@ -32,6 +32,9 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
+    // Initialize Prometheus metrics and set treetop-core sink
+    let metrics_registry = treetop_rest::metrics::init_prometheus().expect("Failed to init metrics");
+
     let store = Arc::new(Mutex::new(PolicyStore::new().unwrap()));
 
     info!(
@@ -79,6 +82,7 @@ async fn main() -> std::io::Result<()> {
                 treetop_rest::handlers::ApiDoc::openapi(),
             ))
             .app_data(actix_web::web::Data::new(store.clone()))
+            .app_data(actix_web::web::Data::new(metrics_registry.clone()))
             .configure(treetop_rest::handlers::init)
     })
     .bind((config.host.as_str(), config.port))?

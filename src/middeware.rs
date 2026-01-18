@@ -10,6 +10,7 @@ use std::task::{Context, Poll};
 use std::time::Instant;
 use tracing::{Instrument, Level, info, span};
 use uuid::Uuid;
+use crate::metrics;
 
 const CORRELATION_ID: HeaderName = HeaderName::from_static("x-correlation-id");
 const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
@@ -68,6 +69,10 @@ where
 
         let method = req.method().to_string();
         let path = req.path().to_string();
+        let client_ip = req
+            .connection_info()
+            .realip_remote_addr()
+            .map(|s| s.split(':').next().unwrap_or(s).to_string());
 
         let start_time = Instant::now();
         info!(request_id = %request_id, correlation_id = ?correlation_id, message = "Request start", method = &method, path = &path);
@@ -80,6 +85,16 @@ where
                 
                 let elapsed_time = start_time.elapsed();
                 info!(message = "Request end", request_id = %request_id, correlation_id = ?correlation_id, method = &method, path = &path, run_time = ?elapsed_time, status_code = ?res.status());
+
+                // Record HTTP metrics
+                let status_code = res.status().as_u16();
+                metrics::http_metrics().observe(
+                    &method,
+                    &path,
+                    status_code,
+                    client_ip.as_deref(),
+                    elapsed_time.as_secs_f64(),
+                );
 
                 res.headers_mut().insert(
                     REQUEST_ID,

@@ -112,6 +112,8 @@ enum Commands {
     Show,
     /// Show version information
     Version,
+    /// Fetch Prometheus metrics from the server
+    Metrics,
 }
 
 #[tokio::main]
@@ -174,6 +176,7 @@ fn print_help() {
     help_line("history", "Show command history");
     help_line("show", "Show current settings");
     help_line("version", "Show version information");
+    help_line("metrics", "Fetch Prometheus metrics");
     help_line("exit, quit", "Exit the REPL");
     help_line("help", "Show this help");
 }
@@ -298,6 +301,25 @@ fn toggle_timing(ctx: &mut ExecContext) {
     println!("Timing display: {}", status_flag(ctx.show_timing));
 }
 
+async fn handle_metrics(ctx: &ExecContext) -> Result<()> {
+    let resp = ctx.api.get_metrics().await?;
+    let status = resp.status();
+    let body = resp.text().await?;
+
+    if ctx.show_debug {
+        eprintln!("{} {}", warning("DEBUG response status:"), status);
+        eprintln!("{}\n{}", warning("DEBUG response body:"), body);
+    }
+
+    if !status.is_success() {
+        anyhow::bail!("metrics request failed with status {}", status);
+    }
+
+    // Just print the raw Prometheus metrics
+    println!("{}", body);
+    Ok(())
+}
+
 fn show_settings(ctx: &ExecContext) {
     println!("\n{}", title("Current Settings:"));
 
@@ -387,6 +409,9 @@ async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()>
         }
         Commands::Version => {
             show_status_and_version(ctx).await?;
+        }
+        Commands::Metrics => {
+            handle_metrics(ctx).await?;
         }
     }
 

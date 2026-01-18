@@ -16,6 +16,7 @@ pub const COMMANDS_MAIN: &[&str] = &[
     "show",
     "version",
     "history",
+    "metrics",
     "help",
     "exit",
 ];
@@ -45,7 +46,11 @@ pub fn complete_line(line: &str, pos: usize) -> (usize, Vec<String>) {
     let word = &line[start..pos];
     // Split the input into tokens before the current word
     let prefix = &line[..start].trim();
-    let tokens: Vec<&str> = if prefix.is_empty() { vec![] } else { prefix.split_whitespace().collect() };
+    let tokens: Vec<&str> = if prefix.is_empty() {
+        vec![]
+    } else {
+        prefix.split_whitespace().collect()
+    };
 
     // Decide suggestions based on first token
     let base = if tokens.is_empty() {

@@ -89,4 +89,10 @@ impl ApiClient {
             .send()
             .await
     }
+
+    pub async fn get_metrics(&self) -> reqwest::Result<Response> {
+        // Metrics endpoint is at root level, not under /api/v1
+        let metrics_url = self.base_url.replace("/api/v1", "/metrics");
+        self.client.get(metrics_url).send().await
+    }
 }
