@@ -31,7 +31,7 @@ tracing-subscriber = { version = "0.3", features = [
     "serde",
     "serde_json",
 ] }
-treetop-core = "0.0.12"
+treetop-core = "0.0.13"
 url = { version = "2.5", features = ["serde"] }
 utoipa = { version = "5.4", features = ["actix_extras", "chrono", "yaml"] }
 utoipa-swagger-ui = { version = "9.0", features = ["actix-web"] }
@@ -51,7 +51,7 @@ vergen = { version = "9", features = [
     "rustc",
     "si",
 ] }
-vergen-gitcl = { version = "1", features = [
+vergen-gitcl = { version = "9", features = [
     "emit_and_set",
     "build",
     "cargo",

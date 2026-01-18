@@ -6,7 +6,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, trace};
-use treetop_core::{LABEL_REGISTRY, Labeler, PolicyEngine, RegexLabeler};
+use treetop_core::{LabelRegistryBuilder, Labeler, PolicyEngine, RegexLabeler};
 use utoipa::ToSchema;
 
 use crate::{errors::ServiceError, models::Endpoint};
@@ -145,6 +145,67 @@ struct RawPattern {
     regex: String,
 }
 
+/// Parse labels from JSON and return them as a vector of labelers.
+///
+/// The format of the JSON is expected to be an array of objects, each with a "kind", "field", "output" and "patterns" field.
+pub fn parse_labels(content: &str) -> Result<Vec<Arc<dyn Labeler>>, ServiceError> {
+    let labels: Vec<Label> = serde_json::from_str(content)?;
+
+    let mut labels_for_registry: Vec<Arc<dyn Labeler>> = Vec::new();
+
+    for label in labels {
+        let mut patterns: Vec<(String, Regex)> = Vec::new();
+
+        for r in &label.patterns {
+            if r.name.is_empty() || r.regex.is_empty() {
+                tracing::error!(
+                    message = "Invalid pattern: name or regex is empty",
+                    name = &r.name,
+                    regex = &r.regex
+                );
+                return Err(ServiceError::InvalidJsonPayload(
+                    "Invalid pattern: name or regex is empty".to_string(),
+                ));
+            }
+
+            let regex = match Regex::new(&r.regex) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!(
+                        message = "Invalid regex in pattern",
+                        name = &r.name,
+                        regex = &r.regex,
+                        error = %e
+                    );
+                    return Err(ServiceError::InvalidJsonPayload(format!(
+                        "Invalid regex in pattern: {e}"
+                    )));
+                }
+            };
+
+            patterns.push((r.name.clone(), regex));
+        }
+
+        debug!(
+            update = "Updating pattern",
+            kind = label.kind,
+            field = label.field,
+            output = label.output,
+            count = patterns.len()
+        );
+        trace!(patterns = ?patterns);
+
+        labels_for_registry.push(Arc::new(RegexLabeler::new(
+            label.kind,
+            label.field,
+            label.output,
+            patterns,
+        )));
+    }
+
+    Ok(labels_for_registry)
+}
+
 /// Count the number of policy entries in the content.
 ///
 /// The content is expected to be in the policy DSL format.
@@ -174,62 +235,8 @@ impl MetadataParser for OfLabels {
     }
 
     fn process_content(content: &str) -> Result<(), ServiceError> {
-        let labels: Vec<Label> = serde_json::from_str(content)?;
-
-        let mut labels_for_registry: Vec<Arc<dyn Labeler>> = Vec::new();
-
-        for label in labels {
-            let mut patterns: Vec<(String, Regex)> = Vec::new();
-
-            for r in &label.patterns {
-                if r.name.is_empty() || r.regex.is_empty() {
-                    tracing::error!(
-                        message = "Invalid pattern: name or regex is empty",
-                        name = &r.name,
-                        regex = &r.regex
-                    );
-                    return Err(ServiceError::InvalidJsonPayload(
-                        "Invalid pattern: name or regex is empty".to_string(),
-                    ));
-                }
-
-                let regex = match Regex::new(&r.regex) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::error!(
-                            message = "Invalid regex in pattern",
-                            name = &r.name,
-                            regex = &r.regex,
-                            error = %e
-                        );
-                        return Err(ServiceError::InvalidJsonPayload(format!(
-                            "Invalid regex in pattern: {e}"
-                        )));
-                    }
-                };
-
-                patterns.push((r.name.clone(), regex));
-            }
-
-            debug!(
-                update = "Updating pattern",
-                kind = label.kind,
-                field = label.field,
-                output = label.output,
-                count = patterns.len()
-            );
-            trace!(patterns = ?patterns);
-
-            labels_for_registry.push(Arc::new(RegexLabeler::new(
-                label.kind,
-                label.field,
-                label.output,
-                patterns,
-            )));
-        }
-
-        LABEL_REGISTRY.load(labels_for_registry);
-
+        // Validate that the labels can be parsed
+        parse_labels(content)?;
         Ok(())
     }
 }
@@ -241,6 +248,7 @@ pub struct PolicyStore {
 
     pub policies: Metadata<OfPolicies>,
     pub labels: Metadata<OfLabels>,
+    pub label_registry_labelers: Vec<Arc<dyn Labeler>>,
 }
 
 impl Default for PolicyStore {
@@ -253,6 +261,7 @@ impl Default for PolicyStore {
             upload_token: None,
             policies: Metadata::<OfPolicies>::new(String::new(), None, None).unwrap(),
             labels: Metadata::<OfLabels>::new(String::new(), None, None).unwrap(),
+            label_registry_labelers: Vec::new(),
         }
     }
 }
@@ -268,6 +277,7 @@ impl PolicyStore {
             upload_token: None,
             policies: Metadata::<OfPolicies>::new(String::new(), None, None)?,
             labels: Metadata::<OfLabels>::new(String::new(), None, None)?,
+            label_registry_labelers: Vec::new(),
         })
     }
 
@@ -283,7 +293,18 @@ impl PolicyStore {
 
         let metadata = Metadata::<OfPolicies>::new(dsl.to_string(), source, refresh_frequency)?;
 
-        self.engine = Arc::new(PolicyEngine::new_from_str(dsl)?);
+        let mut engine = PolicyEngine::new_from_str(dsl)?;
+
+        // Apply labels to the new engine if we have any
+        if !self.label_registry_labelers.is_empty() {
+            let mut builder = LabelRegistryBuilder::new();
+            for labeler in &self.label_registry_labelers {
+                builder = builder.add_labeler(Arc::clone(labeler));
+            }
+            engine = engine.with_label_registry(builder.build());
+        }
+
+        self.engine = Arc::new(engine);
         self.policies = metadata;
         Ok(())
     }
@@ -299,6 +320,21 @@ impl PolicyStore {
         let refresh_frequency = refresh_frequency.or(old_metadata.refresh_frequency);
 
         let metadata = Metadata::<OfLabels>::new(labels.to_string(), source, refresh_frequency)?;
+
+        // Parse and store the labelers
+        self.label_registry_labelers = parse_labels(labels)?;
+
+        // Re-apply labels to the engine
+        if !self.label_registry_labelers.is_empty() {
+            let mut builder = LabelRegistryBuilder::new();
+            for labeler in &self.label_registry_labelers {
+                builder = builder.add_labeler(Arc::clone(labeler));
+            }
+            let mut engine = PolicyEngine::new_from_str(&self.policies.content)?;
+            engine = engine.with_label_registry(builder.build());
+            self.engine = Arc::new(engine);
+        }
+
         self.labels = metadata;
         Ok(())
     }
@@ -429,6 +465,7 @@ forbid (
         assert!(store.upload_token.is_none());
         assert_eq!(store.policies.entries, 0);
         assert_eq!(store.labels.entries, 0);
+        assert!(store.label_registry_labelers.is_empty());
     }
 
     #[test]
