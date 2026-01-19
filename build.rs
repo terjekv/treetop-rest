@@ -7,6 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .sha(true)
         .branch(true)
         .dirty(true)
+        .fail_on_error(false) // Don't fail if git info is unavailable
         .build()?;
     let cargo = CargoBuilder::default()
         .dependencies(true)

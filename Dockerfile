@@ -2,6 +2,16 @@
 FROM rust:1.92-alpine AS builder
 WORKDIR /usr/src/treetop-rest
 
+# Accept build args for git info
+ARG GIT_BRANCH=main
+ARG GIT_SHA=unknown
+ARG GIT_DESCRIBE=unknown
+
+# Set environment variables for vergen
+ENV VERGEN_GIT_BRANCH=$GIT_BRANCH
+ENV VERGEN_GIT_SHA=$GIT_SHA
+ENV VERGEN_GIT_DESCRIBE=$GIT_DESCRIBE
+
 RUN apk add --no-cache \
     openssl-dev \
     openssl-libs-static \

@@ -70,7 +70,9 @@ jobs:
         run: |
           docker build \
             --file Dockerfile \
-            --tag $GHCR_REGISTRY:develop \
+            --build-arg GIT_BRANCH=${{ github.ref_name }} \
+            --build-arg GIT_SHA=${{ github.sha }} \
+            --build-arg GIT_DESCRIBE=$(git describe --tags --always --dirty) \            --tag $GHCR_REGISTRY:develop \
             --tag $DOCKERHUB_REGISTRY:develop \
             .
           docker push $GHCR_REGISTRY:develop
@@ -106,6 +108,9 @@ jobs:
           for REG in $GHCR_REGISTRY $DOCKERHUB_REGISTRY; do
             docker build \
               --file Dockerfile \
+              --build-arg GIT_BRANCH=${{ github.ref_name }} \
+              --build-arg GIT_SHA=${{ github.sha }} \
+              --build-arg GIT_DESCRIBE=$(git describe --tags --always --dirty) \
               --tag $REG/:${{ env.TAG }} \
               --tag $REG/:latest \
               .
