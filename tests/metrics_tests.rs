@@ -38,6 +38,10 @@ fn create_test_app_with_metrics(
 
 /// Helper to create a test policy store with default policies
 fn create_test_store() -> Arc<Mutex<PolicyStore>> {
+    // Initialize metrics BEFORE creating the policy store/engine
+    // This ensures the metrics sink is set up when the engine is created
+    let _ = get_metrics_registry();
+
     let mut store = PolicyStore::new().unwrap();
 
     let dsl = r#"
