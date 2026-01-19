@@ -112,11 +112,11 @@ jobs:
               --build-arg GIT_BRANCH=${{ github.ref_name }} \
               --build-arg GIT_SHA=${{ github.sha }} \
               --build-arg GIT_DESCRIBE=$(git describe --tags --always --dirty) \
-              --tag $REG/:${{ env.TAG }} \
-              --tag $REG/:latest \
+              --tag $REG:${{ env.TAG }} \
+              --tag $REG:latest \
               .
-            docker push $REG/:${{ env.TAG }}
-            docker push $REG/:latest
+            docker push $REG:${{ env.TAG }}
+            docker push $REG:latest
           done
 
       # C) Cross-compile server & cli for Linux x86_64 + ARM (musl)
