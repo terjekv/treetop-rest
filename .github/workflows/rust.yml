@@ -120,35 +120,33 @@ jobs:
           done
 
       # C) Cross-compile server & cli for Linux x86_64 + ARM (musl)
-      - name: Install musl toolchains
+      - name: Install cross-compilation tool
         run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-          rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+          cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build native binaries
         run: |
-          cargo build --release --target x86_64-unknown-linux-musl
-          cargo build --release --target aarch64-unknown-linux-musl
+          cross build --release --target x86_64-unknown-linux-musl
+          cross build --release --target aarch64-unknown-linux-musl
 
       - name: Package artifacts
         run: |
           mkdir release-artifacts
           for TGT in x86_64 aarch64; do
             BIN_X=target/${TGT}-unknown-linux-musl/release
-            tar czf release-artifacts/server-${TGT}.tar.gz -C $BIN_X server
-            tar czf release-artifacts/cli-${TGT}.tar.gz    -C $BIN_X cli
+            tar czf release-artifacts/treetop-server-${TGT}-linux-musl.tar.gz -C $BIN_X treetop-server
+            tar czf release-artifacts/treetop-cli-${TGT}-linux-musl.tar.gz -C $BIN_X treetop-cli
           done
 
-      # D) Create GH Release & upload all four .tar.gz’s
+      # D) Create GH Release & upload binaries
       - name: Create GitHub Release & upload binaries
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ env.TAG }}
           name: Release ${{ env.TAG }}
           artifacts: |
-            release-artifacts/server-x86_64.tar.gz
-            release-artifacts/server-aarch64.tar.gz
-            release-artifacts/cli-x86_64.tar.gz
-            release-artifacts/cli-aarch64.tar.gz
+            release-artifacts/treetop-server-x86_64-linux-musl.tar.gz
+            release-artifacts/treetop-server-aarch64-linux-musl.tar.gz
+            release-artifacts/treetop-cli-x86_64-linux-musl.tar.gz
+            release-artifacts/treetop-cli-aarch64-linux-musl.tar.gz
 
