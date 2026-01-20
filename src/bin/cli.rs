@@ -13,6 +13,7 @@ use treetop_rest::cli::{
     UserPolicies, repl::run_repl,
 };
 use treetop_rest::models::{CheckResponse, CheckResponseBrief, PoliciesMetadata};
+use uuid::Uuid;
 
 // Completion is handled inside the REPL module now
 
@@ -25,6 +26,7 @@ struct ExecContext {
     last_used: LastUsedValues,
     host: String,
     port: u16,
+    correlation_id: String,
 }
 
 // REPL logic moved to treetop_rest::cli::repl
@@ -58,6 +60,30 @@ fn parse_kv(s: &str) -> Result<(String, InputAttrValue), String> {
         return Err("attribute key is empty".into());
     }
     Ok((k.to_string(), v.parse()?))
+}
+
+fn sanitize_command(cmd: &str) -> String {
+    cmd.chars()
+        .filter_map(|c| {
+            if !c.is_ascii() {
+                None
+            } else if c.is_whitespace() {
+                Some('_')
+            } else {
+                Some(c)
+            }
+        })
+        .collect()
+}
+
+fn make_correlation_id(cmd: &str) -> String {
+    let sanitized = sanitize_command(cmd);
+    let uuid = Uuid::new_v4();
+    if sanitized.is_empty() {
+        uuid.to_string()
+    } else {
+        format!("{}-{}", uuid, sanitized)
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -119,7 +145,12 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let api = ApiClient::from_host_port(&cli.host, cli.port);
+    let cli_command = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
+    let correlation_id = make_correlation_id(&cli_command);
+
+    let mut api = ApiClient::from_host_port(&cli.host, cli.port);
+    api.set_correlation_id(correlation_id.clone());
+
     let mut ctx = ExecContext {
         api,
         show_json: cli.json || cli.debug,
@@ -128,6 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         last_used: LastUsedValues::default(),
         host: cli.host.clone(),
         port: cli.port,
+        correlation_id,
     };
 
     if let Commands::Repl = cli.command {
@@ -144,7 +176,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let args = std::iter::once("policy-cli").chain(parts.into_iter());
                         match Cli::try_parse_from(args) {
                             Ok(parsed) => {
+                                let correlation_id = make_correlation_id(&input);
                                 let mut guard = ctx_arc_inner.lock().await;
+                                guard.api.set_correlation_id(correlation_id.clone());
+                                guard.correlation_id = correlation_id;
                                 execute_command(parsed.command, &mut guard).await
                             }
                             Err(e) => {

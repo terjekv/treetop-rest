@@ -2,7 +2,6 @@ use actix_web::{App, HttpServer};
 use clap::Parser;
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
-use tracing_actix_web::TracingLogger;
 use tracing_subscriber::EnvFilter;
 use treetop_rest::build_info::build_info;
 use treetop_rest::config::Config;
@@ -18,6 +17,8 @@ async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .json()
+        .with_current_span(true)
+        .with_span_list(true)
         .init();
 
     let config = Config::parse();
@@ -33,7 +34,8 @@ async fn main() -> std::io::Result<()> {
     }
 
     // Initialize Prometheus metrics and set treetop-core sink
-    let metrics_registry = treetop_rest::metrics::init_prometheus().expect("Failed to init metrics");
+    let metrics_registry =
+        treetop_rest::metrics::init_prometheus().expect("Failed to init metrics");
 
     let store = Arc::new(Mutex::new(PolicyStore::new().unwrap()));
 
@@ -75,7 +77,6 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
-            .wrap(TracingLogger::default())
             .wrap(TracingMiddleware)
             .service(SwaggerUi::new("/swagger-ui/{_:.*}").url(
                 "/api-docs/openapi.json",
