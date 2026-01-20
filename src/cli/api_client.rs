@@ -1,34 +1,53 @@
-use reqwest::{Client, Response};
+use reqwest::{Client, RequestBuilder, Response};
+
+const CORRELATION_HEADER: &str = "x-correlation-id";
 
 pub struct ApiClient {
     base_url: String,
     client: Client,
+    correlation_id: Option<String>,
 }
 
 impl ApiClient {
     pub fn from_host_port(host: &str, port: u16) -> Self {
         let base_url = format!("http://{}:{}/api/v1", host, port);
         let client = Client::new();
-        Self { base_url, client }
+        Self {
+            base_url,
+            client,
+            correlation_id: None,
+        }
     }
 
     pub fn with_client(host: &str, port: u16, client: Client) -> Self {
         let base_url = format!("http://{}:{}/api/v1", host, port);
-        Self { base_url, client }
+        Self {
+            base_url,
+            client,
+            correlation_id: None,
+        }
+    }
+
+    pub fn set_correlation_id(&mut self, id: String) {
+        self.correlation_id = Some(id);
+    }
+
+    fn apply_headers<'a>(&'a self, builder: RequestBuilder) -> RequestBuilder {
+        if let Some(cid) = &self.correlation_id {
+            builder.header(CORRELATION_HEADER, cid)
+        } else {
+            builder
+        }
     }
 
     pub async fn get_status(&self) -> reqwest::Result<Response> {
-        self.client
-            .get(format!("{}/status", self.base_url))
-            .send()
-            .await
+        let builder = self.client.get(format!("{}/status", self.base_url));
+        self.apply_headers(builder).send().await
     }
 
     pub async fn get_version(&self) -> reqwest::Result<Response> {
-        self.client
-            .get(format!("{}/version", self.base_url))
-            .send()
-            .await
+        let builder = self.client.get(format!("{}/version", self.base_url));
+        self.apply_headers(builder).send().await
     }
 
     pub async fn post_check<T: serde::Serialize + ?Sized>(
@@ -41,11 +60,11 @@ impl ApiClient {
         } else {
             "/check"
         };
-        self.client
+        let builder = self
+            .client
             .post(format!("{}{}", self.base_url, path))
-            .json(req)
-            .send()
-            .await
+            .json(req);
+        self.apply_headers(builder).send().await
     }
 
     pub async fn get_policies(&self, raw: bool) -> reqwest::Result<Response> {
@@ -54,7 +73,8 @@ impl ApiClient {
         } else {
             format!("{}/policies", self.base_url)
         };
-        self.client.get(url).send().await
+        let builder = self.client.get(url);
+        self.apply_headers(builder).send().await
     }
 
     pub async fn post_policies_raw(
@@ -62,13 +82,13 @@ impl ApiClient {
         token: &str,
         content: String,
     ) -> reqwest::Result<Response> {
-        self.client
+        let builder = self
+            .client
             .post(format!("{}/policies", self.base_url))
             .header("Content-Type", "text/plain")
             .header("X-Upload-Token", token)
-            .body(content)
-            .send()
-            .await
+            .body(content);
+        self.apply_headers(builder).send().await
     }
 
     pub async fn post_policies_json(&self, content: String) -> reqwest::Result<Response> {
@@ -76,23 +96,24 @@ impl ApiClient {
         struct Upload {
             policies: String,
         }
-        self.client
+        let builder = self
+            .client
             .post(format!("{}/policies", self.base_url))
-            .json(&Upload { policies: content })
-            .send()
-            .await
+            .json(&Upload { policies: content });
+        self.apply_headers(builder).send().await
     }
 
     pub async fn get_user_policies(&self, user: &str) -> reqwest::Result<Response> {
-        self.client
-            .get(format!("{}/policies/{}", self.base_url, user))
-            .send()
-            .await
+        let builder = self
+            .client
+            .get(format!("{}/policies/{}", self.base_url, user));
+        self.apply_headers(builder).send().await
     }
 
     pub async fn get_metrics(&self) -> reqwest::Result<Response> {
         // Metrics endpoint is at root level, not under /api/v1
         let metrics_url = self.base_url.replace("/api/v1", "/metrics");
-        self.client.get(metrics_url).send().await
+        let builder = self.client.get(metrics_url);
+        self.apply_headers(builder).send().await
     }
 }

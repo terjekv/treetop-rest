@@ -4,6 +4,7 @@ use actix_web::{
     dev::ServiceRequest,
     dev::ServiceResponse,
     http::header::{HeaderName, HeaderValue},
+    HttpMessage,
 };
 use futures_util::future::{self, LocalBoxFuture, Ready};
 use std::task::{Context, Poll};
@@ -11,6 +12,12 @@ use std::time::Instant;
 use tracing::{Instrument, Level, info, span};
 use uuid::Uuid;
 use crate::metrics;
+
+#[derive(Clone)]
+pub struct RequestIds {
+    pub request_id: String,
+    pub correlation_id: String,
+}
 
 const CORRELATION_ID: HeaderName = HeaderName::from_static("x-correlation-id");
 const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
@@ -53,18 +60,25 @@ where
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
+        let request_id = Uuid::new_v4().to_string();
         let correlation_id = req
             .headers()
             .get(&CORRELATION_ID)
             .and_then(|hv| hv.to_str().ok())
-            .map(str::to_string);
+            .map(str::to_string)
+            .unwrap_or_else(|| request_id.clone());
 
-        let request_id = Uuid::new_v4().to_string();
+        // Make IDs available to downstream handlers/services
+        req.extensions_mut().insert(RequestIds {
+            request_id: request_id.clone(),
+            correlation_id: correlation_id.clone(),
+        });
+
         let span = span!(
             Level::INFO,
             "request",
             request_id     = %request_id,
-            correlation_id = ?correlation_id
+            correlation_id = %correlation_id
         );
 
         let method = req.method().to_string();
@@ -75,7 +89,7 @@ where
             .map(|s| s.split(':').next().unwrap_or(s).to_string());
 
         let start_time = Instant::now();
-        info!(request_id = %request_id, correlation_id = ?correlation_id, message = "Request start", method = &method, path = &path);
+        info!(request_id = %request_id, correlation_id = %correlation_id, message = "Request start", method = &method, path = &path);
 
         let fut = self.service.call(req);
 
@@ -84,8 +98,7 @@ where
                 let mut res = fut.await?;
                 
                 let elapsed_time = start_time.elapsed();
-                info!(message = "Request end", request_id = %request_id, correlation_id = ?correlation_id, method = &method, path = &path, run_time = ?elapsed_time, status_code = ?res.status());
-
+                info!(message = "Request end", request_id = %request_id, correlation_id = %correlation_id, method = &method, path = &path, run_time = ?elapsed_time, status_code = ?res.status());
                 // Record HTTP metrics
                 let status_code = res.status().as_u16();
                 metrics::http_metrics().observe(
@@ -98,15 +111,15 @@ where
 
                 res.headers_mut().insert(
                     REQUEST_ID,
-                    request_id.parse().unwrap_or_else(|_| HeaderValue::from_static("<failed>")),
+                    HeaderValue::from_str(&request_id)
+                        .unwrap_or_else(|_| HeaderValue::from_static("<failed>")),
                 );
 
-                if let Some(correlation_id) = correlation_id {
-                    res.headers_mut().insert(
-                        CORRELATION_ID,
-                        correlation_id.parse().unwrap_or_else(|_| HeaderValue::from_static("<failed>"))
-                    );
-                }
+                res.headers_mut().insert(
+                    CORRELATION_ID,
+                    HeaderValue::from_str(&correlation_id)
+                        .unwrap_or_else(|_| HeaderValue::from_static("<failed>")),
+                );
                 Ok(res)
             }
             .instrument(span),
