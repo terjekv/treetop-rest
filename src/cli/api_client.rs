@@ -32,7 +32,7 @@ impl ApiClient {
         self.correlation_id = Some(id);
     }
 
-    fn apply_headers<'a>(&'a self, builder: RequestBuilder) -> RequestBuilder {
+    fn apply_headers(&self, builder: RequestBuilder) -> RequestBuilder {
         if let Some(cid) = &self.correlation_id {
             builder.header(CORRELATION_HEADER, cid)
         } else {

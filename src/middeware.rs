@@ -132,6 +132,12 @@ pub struct TracingMiddleware {
     trust_ip_headers: bool,
 }
 
+impl Default for TracingMiddleware {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TracingMiddleware {
     pub fn new() -> Self {
         Self { trust_ip_headers: true }
