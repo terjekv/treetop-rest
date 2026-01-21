@@ -3,64 +3,9 @@
 This is a REST server providing a REST API for [Treetop](https://github.com/terjekv/treetop-core),
 a policy management framework. A CLI interface to the REST API is also provided.
 
-See [docs/api.md](docs/api.md) for the full HTTP API reference.
-
-## Endpoints
-
-Note, these endpoints are currently in development and may change in the future. This API is not yet
-stable and makes a lot of assumptions about the current usage of the Treetop framework.
-
-### `/api/v1/policies`
-
-- `GET`: List all policies.
-- `POST`: Upload a new policy file in Cedar format, if enabled.
-
-### `/api/v1/policies/<username>`
-
-- `GET`: List all policies for a user.
-
-### `/api/v1/status`
-
-- `GET`: Get the status of the policy engine, the server, and their configuration.
-
-### `/api/v1/check`
-
-- `POST`: Check a request for allow/deny. The format of the request is:
-
-```json
-$ curl -X POST http://localhost:9999/api/v1/check \
-  -H "Content-Type: application/json" \
-  -d '{
-    "principal": {
-      "User": {
-        "id": "alice",
-        "namespace": ["DNS"],
-        "groups": [
-          { "id": "admins", "namespace": ["DNS"] }
-        ]
-      }
-    },
-    "action": { "id": "create_host", "namespace": ["DNS"] },
-    "resource": {
-      "kind": "Host",
-      "id": "hostname.example.com",
-      "attrs": {
-        "ip":   { "type": "Ip", "value": "10.0.0.1" },
-        "name": { "type": "String", "value": "hostname.example.com" }
-      }
-    }
-  }'
-```
-
-Valid attribute types are: `String`, `Int`, `Bool`, `Ip`, and `Set`.
+See [docs/api.md](docs/api.md) for the HTTP API reference.
 
 ## Server startup
-
-Ths requries Rust and Cargo to be installed. You can run the server with:
-
-```bash
-RUST_LOG=debug cargo run --bin server
-```
 
 The server supports the following environment variables:
 
@@ -77,6 +22,10 @@ The server supports the following environment variables:
 - `APP_LABEL_URL`: An optional URL for fetching the label file (in JSON format) (default: `None`).
 - `APP_LABEL_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the label file from the
   `APP_LABEL_URL` (default: `60`).
+- `APP_CLIENT_ALLOWLIST`: Whitelist of client IPs or CIDR blocks. Use `*` to allow all,
+  or comma-separated IPv4/IPv6 addresses/CIDRs (default: `127.0.0.1,::1`).
+- `APP_TRUST_IP_HEADERS`: Whether to trust proxy IP headers (`X-Forwarded-For`, `Forwarded`).
+  If `false`, only uses peer address (default: `true`).
 
 ### Client interaction
 

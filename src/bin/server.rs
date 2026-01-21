@@ -6,7 +6,7 @@ use tracing_subscriber::EnvFilter;
 use treetop_rest::build_info::build_info;
 use treetop_rest::config::Config;
 use treetop_rest::fetcher::{LabelFetchAdapter, PolicyFetchAdapter};
-use treetop_rest::middeware::TracingMiddleware;
+use treetop_rest::middeware::{ClientAllowlistMiddleware, TracingMiddleware};
 use treetop_rest::state::PolicyStore;
 
 use utoipa::OpenApi;
@@ -18,7 +18,6 @@ async fn main() -> std::io::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .json()
         .with_current_span(true)
-        .with_span_list(true)
         .init();
 
     let config = Config::parse();
@@ -75,9 +74,16 @@ async fn main() -> std::io::Result<()> {
         LabelFetchAdapter::new(store.clone()).spawn(hurl, freq);
     }
 
+    let client_allowlist = config.client_allowlist.clone();
+    let trust_ip_headers = config.trust_ip_headers;
+
     HttpServer::new(move || {
         App::new()
-            .wrap(TracingMiddleware)
+            .wrap(ClientAllowlistMiddleware::new_with_trust(
+                client_allowlist.clone(),
+                trust_ip_headers,
+            ))
+            .wrap(TracingMiddleware::new_with_trust(trust_ip_headers))
             .service(SwaggerUi::new("/swagger-ui/{_:.*}").url(
                 "/api-docs/openapi.json",
                 treetop_rest::handlers::ApiDoc::openapi(),

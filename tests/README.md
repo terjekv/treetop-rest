@@ -83,15 +83,29 @@ End-to-end tests using the actual test data files (`testdata/`):
 
 Tests for command-line argument parsing logic using **parameterized tests**:
 
-- **IP parsing**: IPv4 and IPv6 addresses (4 cases)
-- **Long/integer parsing**: positive, negative, zero, large numbers (4 cases)
-- **Boolean parsing**: true/false (2 cases)
-- **Key-value parsing**: simple, with equals in value, URLs (4 cases)
-- **Quoted string handling**: quoted, unquoted strings (4 cases)
-- **Whitespace handling**: various spacing patterns (3 cases)
-- **Error cases**: empty keys (3 cases), missing equals (3 cases)
-- Single test for multiple attributes
-- Single test for AttrValue conversions
+- **Command completion**: 19 cases covering command and flag completion
+- **Command parsing**: 8 cases for parsing various CLI command structures
+
+#### Client Allowlist Tests (`tests/client_allowlist_tests.rs`)
+
+Tests for IP/CIDR whitelist and proxy header trust configuration:
+
+- **IPv4 whitelisting**: Allowing requests from whitelisted CIDR ranges
+- **IPv4 rejection**: Rejecting requests from non-whitelisted addresses
+- **IPv6 support**: Allowing whitelisted IPv6 addresses
+- **Trust header toggle**: Ignoring spoofed proxy headers when trust is disabled
+
+#### Metrics Tests (`tests/metrics_tests.rs`)
+
+Tests for Prometheus metrics collection and reporting:
+
+- **Metrics endpoint**: Availability and content-type validation
+- **Build info**: Version labels (app, core, Cedar)
+- **Policy evaluation metrics**: Counters for evaluations, allowed/denied decisions
+- **HTTP request metrics**: Per-endpoint request counting and duration histograms
+- **Client IP tracking**: Proxy-header-aware IP labels in HTTP metrics
+- **Histogram validation**: Bucket, sum, and count fields for latency histograms
+- **Prometheus format**: HELP and TYPE comments for proper format compliance
 
 ## Running Tests
 
@@ -119,6 +133,8 @@ cargo test --tests
 cargo test --test handler_tests
 cargo test --test integration_tests
 cargo test --test cli_parsing_tests
+cargo test --test client_allowlist_tests
+cargo test --test metrics_tests
 ```
 
 ### Run Specific Test by Name
@@ -147,25 +163,6 @@ The integration tests use real Cedar policy files and label definitions from `te
 
 - `testdata/default.cedar` - Sample Cedar policies with permit and forbid rules
 - `testdata/labels.json` - Label definitions with regex patterns for host naming
-
-## Test Coverage
-
-The current test suite includes **80 test cases** covering:
-
-- ✅ **Models** (4 tests): Endpoint parsing, decision conversions
-- ✅ **State** (14 tests): Metadata handling, policy store management, label processing
-- ✅ **Handlers** (14 tests): All HTTP endpoints with parameterized token validation
-- ✅ **CLI** (29 tests): Parameterized parsing tests for all input types
-- ✅ **Integration** (19 tests): Parameterized authorization scenarios with real policies
-
-### Parameterized Test Benefits
-
-Using `rstest`, we've consolidated repetitive tests:
-
-- **Before**: 6+ separate authorization tests → **After**: 1 parameterized test with 6 cases
-- **Before**: 5+ IP range tests → **After**: 1 parameterized test with 5 cases
-- **Before**: Multiple parsing tests → **After**: Consolidated with multiple cases each
-- **Result**: More test cases, less code duplication, easier to add new scenarios
 
 ## Adding New Tests
 
@@ -226,42 +223,3 @@ These tests are designed to run in CI/CD pipelines without requiring Docker or e
 # In your CI pipeline
 cargo test --all
 ```
-
-## Performance
-
-The test suite is fast despite having **80 test cases**:
-
-- Unit tests (18): < 0.02 seconds
-- CLI tests (29): < 0.01 seconds
-- Handler tests (14): < 0.02 seconds
-- Integration tests (19): < 0.04 seconds
-- **Total test execution**: < 0.1 seconds
-
-This makes them ideal for:
-
-- Pre-commit hooks
-- Watch mode during development (`cargo watch -x test`)
-- Rapid feedback loops
-- CI/CD pipelines
-
-The parameterized tests run efficiently as each case is executed independently.
-
-## Dependencies
-
-Test-specific dependencies (in `[dev-dependencies]`):
-
-- `actix-rt` - Async runtime for Actix tests
-- `rstest` - Parameterized testing framework
-- `tempfile` - Temporary file creation (currently unused, available for future tests)
-
-## Future Improvements
-
-Potential additions to the test suite:
-
-- [ ] Property-based testing with `proptest`
-- [ ] Benchmark tests with `criterion`
-- [ ] More edge cases for label regex patterns
-- [ ] Negative test cases for malformed requests
-- [ ] Performance tests for large policy sets
-- [ ] CLI REPL interaction tests
-- [ ] Concurrency tests for shared state
