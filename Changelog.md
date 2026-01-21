@@ -11,3 +11,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Propagation of `Correlation-ID` through spans to core libraries.
 - Correlation-ID in the CLI requests.
+- Allowlist and trust proxy headers configuration via environment variables.
