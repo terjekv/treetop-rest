@@ -3701,7 +3701,7 @@ dependencies = [
  "env_logger",
  "futures",
  "futures-util",
- "lazy_static",
+ "ipnet",
  "prometheus",
  "rayon",
  "regex",

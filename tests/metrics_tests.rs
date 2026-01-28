@@ -30,7 +30,7 @@ fn create_test_app_with_metrics(
     let registry = get_metrics_registry();
 
     App::new()
-        .wrap(treetop_rest::middeware::TracingMiddleware)
+        .wrap(treetop_rest::middeware::TracingMiddleware::new())
         .app_data(web::Data::new(store))
         .app_data(web::Data::new(registry))
         .configure(handlers::init)
@@ -431,6 +431,42 @@ async fn test_metrics_has_histogram_buckets() {
         body_str.contains("policy_eval_duration_seconds_count"),
         "Duration histogram should have count"
     );
+}
+
+#[actix_web::test]
+async fn test_http_metrics_include_client_ip_label() {
+    let store = create_test_store();
+    // Build an app that trusts IP headers so x-forwarded-for is used
+    let registry = get_metrics_registry();
+    let app = test::init_service(
+        App::new()
+            .wrap(treetop_rest::middeware::TracingMiddleware::new_with_trust(true))
+            .app_data(web::Data::new(store))
+            .app_data(web::Data::new(registry.clone()))
+            .configure(handlers::init),
+    )
+    .await;
+
+    // Send a request with a specific client IP
+    let req = test::TestRequest::get()
+        .uri("/api/v1/health")
+        .insert_header(("x-forwarded-for", "203.0.113.10"))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    // Fetch metrics and verify the client_ip label is present with our value
+    let req = test::TestRequest::get().uri("/metrics").to_request();
+    let resp = test::call_service(&app, req).await;
+    let body = test::read_body(resp).await;
+    let body_str = std::str::from_utf8(&body).unwrap();
+
+    let has_client_ip = body_str.lines().any(|line| {
+        line.starts_with("http_requests_total")
+            && line.contains("client_ip=\"203.0.113.10\"")
+            && !line.starts_with('#')
+    });
+    assert!(has_client_ip, "HTTP metrics should include client_ip label with the forwarded IP");
 }
 
 /// Helper function to extract a metric value from Prometheus text format
