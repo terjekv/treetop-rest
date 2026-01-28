@@ -134,7 +134,139 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
 - Purpose: list policies that apply to a user.
 - Response: `{ "user": "<user>", "policies": [<policy_json_objects>] }`.
 
-### POST /api/v1/check
+### POST /api/v1/authorize (Unified Authorization Endpoint)
+
+- Purpose: evaluate one or more authorization requests with optional client-provided identifiers.
+- Query parameters:
+  - `detail`: Response detail level. `brief` (default) returns only decision and version; `full` (or `detailed`)
+  includes matching policy information.
+- Request body (JSON):
+  - `requests`: Array of authorization requests, each containing:
+    - `id` (optional): Client-provided identifier for correlating responses
+    - `principal`: Principal object
+    - `action`: Action identifier
+    - `resource`: Resource object with `kind`, `id`, and optional `attrs`
+
+**Example request:**
+
+```bash
+curl -X POST http://localhost:9999/api/v1/authorize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "requests": [
+      {
+        "id": "check-1",
+        "principal": { "User": { "id": "alice", "namespace": ["DNS"], "groups": [{ "id": "admins", "namespace": ["DNS"] }] } },
+        "action": { "id": "create_host", "namespace": ["DNS"] },
+        "resource": {
+          "kind": "Host",
+          "id": "hostname.example.com",
+          "attrs": {
+            "ip":   { "type": "Ip", "value": "10.0.0.1" },
+            "name": { "type": "String", "value": "hostname.example.com" }
+          }
+        }
+      },
+      {
+        "id": "check-2",
+        "principal": { "User": { "id": "bob", "namespace": ["Service"], "groups": [] } },
+        "action": { "id": "view", "namespace": ["Service"] },
+        "resource": {
+          "kind": "Photo",
+          "id": "photo.jpg",
+          "attrs": {
+            "owner": { "type": "String", "value": "alice" }
+          }
+        }
+      }
+    ]
+  }'
+```
+
+**Response (brief, default):**
+
+```json
+{
+  "results": [
+    {
+      "index": 0,
+      "id": "check-1",
+      "status": "success",
+      "result": {
+        "decision": "Allow",
+        "version": {
+          "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
+          "loaded_at": "2025-12-19T00:14:38.577289000Z"
+        }
+      }
+    },
+    {
+      "index": 1,
+      "id": "check-2",
+      "status": "failed",
+      "error": "Evaluation failed: invalid resource"
+    }
+  ],
+  "version": {
+    "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
+    "loaded_at": "2025-12-19T00:14:38.577289000Z"
+  },
+  "successful": 1,
+  "failed": 1
+}
+```
+
+**Response (detailed, ?detail=full):**
+
+```json
+{
+  "results": [
+    {
+      "index": 0,
+      "id": "check-1",
+      "status": "success",
+      "result": {
+        "policy": {
+          "literal": "permit (...)",
+          "json": {...}
+        },
+        "desicion": "Allow",
+        "version": {
+          "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
+          "loaded_at": "2025-12-19T00:14:38.577289000Z"
+        }
+      }
+    },
+    {
+      "index": 1,
+      "id": "check-2",
+      "status": "failed",
+      "error": "Evaluation failed: invalid resource"
+    }
+  ],
+  "version": {
+    "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
+    "loaded_at": "2025-12-19T00:14:38.577289000Z"
+  },
+  "successful": 1,
+  "failed": 1
+}
+```
+
+### Features
+
+- **Single or Multiple Requests**: Handle one or many authorization requests in a single call
+- **Client Identifiers**: Optional `id` field on each request for easy correlation of responses
+- **Parallel Processing**: All requests evaluated in parallel using Rayon
+- **Consistent Snapshot**: All requests evaluated against the same policy version
+- **Detailed or Brief Results**: Control response verbosity with the `?detail` query parameter
+- **Index Tracking**: Results maintain input order with `index` field
+
+## Deprecated Single/Batch Check Endpoints
+
+The following endpoints are **deprecated** and will be removed in a future release. Use `/api/v1/authorize` instead:
+
+### POST /api/v1/check (DEPRECATED)
 
 - Purpose: evaluate a request and return an allow/deny decision.
 - Request body (JSON):
@@ -179,7 +311,7 @@ Example response:
 }
 ```
 
-### POST /api/v1/check_detailed
+### POST /api/v1/check_detailed (DEPRECATED)
 
 Same request structure as `/api/v1/check` but returns the matching policy if the decision is `Allow`.
 
@@ -241,19 +373,21 @@ Example response:
 }
 ```
 
-## Batch API
+## Deprecated Batch API
 
-The batch API allows you to evaluate multiple authorization requests in a single HTTP call with parallel processing
+The batch API is **deprecated**. Use `/api/v1/authorize` instead for all authorization requests (single or multiple).
+
+The old batch API allowed you to evaluate multiple authorization requests in a single HTTP call with parallel processing
 on the server side.
 
-### Features
+### Features (Deprecated Endpoints)
 
 - **Parallel Processing**: All requests are evaluated in parallel using Rayon for maximum throughput
 - **Consistent Snapshot**: All requests in a batch are evaluated against the same policy version
 - **Individual Results**: Each request's result is tracked separately with success/failure status
 - **Index Tracking**: Results maintain the same order as the input requests with explicit index values
 
-### POST /api/v1/batch_check - Brief Results
+### POST /api/v1/batch_check (DEPRECATED)
 
 Process multiple authorization requests and return brief results (decision + version only).
 
@@ -300,7 +434,7 @@ Process multiple authorization requests and return brief results (decision + ver
     },
     {
       "index": 1,
-      "status": "error",
+      "status": "failed",
       "error": "Evaluation failed: invalid resource"
     }
   ],
@@ -313,7 +447,7 @@ Process multiple authorization requests and return brief results (decision + ver
 }
 ```
 
-### POST /api/v1/batch_check_detailed - Detailed Results
+### POST /api/v1/batch_check_detailed (DEPRECATED)
 
 Process multiple authorization requests and return detailed results (includes policy information).
 
@@ -342,7 +476,7 @@ Same as `/batch_check`
     },
     {
       "index": 1,
-      "status": "error",
+      "status": "failed",
       "error": "Evaluation failed: invalid resource"
     }
   ],
@@ -372,7 +506,7 @@ Same as `/batch_check`
 ```json
 {
   "index": 1,
-  "status": "error",
+  "status": "failed",
   "error": "Error message string"
 }
 ```

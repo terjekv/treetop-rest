@@ -46,7 +46,7 @@ impl std::str::FromStr for Endpoint {
     }
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema, Clone)]
 pub struct CheckResponse {
     pub policy: Option<PermitPolicy>,
     pub desicion: DecisionBrief,
@@ -70,13 +70,13 @@ impl From<Decision> for CheckResponse {
     }
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema, Clone)]
 pub enum DecisionBrief {
     Allow,
     Deny,
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema, Clone)]
 pub struct CheckResponseBrief {
     pub decision: DecisionBrief,
     pub version: PolicyVersion,
@@ -142,6 +142,21 @@ impl From<treetop_core::UserPolicies> for UserPolicies {
     }
 }
 
+#[derive(Deserialize, Serialize, ToSchema)]
+pub struct AuthRequest {
+    /// Optional client-provided identifier for this request
+    pub id: Option<String>,
+    /// The actual authorization request
+    #[serde(flatten)]
+    pub request: Request,
+}
+
+#[derive(Deserialize, Serialize, ToSchema)]
+pub struct AuthorizeRequest {
+    /// List of authorization requests to evaluate
+    pub requests: Vec<AuthRequest>,
+}
+
 #[derive(Deserialize, ToSchema)]
 pub struct BatchCheckRequest {
     /// List of authorization requests to evaluate
@@ -151,13 +166,13 @@ pub struct BatchCheckRequest {
 #[derive(Serialize, ToSchema)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum BatchResult<T> {
-    Success { 
+    Success {
         #[serde(rename = "result")]
-        data: T 
+        data: T,
     },
-    Error { 
+    Failed {
         #[serde(rename = "error")]
-        message: String 
+        message: String,
     },
 }
 
@@ -165,9 +180,36 @@ pub enum BatchResult<T> {
 pub struct IndexedResult<T> {
     /// Index of the request in the original batch
     pub index: usize,
+    /// Client-provided identifier for this request (if provided)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     /// Result of the evaluation (success or error)
     #[serde(flatten)]
     pub result: BatchResult<T>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct AuthorizeResponse {
+    /// Results for each request with optional client IDs
+    pub results: Vec<IndexedResult<CheckResponseBrief>>,
+    /// Policy version used for all evaluations
+    pub version: PolicyVersion,
+    /// Number of successful evaluations
+    pub successful: usize,
+    /// Number of failed evaluations
+    pub failed: usize,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct AuthorizeDetailedResponse {
+    /// Detailed results for each request with optional client IDs
+    pub results: Vec<IndexedResult<CheckResponse>>,
+    /// Policy version used for all evaluations
+    pub version: PolicyVersion,
+    /// Number of successful evaluations
+    pub successful: usize,
+    /// Number of failed evaluations
+    pub failed: usize,
 }
 
 #[derive(Serialize, ToSchema)]

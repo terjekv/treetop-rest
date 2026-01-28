@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
 use treetop_rest::handlers;
-use treetop_rest::models::{CheckResponseBrief, DecisionBrief, PoliciesMetadata};
+use treetop_rest::models::{AuthRequest, AuthorizeRequest, CheckResponseBrief, DecisionBrief, PoliciesMetadata};
 use treetop_rest::state::PolicyStore;
 
 /// Helper to create a test policy store with default policies
@@ -302,4 +302,97 @@ async fn test_list_policies_for_user() {
 
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
+}
+
+#[actix_web::test]
+async fn test_authorize_endpoint_brief() {
+    let store = create_test_store();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let request1 = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    let request2 = Request {
+        principal: Principal::User(User::from_str("bob").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    let auth_request = AuthorizeRequest {
+        requests: vec![
+            AuthRequest {
+                id: Some("check-1".to_string()),
+                request: request1,
+            },
+            AuthRequest {
+                id: Some("check-2".to_string()),
+                request: request2,
+            },
+        ],
+    };
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=brief")
+        .set_json(&auth_request)
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["results"].as_array().unwrap().len(), 2);
+    assert_eq!(body["results"][0]["id"].as_str(), Some("check-1"));
+    assert_eq!(body["results"][0]["status"].as_str(), Some("success"));
+    assert_eq!(body["results"][0]["result"]["decision"].as_str(), Some("Allow"));
+    // Second request should be a Deny (bob doesn't have view on this photo)
+    assert_eq!(body["results"][1]["id"].as_str(), Some("check-2"));
+    assert_eq!(body["results"][1]["status"].as_str(), Some("success"));
+    assert_eq!(body["results"][1]["result"]["decision"].as_str(), Some("Deny"));
+    assert_eq!(body["successful"].as_u64(), Some(2));
+    assert_eq!(body["failed"].as_u64(), Some(0));
+}
+
+#[actix_web::test]
+async fn test_authorize_endpoint_detailed() {
+    let store = create_test_store();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let request = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    let auth_request = AuthorizeRequest {
+        requests: vec![AuthRequest {
+            id: Some("check-1".to_string()),
+            request,
+        }],
+    };
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=full")
+        .set_json(&auth_request)
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["results"][0]["status"].as_str(), Some("success"));
+    assert_eq!(body["results"][0]["result"]["desicion"].as_str(), Some("Allow"));
+    assert!(body["results"][0]["result"]["policy"].is_object());
 }

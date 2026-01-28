@@ -1,6 +1,7 @@
 use crate::build_info::build_info;
 use crate::errors::ServiceError;
 use crate::models::{
+    AuthorizeDetailedResponse, AuthorizeRequest, AuthorizeResponse,
     BatchCheckDetailedResponse, BatchCheckRequest, BatchCheckResponse, BatchResult, CheckResponse,
     CheckResponseBrief, IndexedResult, PoliciesDownload, PoliciesMetadata, UserPolicies,
 };
@@ -25,6 +26,9 @@ pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.route("/api/v1/status", web::get().to(get_status))
         .route("/api/v1/health", web::get().to(health))
         .route("/api/v1/version", web::get().to(version))
+        // New unified endpoint
+        .route("/api/v1/authorize", web::post().to(authorize))
+        // Deprecated endpoints (kept for backwards compatibility)
         .route("/api/v1/check", web::post().to(check))
         .route("/api/v1/check_detailed", web::post().to(check_detailed))
         .route("/api/v1/batch_check", web::post().to(batch_check))
@@ -44,6 +48,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         (name = "Treetop REST API", description = "API for Treetop policy management and evaluation")
     ),
     paths(
+        authorize,
         check,
         check_detailed,
         batch_check,
@@ -105,6 +110,115 @@ pub async fn version(
         },
         policies: store.lock()?.engine.current_version(),
     }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct AuthorizeQuery {
+    /// Response detail level: 'brief' (default) or 'full'
+    detail: Option<String>,
+}
+
+#[utoipa::path(
+        post,
+        path = "/api/v1/authorize",
+        params(
+            ("detail" = Option<String>, Query, description = "Response detail level: 'brief' (default) or 'full'"),
+        ),
+        responses(
+            (status = 200, description = "Authorize performed successfully", body = AuthorizeResponse),
+            (status = 400, description = "Bad request", body = ServiceError),
+            (status = 500, description = "Internal server error", body = ServiceError)
+        ),
+    )]
+pub async fn authorize(
+    store: web::Data<SharedPolicyStore>,
+    query: web::Query<AuthorizeQuery>,
+    req: web::Json<AuthorizeRequest>,
+) -> Result<web::Json<serde_json::Value>, ServiceError> {
+    let store = store.lock()?;
+    let engine_snapshot = store.engine.clone();
+    let version = engine_snapshot.current_version();
+
+    // Release the lock before parallel processing
+    drop(store);
+
+    let detailed = query
+        .detail
+        .as_deref()
+        .map(|d| d.eq_ignore_ascii_case("full") || d.eq_ignore_ascii_case("detailed"))
+        .unwrap_or(false);
+
+    if detailed {
+        // Process in parallel using rayon, returning detailed results
+        let results: Vec<IndexedResult<CheckResponse>> = req
+            .requests
+            .par_iter()
+            .enumerate()
+            .map(|(index, auth_req)| {
+                let result = match engine_snapshot.evaluate(&auth_req.request) {
+                    Ok(decision) => BatchResult::Success {
+                        data: CheckResponse::from(decision),
+                    },
+                    Err(e) => BatchResult::Failed {
+                        message: e.to_string(),
+                    },
+                };
+                IndexedResult {
+                    index,
+                    id: auth_req.id.clone(),
+                    result,
+                }
+            })
+            .collect();
+
+        let successful = results
+            .iter()
+            .filter(|r| matches!(r.result, BatchResult::Success { .. }))
+            .count();
+        let failed = results.len() - successful;
+
+        Ok(web::Json(serde_json::to_value(AuthorizeDetailedResponse {
+            results,
+            version,
+            successful,
+            failed,
+        })?))
+    } else {
+        // Process in parallel using rayon, returning brief results
+        let results: Vec<IndexedResult<CheckResponseBrief>> = req
+            .requests
+            .par_iter()
+            .enumerate()
+            .map(|(index, auth_req)| {
+                let result = match engine_snapshot.evaluate(&auth_req.request) {
+                    Ok(decision) => BatchResult::Success {
+                        data: CheckResponseBrief::from(decision),
+                    },
+                    Err(e) => BatchResult::Failed {
+                        message: e.to_string(),
+                    },
+                };
+                IndexedResult {
+                    index,
+                    id: auth_req.id.clone(),
+                    result,
+                }
+            })
+            .collect();
+
+        let successful = results
+            .iter()
+            .filter(|r| matches!(r.result, BatchResult::Success { .. }))
+            .count();
+        let failed = results.len() - successful;
+
+        Ok(web::Json(serde_json::to_value(AuthorizeResponse {
+            results,
+            version,
+            successful,
+            failed,
+        })?))
+    }
 }
 
 #[utoipa::path(
@@ -178,11 +292,11 @@ pub async fn batch_check(
                 Ok(decision) => BatchResult::Success {
                     data: CheckResponseBrief::from(decision),
                 },
-                Err(e) => BatchResult::Error {
+                Err(e) => BatchResult::Failed {
                     message: e.to_string(),
                 },
             };
-            IndexedResult { index, result }
+            IndexedResult { index, id: None, result }
         })
         .collect();
 
@@ -231,11 +345,11 @@ pub async fn batch_check_detailed(
                 Ok(decision) => BatchResult::Success {
                     data: CheckResponse::from(decision),
                 },
-                Err(e) => BatchResult::Error {
+                Err(e) => BatchResult::Failed {
                     message: e.to_string(),
                 },
             };
-            IndexedResult { index, result }
+            IndexedResult { index, id: None, result }
         })
         .collect();
 

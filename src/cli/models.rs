@@ -2,9 +2,10 @@ use std::{fmt, net::IpAddr, str::FromStr};
 
 use colored::*;
 use serde::{Deserialize, Serialize};
+use tabled::{Table, Tabled};
 use treetop_core::AttrValue;
 
-use crate::cli::style::{error, success};
+use crate::cli::style::{error, success, warning};
 use crate::models::{CheckResponse, CheckResponseBrief, DecisionBrief, PoliciesMetadata};
 use crate::state::{Metadata, OfPolicies};
 
@@ -116,7 +117,10 @@ pub struct PoliciesDownload {
 }
 impl CliDisplay for PoliciesDownload {
     fn display(&self) -> String {
-        format!("Metadata:\n{}\nContent:\n{}", self.policies, self.policies.content)
+        format!(
+            "Metadata:\n{}\nContent:\n{}",
+            self.policies, self.policies.content
+        )
     }
 }
 
@@ -131,4 +135,210 @@ impl CliDisplay for UserPolicies {
 #[derive(Deserialize, Clone)]
 pub struct ErrorResponse {
     pub error: String,
+}
+
+/// Union type for authorization check results (Brief or Detailed)
+#[derive(Clone)]
+pub enum AuthCheckResult {
+    Brief(CheckResponseBrief),
+    Detailed(CheckResponse),
+}
+
+impl<'de> serde::Deserialize<'de> for AuthCheckResult {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let v = serde_json::Value::deserialize(deserializer)?;
+
+        // Try detailed first (has 'policy' field which is unique to CheckResponse)
+        if let Ok(detailed) = serde_json::from_value::<CheckResponse>(v.clone()) {
+            return Ok(AuthCheckResult::Detailed(detailed));
+        }
+
+        // Fall back to brief
+        if let Ok(brief) = serde_json::from_value::<CheckResponseBrief>(v) {
+            return Ok(AuthCheckResult::Brief(brief));
+        }
+
+        Err(serde::de::Error::custom(
+            "Could not deserialize as CheckResponse or CheckResponseBrief",
+        ))
+    }
+}
+
+#[derive(Deserialize)]
+pub struct AuthorizeResult {
+    pub results: Vec<SingleResult>,
+}
+
+#[derive(Deserialize)]
+pub struct SingleResult {
+    pub index: usize,
+    pub id: Option<String>,
+    pub status: String,
+    #[serde(default)]
+    pub result: Option<AuthCheckResult>,
+    pub error: Option<String>,
+}
+
+/// Table representation of a single result for displaying multiple results
+#[derive(Tabled)]
+struct ResultRow {
+    #[tabled(rename = "Index")]
+    index: String,
+    #[tabled(rename = "QID")]
+    id: String,
+    #[tabled(rename = "Status")]
+    status: String,
+    #[tabled(rename = "Decision")]
+    decision: String,
+    #[tabled(rename = "PolicyID")]
+    policy: String,
+}
+
+impl CliDisplay for AuthCheckResult {
+    fn display(&self) -> String {
+        match self {
+            AuthCheckResult::Detailed(detailed) => detailed.display(),
+            AuthCheckResult::Brief(brief) => brief.display(),
+        }
+    }
+}
+
+impl AuthorizeResult {
+    /// Display as a table regardless of result count (without colors)
+    pub fn display_as_table(&self) -> String {
+        if self.results.is_empty() {
+            return warning("Warning: No results in response").to_string();
+        }
+
+        // Extract version - should be the same for all results
+        let version = self
+            .results
+            .first()
+            .and_then(|r| match &r.result {
+                Some(AuthCheckResult::Detailed(detailed)) => Some(detailed.version.hash.clone()),
+                Some(AuthCheckResult::Brief(brief)) => Some(brief.version.hash.clone()),
+                None => None,
+            })
+            .unwrap_or_else(|| "-".to_string());
+
+        let rows: Vec<ResultRow> = self
+            .results
+            .iter()
+            .map(|r| self.result_to_row(r, false))
+            .collect();
+
+        let table_str = Table::new(rows).to_string();
+        format!("Version: {}\n\n{}", version, table_str)
+    }
+
+    /// Extract policy @id from the policy literal text
+    fn extract_policy_id(policy_literal: &str) -> String {
+        // Look for pattern: @id("...") or @id("...", ...)
+        if let Some(start) = policy_literal.find("@id(\"") {
+            let offset = start + 5; // Skip "@id(\""
+            if let Some(end) = policy_literal[offset..].find('"') {
+                return policy_literal[offset..offset + end].to_string();
+            }
+        }
+        "-".to_string()
+    }
+
+    /// Convert a single result to a table row
+    fn result_to_row(&self, r: &SingleResult, use_colors: bool) -> ResultRow {
+        let decision_str = match (&r.result, &r.error) {
+            (Some(auth_result), _) => match auth_result {
+                AuthCheckResult::Detailed(detailed) => match detailed.desicion {
+                    DecisionBrief::Allow => {
+                        if use_colors {
+                            success("Allow").to_string()
+                        } else {
+                            "Allow".to_string()
+                        }
+                    }
+                    DecisionBrief::Deny => {
+                        if use_colors {
+                            error("Deny").to_string()
+                        } else {
+                            "Deny".to_string()
+                        }
+                    }
+                },
+                AuthCheckResult::Brief(brief) => match brief.decision {
+                    DecisionBrief::Allow => {
+                        if use_colors {
+                            success("Allow").to_string()
+                        } else {
+                            "Allow".to_string()
+                        }
+                    }
+                    DecisionBrief::Deny => {
+                        if use_colors {
+                            error("Deny").to_string()
+                        } else {
+                            "Deny".to_string()
+                        }
+                    }
+                },
+            },
+            (None, Some(err)) => {
+                if use_colors {
+                    error(err).to_string()
+                } else {
+                    err.clone()
+                }
+            }
+            (None, None) => "-".to_string(),
+        };
+
+        let policy_id = match &r.result {
+            Some(AuthCheckResult::Detailed(detailed)) => {
+                if let Some(policy) = &detailed.policy {
+                    Self::extract_policy_id(&policy.literal)
+                } else {
+                    "-".to_string()
+                }
+            }
+            _ => "-".to_string(),
+        };
+
+        ResultRow {
+            index: r.index.to_string(),
+            id: r.id.as_deref().unwrap_or("-").to_string(),
+            status: r.status.clone(),
+            decision: decision_str,
+            policy: policy_id,
+        }
+    }
+}
+
+impl CliDisplay for AuthorizeResult {
+    fn display(&self) -> String {
+        match self.results.len() {
+            0 => warning("Warning: No results in response").to_string(),
+            1 => {
+                // Single result - display with full detail
+                let result = &self.results[0];
+                if result.status == "success" {
+                    if let Some(auth_result) = &result.result {
+                        auth_result.display()
+                    } else {
+                        "Success: no result data".to_string()
+                    }
+                } else {
+                    format!(
+                        "{}: {}",
+                        error("Failed"),
+                        result
+                            .error
+                            .as_ref()
+                            .unwrap_or(&"Unknown error".to_string())
+                    )
+                }
+            }
+            _ => self.display_as_table(),
+        }
+    }
 }

@@ -9,10 +9,10 @@ use treetop_rest::cli::style::{
     error, help_line, settings_line, status_flag, title, version, warning, yes_no,
 };
 use treetop_rest::cli::{
-    ApiClient, CliDisplay, ErrorResponse, InputAttrValue, LastUsedValues, PoliciesDownload,
-    UserPolicies, repl::run_repl,
+    ApiClient, AuthorizeResult, CliDisplay, ErrorResponse, InputAttrValue, LastUsedValues,
+    PoliciesDownload, UserPolicies, repl::run_repl,
 };
-use treetop_rest::models::{CheckResponse, CheckResponseBrief, PoliciesMetadata};
+use treetop_rest::models::{AuthRequest, AuthorizeRequest, PoliciesMetadata};
 use uuid::Uuid;
 
 // Completion is handled inside the REPL module now
@@ -111,6 +111,9 @@ enum Commands {
         resource_id: Option<String>,
         #[clap(long = "detailed")]
         detailed: bool,
+        /// Display results in table format instead of default format
+        #[clap(long = "table")]
+        table: bool,
     },
     /// Download policies (JSON by default, use --raw for plain text)
     GetPolicies {
@@ -224,6 +227,7 @@ async fn handle_check(
     resource_id: Option<String>,
     attrs: Vec<(String, InputAttrValue)>,
     detailed: bool,
+    table: bool,
 ) -> Result<()> {
     let principal = principal
         .or_else(|| ctx.last_used.principal.clone())
@@ -275,13 +279,16 @@ async fn handle_check(
         }
     }
 
-    if detailed {
-        let resp = ctx.api.post_check(true, &req).await?;
-        handle_response::<CheckResponse>(resp, ctx.show_json, ctx.show_debug).await?
-    } else {
-        let resp = ctx.api.post_check(false, &req).await?;
-        handle_response::<CheckResponseBrief>(resp, ctx.show_json, ctx.show_debug).await?
-    }
+    // Use the new unified authorize endpoint
+    let auth_request = AuthorizeRequest {
+        requests: vec![AuthRequest {
+            id: None,
+            request: req,
+        }],
+    };
+
+    let resp = ctx.api.post_authorize(&auth_request, detailed).await?;
+    handle_response_authorize(resp, ctx.show_json, ctx.show_debug, table).await?;
 
     Ok(())
 }
@@ -409,6 +416,7 @@ async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()>
             resource_id,
             attrs,
             detailed,
+            table,
         } => {
             handle_check(
                 ctx,
@@ -418,6 +426,7 @@ async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()>
                 resource_id,
                 attrs,
                 detailed,
+                table,
             )
             .await?;
         }
@@ -538,13 +547,16 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
     Ok(())
 }
 
-async fn handle_response<T>(
+/// Generic response handler that takes a closure for display logic
+async fn handle_response_impl<T, F>(
     resp: reqwest::Response,
     show_json: bool,
     show_debug: bool,
+    display_fn: F,
 ) -> Result<()>
 where
-    T: serde::de::DeserializeOwned + CliDisplay,
+    T: serde::de::DeserializeOwned,
+    F: Fn(T) -> String,
 {
     let status = resp.status();
     let body = resp.text().await?;
@@ -565,7 +577,7 @@ where
 
         match serde_json::from_str::<T>(&body) {
             Ok(data) => {
-                println!("{}", data.display());
+                println!("{}", display_fn(data));
                 Ok(())
             }
             Err(parse_err) => {
@@ -595,4 +607,31 @@ where
         // Make non-2xx fail the command:
         anyhow::bail!("request failed with status {status}")
     }
+}
+
+async fn handle_response_authorize(
+    resp: reqwest::Response,
+    show_json: bool,
+    show_debug: bool,
+    use_table: bool,
+) -> Result<()> {
+    handle_response_impl(resp, show_json, show_debug, |data: AuthorizeResult| {
+        if use_table {
+            data.display_as_table()
+        } else {
+            data.display()
+        }
+    })
+    .await
+}
+
+async fn handle_response<T>(
+    resp: reqwest::Response,
+    show_json: bool,
+    show_debug: bool,
+) -> Result<()>
+where
+    T: serde::de::DeserializeOwned + CliDisplay,
+{
+    handle_response_impl(resp, show_json, show_debug, |data: T| data.display()).await
 }

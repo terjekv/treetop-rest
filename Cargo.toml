@@ -21,6 +21,7 @@ regex = "1.12"
 reqwest = { version = "0.13", features = ["json"] }
 rustyline = "17.0"
 serde = "1"
+tabled = "0.20"
 serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1.49", features = ["full"] }
