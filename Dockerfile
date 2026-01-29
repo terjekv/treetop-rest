@@ -47,7 +47,7 @@ RUN chown -R appuser:appgroup /app
 
 USER appuser
 
-# Expose the default API port (config default is 9999; override with APP_PORT)
+# Expose the default API port (config default is 9999; override with TREETOP_PORT)
 EXPOSE 9999
 
 # Health check

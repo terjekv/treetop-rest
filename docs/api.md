@@ -13,7 +13,7 @@ policy management and evaluation.
 ## Authentication
 
 - There is (currently) no authentication for GET endpoints.
-- Uploads to `/api/v1/policies` require `APP_ALLOW_UPLOAD=true` to be set on server start
+- Uploads to `/api/v1/policies` require `TREETOP_ALLOW_UPLOAD=true` to be set on server start
   and the header `X-Upload-Token: <token>` matching the server-generated upload token. This
   token is printed in the server logs on startup.
 

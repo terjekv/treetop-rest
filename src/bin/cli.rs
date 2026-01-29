@@ -1,10 +1,13 @@
 use anyhow::{Context as AnyContext, Result};
-use clap::{Parser, Subcommand};
+use clap::parser::ValueSource;
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use colored::*;
+use dirs::data_dir;
 use std::fs;
 use std::str::FromStr;
 use std::sync::Arc;
 use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
+use treetop_rest::cli::paths::{cli_config_path, cli_history_path};
 use treetop_rest::cli::style::{
     error, help_line, settings_line, status_flag, title, version, warning, yes_no,
 };
@@ -152,36 +155,71 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let cli = Cli::from_arg_matches(&matches)?;
 
     // Load configuration hierarchy: CLI > ENV > Config file > Built-in defaults
     // At this point, clap has already handled CLI args and environment variables
     // Now fill in any missing values from the config file
-    let (config, config_loaded_from_file) = CliConfig::load();
+    let (config, _config_loaded_from_file) = CliConfig::load();
 
-    // For table style: if not provided via CLI/ENV, use config file value
-    let table_style = if let Some(style) = cli.table_style {
-        style
-    } else if config_loaded_from_file {
-        config.table_style
-    } else {
-        TableStyle::default()
+    let is_explicit = |id: &str| {
+        matches.value_source(id).is_some_and(|source| {
+            matches!(source, ValueSource::CommandLine | ValueSource::EnvVariable)
+        })
     };
+
+    let host = if is_explicit("host") {
+        cli.host.clone()
+    } else {
+        config.host.clone().unwrap_or_else(|| cli.host.clone())
+    };
+
+    let port = if is_explicit("port") {
+        cli.port
+    } else {
+        config.port.unwrap_or(cli.port)
+    };
+
+    let show_debug = if is_explicit("debug") {
+        cli.debug
+    } else {
+        config.debug.unwrap_or(cli.debug)
+    };
+
+    let show_json = if is_explicit("json") {
+        cli.json
+    } else {
+        config.json.unwrap_or(cli.json)
+    } || show_debug;
+
+    let show_timing = if is_explicit("timing") {
+        cli.timing
+    } else {
+        config.timing.unwrap_or(cli.timing)
+    };
+
+    let table_style = if is_explicit("table_style") {
+        cli.table_style
+    } else {
+        config.table_style.or(cli.table_style)
+    }
+    .unwrap_or_default();
 
     let cli_command = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
     let correlation_id = make_correlation_id(&cli_command);
 
-    let mut api = ApiClient::from_host_port(&cli.host, cli.port);
+    let mut api = ApiClient::from_host_port(&host, port);
     api.set_correlation_id(correlation_id.clone());
 
     let mut ctx = ExecContext {
         api,
-        show_json: cli.json || cli.debug,
-        show_debug: cli.debug,
-        show_timing: cli.timing,
+        show_json,
+        show_debug,
+        show_timing,
         last_used: LastUsedValues::default(),
-        host: cli.host.clone(),
-        port: cli.port,
+        host: host.clone(),
+        port,
         correlation_id,
         table_style,
     };
@@ -189,8 +227,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Commands::Repl = cli.command {
         let ctx_arc = Arc::new(tokio::sync::Mutex::new(ctx));
         run_repl(
-            &cli.host,
-            cli.port,
+            &host,
+            port,
             {
                 let ctx_arc = ctx_arc.clone();
                 move |input: String| {
@@ -286,6 +324,17 @@ async fn handle_check(ctx: &mut ExecContext, params: CheckParams) -> Result<()> 
         .map(|(k, v)| (k.clone(), v.to_string()))
         .collect();
 
+    // Calculate total number of attribute value permutations
+    // Each attribute's values can have alternatives (|), and we need the product of all
+    let attr_permutations_count: usize = if attrs_tuples.is_empty() {
+        0
+    } else {
+        attrs_tuples
+            .iter()
+            .map(|(_, v)| v.split('|').count())
+            .product()
+    };
+
     // Expand matrix to generate all query permutations
     let matrix_queries = expand_matrix(
         &principal,
@@ -314,6 +363,9 @@ async fn handle_check(ctx: &mut ExecContext, params: CheckParams) -> Result<()> 
         }
         if resource_ids_count > 1 {
             dimensions.push(format!("{} resource-ids", resource_ids_count));
+        }
+        if attr_permutations_count > 1 {
+            dimensions.push(format!("{} attributes", attr_permutations_count));
         }
 
         println!(
@@ -489,10 +541,18 @@ fn show_settings(ctx: &ExecContext) {
         }
     }
 
-    if let Some(data_dir) = dirs::data_dir() {
-        let history_path = data_dir.join("treetop-rest").join("cli_history");
+    let history_path = cli_history_path()
+        .or_else(|| data_dir().map(|dir| dir.join("treetop-cli").join("history")));
+    let config_path = cli_config_path();
+
+    if history_path.is_some() || config_path.is_some() {
         println!("\n{}", title("Files:"));
-        settings_line("History:", &history_path.display().to_string());
+        if let Some(path) = history_path {
+            settings_line("History:", &path.display().to_string());
+        }
+        if let Some(path) = config_path {
+            settings_line("Config:", &path.display().to_string());
+        }
     }
 }
 
@@ -559,7 +619,10 @@ async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()>
     }
 
     if ctx.show_timing {
-        println!("Time: {:?} microseconds", now.elapsed().as_micros());
+        println!(
+            "Time: {} milliseconds",
+            now.elapsed().as_micros() as f64 / 1000.0
+        );
     }
     Ok(())
 }

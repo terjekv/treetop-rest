@@ -3,6 +3,7 @@ pub mod cli_config;
 pub mod completion;
 pub mod matrix;
 pub mod models;
+pub mod paths;
 pub mod repl;
 pub mod style;
 

@@ -2,33 +2,45 @@
 //!
 //! This module handles loading and saving CLI configuration, including table style preferences,
 //! from the platform-standard config directory:
-//! - Unix: `~/.config/treetop/cli.toml`
-//! - Windows: `%APPDATA%/treetop/cli.toml`
-//! - macOS: `~/Library/Application Support/treetop/cli.toml`
+//! - Unix: `~/.config/treetop-cli/config.toml`
+//! - Windows: `%APPDATA%/treetop-cli/config.toml`
+//! - macOS: `~/Library/Application Support/treetop-cli/config.toml`
 //!
 //! Configuration hierarchy (highest to lowest priority):
 //! 1. Command line arguments
 //! 2. Environment variables (e.g., TREETOP_TABLE_STYLE)
-//! 3. Config file (~/.config/treetop/cli.toml)
+//! 3. Config file (~/.config/treetop-cli/config.toml)
 //! 4. Built-in defaults
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+use crate::cli::paths::cli_config_path;
+
 use crate::cli::models::TableStyle;
 
 /// CLI configuration that can be persisted to disk
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CliConfig {
+    /// Default server host to connect to
+    pub host: Option<String>,
+    /// Default server port to connect to
+    pub port: Option<u16>,
+    /// Default JSON output toggle
+    pub json: Option<bool>,
+    /// Default debug output toggle
+    pub debug: Option<bool>,
+    /// Default timing output toggle
+    pub timing: Option<bool>,
     /// Default table style for output
-    pub table_style: TableStyle,
+    pub table_style: Option<TableStyle>,
 }
 
 impl CliConfig {
     /// Get the path to the config file using platform-standard directories
     fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|config_dir| config_dir.join("treetop").join("cli.toml"))
+        cli_config_path()
     }
 
     /// Load configuration from disk, or return defaults if not found
@@ -76,7 +88,12 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = CliConfig::default();
-        assert_eq!(config.table_style.to_string(), "rounded");
+        assert!(config.host.is_none());
+        assert!(config.port.is_none());
+        assert!(config.json.is_none());
+        assert!(config.debug.is_none());
+        assert!(config.timing.is_none());
+        assert!(config.table_style.is_none());
     }
 
     #[test]
@@ -85,10 +102,15 @@ mod tests {
         // If no config file exists, defaults to "rounded"
         // If config file exists, uses the value from file
         // Either way, loading should succeed
-        assert!(matches!(
-            config.table_style,
-            TableStyle::Ascii | TableStyle::Rounded | TableStyle::Unicode | TableStyle::Markdown
-        ));
+        if let Some(style) = config.table_style {
+            assert!(matches!(
+                style,
+                TableStyle::Ascii
+                    | TableStyle::Rounded
+                    | TableStyle::Unicode
+                    | TableStyle::Markdown
+            ));
+        }
     }
 
     #[test]
@@ -97,15 +119,16 @@ mod tests {
         assert!(path.is_some());
         if let Some(p) = path {
             println!("Config path: {:?}", p);
-            assert!(p.to_string_lossy().contains("treetop"));
-            assert!(p.ends_with("cli.toml"));
+            assert!(p.to_string_lossy().contains("treetop-cli"));
+            assert!(p.ends_with("config.toml"));
         }
     }
 
     #[test]
     fn test_toml_serialization() {
         let config = CliConfig {
-            table_style: TableStyle::Unicode,
+            table_style: Some(TableStyle::Unicode),
+            ..Default::default()
         };
         let toml_str = toml::to_string(&config).unwrap();
         assert!(toml_str.contains("table_style"));

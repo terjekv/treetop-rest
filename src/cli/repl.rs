@@ -7,28 +7,47 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Editor, Helper};
 
+use std::path::PathBuf;
+
+use crate::cli::paths::cli_history_path;
+
 use super::completion::complete_line;
 
 pub struct CLIHelper;
 impl Helper for CLIHelper {}
 impl Validator for CLIHelper {}
 impl Highlighter for CLIHelper {}
-impl Hinter for CLIHelper { type Hint = String; }
+impl Hinter for CLIHelper {
+    type Hint = String;
+}
 
 impl Completer for CLIHelper {
     type Candidate = Pair;
 
-    fn complete(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> std::result::Result<(usize, Vec<Pair>), ReadlineError> {
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &Context<'_>,
+    ) -> std::result::Result<(usize, Vec<Pair>), ReadlineError> {
         let (start, matches) = complete_line(line, pos);
         let pairs = matches
             .into_iter()
-            .map(|s| Pair { display: s.clone(), replacement: s })
+            .map(|s| Pair {
+                display: s.clone(),
+                replacement: s,
+            })
             .collect();
         Ok((start, pairs))
     }
 }
 
-pub async fn run_repl<F, Fut, H>(host: &str, port: u16, mut handle_line: F, mut show_help: H) -> Result<()>
+pub async fn run_repl<F, Fut, H>(
+    host: &str,
+    port: u16,
+    mut handle_line: F,
+    mut show_help: H,
+) -> Result<()>
 where
     F: FnMut(String) -> Fut,
     Fut: std::future::Future<Output = Result<()>>,
@@ -37,12 +56,12 @@ where
     let mut rl = Editor::new()?;
     rl.set_helper(Some(CLIHelper));
 
-    let history_path = dirs::data_dir()
-        .map(|p| p.join("treetop-rest"))
-        .unwrap_or_else(|| "treetop-rest".into())
-        .join("cli_history");
+    let history_path =
+        cli_history_path().unwrap_or_else(|| PathBuf::from("treetop-cli").join("history"));
 
-    if let Some(parent) = history_path.parent() { std::fs::create_dir_all(parent)?; }
+    if let Some(parent) = history_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let _ = rl.load_history(&history_path);
     rl.set_max_history_size(1000)?;
 
@@ -68,7 +87,10 @@ where
                 }
             }
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
-            Err(err) => { eprintln!("Error: {err}"); break; }
+            Err(err) => {
+                eprintln!("Error: {err}");
+                break;
+            }
         }
     }
 
