@@ -212,6 +212,16 @@ pub struct AuthorizeDetailedResponse {
     pub failed: usize,
 }
 
+/// Response from the authorize endpoint - either brief or detailed based on query parameter
+#[derive(Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum AuthorizeResponseVariant {
+    /// Brief response with minimal decision information
+    Brief(AuthorizeResponse),
+    /// Detailed response with full decision reasoning
+    Detailed(AuthorizeDetailedResponse),
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct BatchCheckResponse {
     /// Results for each request in the same order as input

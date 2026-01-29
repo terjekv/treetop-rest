@@ -9,8 +9,9 @@ use treetop_rest::cli::style::{
     error, help_line, settings_line, status_flag, title, version, warning, yes_no,
 };
 use treetop_rest::cli::{
-    ApiClient, AuthorizeResult, CliDisplay, ErrorResponse, InputAttrValue, LastUsedValues,
-    PoliciesDownload, UserPolicies, repl::run_repl,
+    ApiClient, AuthorizeResult, CliConfig, CliDisplay, ErrorResponse, InputAttrValue,
+    LastUsedValues, PoliciesDownload, UserPolicies, matrix::expand_matrix, models::TableStyle,
+    repl::run_repl,
 };
 use treetop_rest::models::{AuthRequest, AuthorizeRequest, PoliciesMetadata};
 use uuid::Uuid;
@@ -27,6 +28,7 @@ struct ExecContext {
     host: String,
     port: u16,
     correlation_id: String,
+    table_style: TableStyle,
 }
 
 // REPL logic moved to treetop_rest::cli::repl
@@ -34,19 +36,22 @@ struct ExecContext {
 #[derive(Parser, Debug)]
 #[clap(name = "treetop-cli", about = "CLI (and REPL) for the Treeptop API")]
 struct Cli {
-    #[clap(long, default_value = "127.0.0.1", env = "CLI_HOST")]
+    #[clap(long, default_value = "127.0.0.1", env = "TREETOP_CLI_SERVER_ADDRESS")]
     host: String,
-    #[clap(long, default_value = "9999", env = "CLI_PORT")]
+    #[clap(long, default_value = "9999", env = "TREETOP_CLI_SERVER_PORT")]
     port: u16,
     /// Print JSON responses
-    #[arg(long)]
+    #[arg(long, env = "TREETOP_CLI_JSON")]
     json: bool,
     /// Print JSON requests and responses (superset of --json)
-    #[arg(long)]
+    #[arg(long, env = "TREETOP_CLI_DEBUG")]
     debug: bool,
     /// Print command execution timing
-    #[arg(long)]
+    #[arg(long, env = "TREETOP_CLI_TIMING")]
     timing: bool,
+    /// Table style: rounded (default), ascii, unicode, or markdown
+    #[arg(long, value_parser = clap::value_parser!(TableStyle), env = "TREETOP_CLI_TABLE_STYLE", default_value = "rounded")]
+    table_style: Option<TableStyle>,
     #[clap(subcommand)]
     command: Commands,
 }
@@ -92,21 +97,21 @@ enum Commands {
     Repl,
     /// Get service status
     Status,
-    /// Check a request against policies.     
+    /// Check a request against policies. Supports matrix expansion: use 'alice|bob' for alternatives, 'User::alice[admins|viewers]' for Cedar groups
     Check {
-        /// Principal to evaluate (falls back to last used in REPL)
+        /// Principal to evaluate (falls back to last used in REPL). Supports alternatives: alice|bob
         #[clap(long)]
         principal: Option<String>,
-        /// Action to evaluate (falls back to last used in REPL)
+        /// Action to evaluate (falls back to last used in REPL). Supports alternatives: create|delete
         #[clap(long)]
         action: Option<String>,
-        /// Resource type (falls back to last used in REPL)
+        /// Resource type (falls back to last used in REPL). Supports alternatives: Host|Document
         #[clap(long = "resource-type")]
         resource_type: Option<String>,
-        /// Repeatable: --resource-attribute key=value (quotes allowed around value)
+        /// Repeatable: --resource-attribute key=value (quotes allowed around value). Values support alternatives
         #[arg(long = "resource-attribute", value_parser = parse_kv)]
         attrs: Vec<(String, InputAttrValue)>,
-        /// Resource ID (falls back to last used in REPL)
+        /// Resource ID (falls back to last used in REPL). Supports alternatives: host1.com|host2.com
         #[clap(long = "resource-id")]
         resource_id: Option<String>,
         #[clap(long = "detailed")]
@@ -148,6 +153,21 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+
+    // Load configuration hierarchy: CLI > ENV > Config file > Built-in defaults
+    // At this point, clap has already handled CLI args and environment variables
+    // Now fill in any missing values from the config file
+    let (config, config_loaded_from_file) = CliConfig::load();
+
+    // For table style: if not provided via CLI/ENV, use config file value
+    let table_style = if let Some(style) = cli.table_style {
+        style
+    } else if config_loaded_from_file {
+        config.table_style
+    } else {
+        TableStyle::default()
+    };
+
     let cli_command = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
     let correlation_id = make_correlation_id(&cli_command);
 
@@ -163,6 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         host: cli.host.clone(),
         port: cli.port,
         correlation_id,
+        table_style,
     };
 
     if let Commands::Repl = cli.command {
@@ -219,8 +240,7 @@ fn print_help() {
     help_line("help", "Show this help");
 }
 
-async fn handle_check(
-    ctx: &mut ExecContext,
+struct CheckParams {
     principal: Option<String>,
     action: Option<String>,
     resource_type: Option<String>,
@@ -228,24 +248,30 @@ async fn handle_check(
     attrs: Vec<(String, InputAttrValue)>,
     detailed: bool,
     table: bool,
-) -> Result<()> {
-    let principal = principal
+}
+
+async fn handle_check(ctx: &mut ExecContext, params: CheckParams) -> Result<()> {
+    let principal = params
+        .principal
         .or_else(|| ctx.last_used.principal.clone())
         .ok_or_else(|| anyhow::anyhow!("--principal is required (no previous value)"))?;
-    let action = action
+    let action = params
+        .action
         .or_else(|| ctx.last_used.action.clone())
         .ok_or_else(|| anyhow::anyhow!("--action is required (no previous value)"))?;
-    let resource_type = resource_type
+    let resource_type = params
+        .resource_type
         .or_else(|| ctx.last_used.resource_type.clone())
         .ok_or_else(|| anyhow::anyhow!("--resource-type is required (no previous value)"))?;
-    let resource_id = resource_id
+    let resource_id = params
+        .resource_id
         .or_else(|| ctx.last_used.resource_id.clone())
         .ok_or_else(|| anyhow::anyhow!("--resource-id is required (no previous value)"))?;
 
-    let resolved_attrs = if attrs.is_empty() {
+    let resolved_attrs = if params.attrs.is_empty() {
         ctx.last_used.attrs.clone()
     } else {
-        attrs
+        params.attrs
     };
 
     ctx.last_used.principal = Some(principal.clone());
@@ -254,41 +280,111 @@ async fn handle_check(
     ctx.last_used.resource_id = Some(resource_id.clone());
     ctx.last_used.attrs = resolved_attrs.clone();
 
-    let mut resource = Resource::new(&resource_type, &resource_id);
-    for (k, v) in &resolved_attrs {
-        resource = resource.with_attr(k.clone(), AttrValue::from(v.clone()));
-    }
+    // Convert resolved_attrs to string pairs for matrix expansion
+    let attrs_tuples: Vec<(String, String)> = resolved_attrs
+        .iter()
+        .map(|(k, v)| (k.clone(), v.to_string()))
+        .collect();
 
-    let principal = Principal::User(
-        User::from_str(&principal).with_context(|| format!("invalid --principal `{principal}`"))?,
+    // Expand matrix to generate all query permutations
+    let matrix_queries = expand_matrix(
+        &principal,
+        &action,
+        &resource_type,
+        &resource_id,
+        attrs_tuples,
     );
 
-    let action =
-        Action::from_str(&action).with_context(|| format!("invalid --action `{action}`"))?;
+    // Show preview for matrix queries
+    if matrix_queries.len() > 1 {
+        let mut dimensions = Vec::new();
+        let principals_count = principal.split('|').count();
+        let actions_count = action.split('|').count();
+        let resource_types_count = resource_type.split('|').count();
+        let resource_ids_count = resource_id.split('|').count();
 
-    let req = Request {
-        principal,
-        action,
-        resource,
-    };
+        if principals_count > 1 {
+            dimensions.push(format!("{} principals", principals_count));
+        }
+        if actions_count > 1 {
+            dimensions.push(format!("{} actions", actions_count));
+        }
+        if resource_types_count > 1 {
+            dimensions.push(format!("{} resource-types", resource_types_count));
+        }
+        if resource_ids_count > 1 {
+            dimensions.push(format!("{} resource-ids", resource_ids_count));
+        }
+
+        println!(
+            "{} Generating {} permutations: {}",
+            title("Matrix:"),
+            matrix_queries.len(),
+            dimensions.join(" × ")
+        );
+    }
+
+    // Build authorization requests with query IDs
+    let mut auth_requests = Vec::new();
+    for matrix_query in &matrix_queries {
+        let mut resource = Resource::new(&matrix_query.resource_type, &matrix_query.resource_id);
+        for (k, v) in &matrix_query.attrs {
+            // Parse the attribute value as a Cedar value
+            if let Ok(attr_val) = InputAttrValue::from_str(v) {
+                resource = resource.with_attr(k.clone(), AttrValue::from(attr_val));
+            } else {
+                resource = resource.with_attr(k.clone(), AttrValue::String(v.clone()));
+            }
+        }
+
+        let principal = Principal::User(
+            User::from_str(&matrix_query.principal)
+                .with_context(|| format!("invalid principal `{}`", matrix_query.principal))?,
+        );
+
+        let action = Action::from_str(&matrix_query.action)
+            .with_context(|| format!("invalid action `{}`", matrix_query.action))?;
+
+        let req = Request {
+            principal,
+            action,
+            resource,
+        };
+
+        auth_requests.push(AuthRequest {
+            id: Some(matrix_query.query_id.clone()),
+            request: req,
+        });
+    }
 
     if ctx.show_debug {
-        match serde_json::to_string_pretty(&req) {
-            Ok(body) => eprintln!("{}\n{}", warning("DEBUG request:"), body),
-            Err(err) => eprintln!("{}: {}", error("Failed to serialize request"), err),
+        for (idx, auth_req) in auth_requests.iter().enumerate() {
+            match serde_json::to_string_pretty(&auth_req.request) {
+                Ok(body) => eprintln!("{}\n{}", warning(&format!("DEBUG request {}:", idx)), body),
+                Err(err) => eprintln!("{}: {}", error("Failed to serialize request"), err),
+            }
         }
     }
 
-    // Use the new unified authorize endpoint
-    let auth_request = AuthorizeRequest {
-        requests: vec![AuthRequest {
-            id: None,
-            request: req,
-        }],
+    // Use the unified authorize endpoint with all queries
+    let auth_request_full = AuthorizeRequest {
+        requests: auth_requests,
     };
+    let resp = ctx
+        .api
+        .post_authorize(&auth_request_full, params.detailed)
+        .await?;
 
-    let resp = ctx.api.post_authorize(&auth_request, detailed).await?;
-    handle_response_authorize(resp, ctx.show_json, ctx.show_debug, table).await?;
+    // Auto-enable table mode for multiple queries
+    let use_table = params.table || matrix_queries.len() > 1;
+    handle_response_authorize(
+        resp,
+        ctx.show_json,
+        ctx.show_debug,
+        use_table,
+        ctx.table_style,
+    )
+    .await?;
 
     Ok(())
 }
@@ -369,6 +465,7 @@ fn show_settings(ctx: &ExecContext) {
     settings_line("JSON output:", status_flag(ctx.show_json));
     settings_line("Debug mode:", status_flag(ctx.show_debug));
     settings_line("Timing:", status_flag(ctx.show_timing));
+    settings_line("Table style:", &ctx.table_style.to_string());
 
     if ctx.last_used.principal.is_some() || ctx.last_used.action.is_some() {
         println!("\n{}", title("Last Used Values:"));
@@ -420,13 +517,15 @@ async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()>
         } => {
             handle_check(
                 ctx,
-                principal,
-                action,
-                resource_type,
-                resource_id,
-                attrs,
-                detailed,
-                table,
+                CheckParams {
+                    principal,
+                    action,
+                    resource_type,
+                    resource_id,
+                    attrs,
+                    detailed,
+                    table,
+                },
             )
             .await?;
         }
@@ -614,10 +713,11 @@ async fn handle_response_authorize(
     show_json: bool,
     show_debug: bool,
     use_table: bool,
+    table_style: TableStyle,
 ) -> Result<()> {
     handle_response_impl(resp, show_json, show_debug, |data: AuthorizeResult| {
         if use_table {
-            data.display_as_table()
+            data.display_as_table_with_style(table_style)
         } else {
             data.display()
         }

@@ -2,7 +2,6 @@
 name = "treetop-rest"
 version = "0.0.1"
 edition = "2024"
-rust-version = "1.85"
 build = "build.rs"
 
 [dependencies]
@@ -23,6 +22,7 @@ rustyline = "17.0"
 serde = "1"
 tabled = "0.20"
 serde_json = "1"
+toml = "0.9"
 sha2 = "0.10"
 tokio = { version = "1.49", features = ["full"] }
 tracing = "0.1"

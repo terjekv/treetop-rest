@@ -1,9 +1,10 @@
 use crate::build_info::build_info;
 use crate::errors::ServiceError;
 use crate::models::{
-    AuthorizeDetailedResponse, AuthorizeRequest, AuthorizeResponse,
-    BatchCheckDetailedResponse, BatchCheckRequest, BatchCheckResponse, BatchResult, CheckResponse,
-    CheckResponseBrief, IndexedResult, PoliciesDownload, PoliciesMetadata, UserPolicies,
+    AuthRequest, AuthorizeDetailedResponse, AuthorizeRequest, AuthorizeResponse,
+    AuthorizeResponseVariant, BatchCheckDetailedResponse, BatchCheckRequest, BatchCheckResponse,
+    BatchResult, CheckResponse, CheckResponseBrief, IndexedResult, PoliciesDownload,
+    PoliciesMetadata, UserPolicies,
 };
 use crate::state::SharedPolicyStore;
 
@@ -112,6 +113,62 @@ pub async fn version(
     }))
 }
 
+#[derive(Debug, Clone, Copy)]
+enum DetailLevel {
+    Brief,
+    Full,
+}
+
+impl DetailLevel {
+    fn from_query(detail: Option<&str>) -> Self {
+        match detail {
+            Some(d) if d.eq_ignore_ascii_case("full") || d.eq_ignore_ascii_case("detailed") => {
+                DetailLevel::Full
+            }
+            _ => DetailLevel::Brief,
+        }
+    }
+}
+
+/// Generic helper to evaluate batch requests and return results with counts
+fn evaluate_batch_requests<T, F>(
+    requests: &[AuthRequest],
+    engine_snapshot: &std::sync::Arc<treetop_core::PolicyEngine>,
+    map_fn: F,
+) -> (Vec<IndexedResult<T>>, usize, usize)
+where
+    T: Send,
+    F: Fn(treetop_core::Decision) -> T + Send + Sync,
+{
+    let results: Vec<IndexedResult<T>> = requests
+        .par_iter()
+        .enumerate()
+        .map(|(index, auth_req)| {
+            let result = match engine_snapshot.evaluate(&auth_req.request) {
+                Ok(decision) => BatchResult::Success {
+                    data: map_fn(decision),
+                },
+                Err(e) => BatchResult::Failed {
+                    message: e.to_string(),
+                },
+            };
+            IndexedResult {
+                index,
+                id: auth_req.id.clone(),
+                result,
+            }
+        })
+        .collect();
+
+    let successful = results
+        .iter()
+        .filter(|r| matches!(r.result, BatchResult::Success { .. }))
+        .count();
+    let failed = results.len() - successful;
+
+    (results, successful, failed)
+}
+
 #[derive(serde::Deserialize)]
 pub struct AuthorizeQuery {
     /// Response detail level: 'brief' (default) or 'full'
@@ -125,7 +182,7 @@ pub struct AuthorizeQuery {
             ("detail" = Option<String>, Query, description = "Response detail level: 'brief' (default) or 'full'"),
         ),
         responses(
-            (status = 200, description = "Authorize performed successfully", body = AuthorizeResponse),
+            (status = 200, description = "Authorize performed successfully", body = AuthorizeResponseVariant),
             (status = 400, description = "Bad request", body = ServiceError),
             (status = 500, description = "Internal server error", body = ServiceError)
         ),
@@ -134,7 +191,7 @@ pub async fn authorize(
     store: web::Data<SharedPolicyStore>,
     query: web::Query<AuthorizeQuery>,
     req: web::Json<AuthorizeRequest>,
-) -> Result<web::Json<serde_json::Value>, ServiceError> {
+) -> Result<web::Json<AuthorizeResponseVariant>, ServiceError> {
     let store = store.lock()?;
     let engine_snapshot = store.engine.clone();
     let version = engine_snapshot.current_version();
@@ -142,82 +199,35 @@ pub async fn authorize(
     // Release the lock before parallel processing
     drop(store);
 
-    let detailed = query
-        .detail
-        .as_deref()
-        .map(|d| d.eq_ignore_ascii_case("full") || d.eq_ignore_ascii_case("detailed"))
-        .unwrap_or(false);
+    let detail_level = DetailLevel::from_query(query.detail.as_deref());
 
-    if detailed {
-        // Process in parallel using rayon, returning detailed results
-        let results: Vec<IndexedResult<CheckResponse>> = req
-            .requests
-            .par_iter()
-            .enumerate()
-            .map(|(index, auth_req)| {
-                let result = match engine_snapshot.evaluate(&auth_req.request) {
-                    Ok(decision) => BatchResult::Success {
-                        data: CheckResponse::from(decision),
-                    },
-                    Err(e) => BatchResult::Failed {
-                        message: e.to_string(),
-                    },
-                };
-                IndexedResult {
-                    index,
-                    id: auth_req.id.clone(),
-                    result,
-                }
-            })
-            .collect();
+    match detail_level {
+        DetailLevel::Full => {
+            let (results, successful, failed) =
+                evaluate_batch_requests(&req.requests, &engine_snapshot, CheckResponse::from);
 
-        let successful = results
-            .iter()
-            .filter(|r| matches!(r.result, BatchResult::Success { .. }))
-            .count();
-        let failed = results.len() - successful;
+            Ok(web::Json(AuthorizeResponseVariant::Detailed(
+                AuthorizeDetailedResponse {
+                    results,
+                    version,
+                    successful,
+                    failed,
+                },
+            )))
+        }
+        DetailLevel::Brief => {
+            let (results, successful, failed) =
+                evaluate_batch_requests(&req.requests, &engine_snapshot, CheckResponseBrief::from);
 
-        Ok(web::Json(serde_json::to_value(AuthorizeDetailedResponse {
-            results,
-            version,
-            successful,
-            failed,
-        })?))
-    } else {
-        // Process in parallel using rayon, returning brief results
-        let results: Vec<IndexedResult<CheckResponseBrief>> = req
-            .requests
-            .par_iter()
-            .enumerate()
-            .map(|(index, auth_req)| {
-                let result = match engine_snapshot.evaluate(&auth_req.request) {
-                    Ok(decision) => BatchResult::Success {
-                        data: CheckResponseBrief::from(decision),
-                    },
-                    Err(e) => BatchResult::Failed {
-                        message: e.to_string(),
-                    },
-                };
-                IndexedResult {
-                    index,
-                    id: auth_req.id.clone(),
-                    result,
-                }
-            })
-            .collect();
-
-        let successful = results
-            .iter()
-            .filter(|r| matches!(r.result, BatchResult::Success { .. }))
-            .count();
-        let failed = results.len() - successful;
-
-        Ok(web::Json(serde_json::to_value(AuthorizeResponse {
-            results,
-            version,
-            successful,
-            failed,
-        })?))
+            Ok(web::Json(AuthorizeResponseVariant::Brief(
+                AuthorizeResponse {
+                    results,
+                    version,
+                    successful,
+                    failed,
+                },
+            )))
+        }
     }
 }
 
@@ -296,7 +306,11 @@ pub async fn batch_check(
                     message: e.to_string(),
                 },
             };
-            IndexedResult { index, id: None, result }
+            IndexedResult {
+                index,
+                id: None,
+                result,
+            }
         })
         .collect();
 
@@ -349,7 +363,11 @@ pub async fn batch_check_detailed(
                     message: e.to_string(),
                 },
             };
-            IndexedResult { index, id: None, result }
+            IndexedResult {
+                index,
+                id: None,
+                result,
+            }
         })
         .collect();
 

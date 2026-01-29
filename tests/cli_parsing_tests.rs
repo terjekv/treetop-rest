@@ -33,9 +33,9 @@ fn test_command_completion(#[case] input: &str, #[case] pos: usize, #[case] expe
 }
 
 #[rstest]
-#[case("check ", 6, vec!["--principal", "--action", "--resource-type", "--resource-id", "--resource-attribute", "--detailed"])]
-#[case("check --", 8, vec!["--principal", "--action", "--resource-type", "--resource-id", "--resource-attribute", "--detailed"])]
-#[case("check --p", 9, vec!["--principal"])]
+#[case("check ", 6, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--principal", "--action", "--resource-type", "--resource-id", "--resource-attribute", "--detailed"])]
+#[case("check --", 8, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--principal", "--action", "--resource-type", "--resource-id", "--resource-attribute", "--detailed"])]
+#[case("check --p", 9, vec!["--port", "--principal"])]
 #[case("check --pr", 10, vec!["--principal"])]
 #[case("check --a", 9, vec!["--action"])]
 #[case("check --r", 9, vec!["--resource-type", "--resource-id", "--resource-attribute"])]
@@ -50,7 +50,7 @@ fn test_command_completion(#[case] input: &str, #[case] pos: usize, #[case] expe
 #[case("check --resource-ty", 19, vec!["--resource-type"])]
 #[case("check --resource-i", 18, vec!["--resource-id"])]
 #[case("check --resource-a", 18, vec!["--resource-attribute"])]
-#[case("check --d", 9, vec!["--detailed"])]
+#[case("check --d", 9, vec!["--debug", "--detailed"])]
 fn test_check_flag_completion(
     #[case] input: &str,
     #[case] pos: usize,
@@ -87,8 +87,8 @@ fn test_repeatable_flag_completion(#[case] input: &str, #[case] pos: usize) {
 }
 
 #[rstest]
-#[case("get-policies ", 13, vec!["--raw"])]
-#[case("get-policies --", 15, vec!["--raw"])]
+#[case("get-policies ", 13, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--raw"])]
+#[case("get-policies --", 15, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--raw"])]
 #[case("get-policies --r", 16, vec!["--raw"])]
 fn test_get_policies_completion(
     #[case] input: &str,
@@ -100,11 +100,11 @@ fn test_get_policies_completion(
 }
 
 #[rstest]
-#[case("upload ", 7, vec!["--file", "--raw", "--token"])]
-#[case("upload --", 9, vec!["--file", "--raw", "--token"])]
+#[case("upload ", 7, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--file", "--raw", "--token"])]
+#[case("upload --", 9, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--file", "--raw", "--token"])]
 #[case("upload --f", 10, vec!["--file"])]
 #[case("upload --r", 10, vec!["--raw"])]
-#[case("upload --t", 10, vec!["--token"])]
+#[case("upload --t", 10, vec!["--table-style", "--timing", "--token"])]
 fn test_upload_completion(#[case] input: &str, #[case] pos: usize, #[case] expected: Vec<&str>) {
     let completions = get_completions(input, pos);
     assert_eq!(completions, expected);
@@ -113,14 +113,18 @@ fn test_upload_completion(#[case] input: &str, #[case] pos: usize, #[case] expec
 #[test]
 fn test_no_completion_for_unknown_command() {
     let completions = get_completions("unknown ", 8);
-    assert_eq!(completions.len(), 0);
+    // Unknown commands still get global flags
+    assert!(completions.contains(&"--table-style".to_string()));
+    assert!(completions.len() == treetop_rest::cli::completion::GLOBAL_FLAGS.len());
 }
 
 #[test]
 fn test_no_completion_for_list_policies() {
-    // list-policies takes positional argument, no flags
+    // list-policies takes positional argument, no command-specific flags
+    // but still get global flags
     let completions = get_completions("list-policies ", 14);
-    assert_eq!(completions.len(), 0);
+    assert!(completions.contains(&"--table-style".to_string()));
+    assert!(completions.len() == treetop_rest::cli::completion::GLOBAL_FLAGS.len());
 }
 
 #[test]

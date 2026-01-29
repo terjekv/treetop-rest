@@ -2,12 +2,57 @@ use std::{fmt, net::IpAddr, str::FromStr};
 
 use colored::*;
 use serde::{Deserialize, Serialize};
-use tabled::{Table, Tabled};
+use tabled::{Table, Tabled, settings::Style};
 use treetop_core::AttrValue;
 
 use crate::cli::style::{error, success, warning};
 use crate::models::{CheckResponse, CheckResponseBrief, DecisionBrief, PoliciesMetadata};
 use crate::state::{Metadata, OfPolicies};
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub enum TableStyle {
+    Ascii,
+    #[default]
+    Rounded,
+    Unicode,
+    Markdown,
+}
+
+impl std::str::FromStr for TableStyle {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "ascii" => Ok(TableStyle::Ascii),
+            "rounded" => Ok(TableStyle::Rounded),
+            "unicode" => Ok(TableStyle::Unicode),
+            "markdown" => Ok(TableStyle::Markdown),
+            _ => Err(format!("unknown table style: {}", s)),
+        }
+    }
+}
+
+impl std::fmt::Display for TableStyle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TableStyle::Ascii => write!(f, "ascii"),
+            TableStyle::Rounded => write!(f, "rounded"),
+            TableStyle::Unicode => write!(f, "unicode"),
+            TableStyle::Markdown => write!(f, "markdown"),
+        }
+    }
+}
+
+impl TableStyle {
+    pub fn apply_to_table(&self, mut table: Table) -> Table {
+        match self {
+            TableStyle::Ascii => { table.with(Style::ascii()); },
+            TableStyle::Rounded => { table.with(Style::rounded()); },
+            TableStyle::Unicode => { table.with(Style::modern()); },
+            TableStyle::Markdown => { table.with(Style::markdown()); },
+        }
+        table
+    }
+}
 
 #[derive(Default, Clone)]
 pub struct LastUsedValues {
@@ -16,6 +61,7 @@ pub struct LastUsedValues {
     pub resource_type: Option<String>,
     pub resource_id: Option<String>,
     pub attrs: Vec<(String, InputAttrValue)>,
+    pub table_style: TableStyle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,7 +231,7 @@ pub struct SingleResult {
 /// Table representation of a single result for displaying multiple results
 #[derive(Tabled)]
 struct ResultRow {
-    #[tabled(rename = "Index")]
+    #[tabled(rename = "#")]
     index: String,
     #[tabled(rename = "QID")]
     id: String,
@@ -207,8 +253,8 @@ impl CliDisplay for AuthCheckResult {
 }
 
 impl AuthorizeResult {
-    /// Display as a table regardless of result count (without colors)
-    pub fn display_as_table(&self) -> String {
+    /// Display as a table with the specified style
+    pub fn display_as_table_with_style(&self, style: TableStyle) -> String {
         if self.results.is_empty() {
             return warning("Warning: No results in response").to_string();
         }
@@ -230,8 +276,15 @@ impl AuthorizeResult {
             .map(|r| self.result_to_row(r, false))
             .collect();
 
-        let table_str = Table::new(rows).to_string();
-        format!("Version: {}\n\n{}", version, table_str)
+        let table = Table::new(rows);
+        let styled_table = style.apply_to_table(table);
+        let table_str = styled_table.to_string();
+        format!("Version: {}\n{}", version, table_str)
+    }
+
+    /// Display as a table regardless of result count (without colors) - uses default ASCII style
+    pub fn display_as_table(&self) -> String {
+        self.display_as_table_with_style(TableStyle::default())
     }
 
     /// Extract policy @id from the policy literal text
@@ -338,7 +391,7 @@ impl CliDisplay for AuthorizeResult {
                     )
                 }
             }
-            _ => self.display_as_table(),
+            _ => self.display_as_table_with_style(TableStyle::default()),
         }
     }
 }
