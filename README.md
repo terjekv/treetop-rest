@@ -9,22 +9,22 @@ See [docs/api.md](docs/api.md) for the HTTP API reference.
 
 The server supports the following environment variables:
 
-- `APP_HOST`: The host to bind the server to (default: `localhost`)
-- `APP_PORT`: The port to bind the server to (default: `9999`)
-- `APP_WORKERS`: The number of worker threads to use (default: `4`)
-- `APP_ALLOW_UPLOAD`: Whether to allow manually uploading policies to the server. If set to `true`,
+- `TREETOP_LISTEN`: The host to bind the server to (default: `localhost`)
+- `TREETOP_PORT`: The port to bind the server to (default: `9999`)
+- `TREETOP_WORKERS`: The number of worker threads to use (default: `4`)
+- `TREETOP_ALLOW_UPLOAD`: Whether to allow manually uploading policies to the server. If set to `true`,
   you can upload policies via `POST` to the `/api/v1/policies` endpoint with the content type `text/plain`.
   You will need to provide the upload token in the header `X-Upload-Token`. This token is printed in the
   logs at the `warn` level when the server starts. (default: `false`)
-- `APP_POLICY_URL`: An optional URL for fetching the policy file (in Cedar format) (default: `None`).
-- `APP_POLICY_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the policy file from the
-  `APP_POLICY_URL` (default: `60`).
-- `APP_LABEL_URL`: An optional URL for fetching the label file (in JSON format) (default: `None`).
-- `APP_LABEL_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the label file from the
-  `APP_LABEL_URL` (default: `60`).
-- `APP_CLIENT_ALLOWLIST`: Whitelist of client IPs or CIDR blocks. Use `*` to allow all,
+- `TREETOP_POLICY_URL`: An optional URL for fetching the policy file (in Cedar format) (default: `None`).
+- `TREETOP_POLICY_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the policy file from the
+  `TREETOP_POLICY_URL` (default: `60`).
+- `TREETOP_LABELS_URL`: An optional URL for fetching the label file (in JSON format) (default: `None`).
+- `TREETOP_LABELS_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the label file from the
+  `TREETOP_LABELS_URL` (default: `60`).
+- `TREETOP_CLIENT_ALLOWLIST`: Whitelist of client IPs or CIDR blocks. Use `*` to allow all,
   or comma-separated IPv4/IPv6 addresses/CIDRs (default: `127.0.0.1,::1`).
-- `APP_TRUST_IP_HEADERS`: Whether to trust proxy IP headers (`X-Forwarded-For`, `Forwarded`).
+- `TREETOP_TRUST_IP_HEADERS`: Whether to trust proxy IP headers (`X-Forwarded-For`, `Forwarded`).
   If `false`, only uses peer address (default: `true`).
 
 ### Client interaction
@@ -136,7 +136,8 @@ Last Used Values:
                   ip=10.0.0.1
 
 Files:
-  History:        /Users/alice/Library/Application Support/treetop-rest/cli_history
+  History:        /Users/alice/Library/Application Support/treetop-cli/history
+  Config:         /Users/alice/Library/Application Support/treetop-cli/config.toml
 ```
 
 In the REPL, you can omit `--principal`, `--action`, `--resource-type`, `--resource-id`, and any `--resource-attribute`

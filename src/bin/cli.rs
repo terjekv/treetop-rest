@@ -1,18 +1,22 @@
 use anyhow::{Context as AnyContext, Result};
-use clap::{Parser, Subcommand};
+use clap::parser::ValueSource;
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use colored::*;
+use dirs::data_dir;
 use std::fs;
 use std::str::FromStr;
 use std::sync::Arc;
 use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
+use treetop_rest::cli::paths::{cli_config_path, cli_history_path};
 use treetop_rest::cli::style::{
     error, help_line, settings_line, status_flag, title, version, warning, yes_no,
 };
 use treetop_rest::cli::{
-    ApiClient, CliDisplay, ErrorResponse, InputAttrValue, LastUsedValues, PoliciesDownload,
-    UserPolicies, repl::run_repl,
+    ApiClient, AuthorizeResult, CliConfig, CliDisplay, ErrorResponse, InputAttrValue,
+    LastUsedValues, PoliciesDownload, UserPolicies, matrix::expand_matrix, models::TableStyle,
+    repl::run_repl,
 };
-use treetop_rest::models::{CheckResponse, CheckResponseBrief, PoliciesMetadata};
+use treetop_rest::models::{AuthRequest, AuthorizeRequest, PoliciesMetadata};
 use uuid::Uuid;
 
 // Completion is handled inside the REPL module now
@@ -27,6 +31,7 @@ struct ExecContext {
     host: String,
     port: u16,
     correlation_id: String,
+    table_style: TableStyle,
 }
 
 // REPL logic moved to treetop_rest::cli::repl
@@ -34,19 +39,22 @@ struct ExecContext {
 #[derive(Parser, Debug)]
 #[clap(name = "treetop-cli", about = "CLI (and REPL) for the Treeptop API")]
 struct Cli {
-    #[clap(long, default_value = "127.0.0.1", env = "CLI_HOST")]
+    #[clap(long, default_value = "127.0.0.1", env = "TREETOP_CLI_SERVER_ADDRESS")]
     host: String,
-    #[clap(long, default_value = "9999", env = "CLI_PORT")]
+    #[clap(long, default_value = "9999", env = "TREETOP_CLI_SERVER_PORT")]
     port: u16,
     /// Print JSON responses
-    #[arg(long)]
+    #[arg(long, env = "TREETOP_CLI_JSON")]
     json: bool,
     /// Print JSON requests and responses (superset of --json)
-    #[arg(long)]
+    #[arg(long, env = "TREETOP_CLI_DEBUG")]
     debug: bool,
     /// Print command execution timing
-    #[arg(long)]
+    #[arg(long, env = "TREETOP_CLI_TIMING")]
     timing: bool,
+    /// Table style: rounded (default), ascii, unicode, or markdown
+    #[arg(long, value_parser = clap::value_parser!(TableStyle), env = "TREETOP_CLI_TABLE_STYLE", default_value = "rounded")]
+    table_style: Option<TableStyle>,
     #[clap(subcommand)]
     command: Commands,
 }
@@ -92,25 +100,28 @@ enum Commands {
     Repl,
     /// Get service status
     Status,
-    /// Check a request against policies.     
+    /// Check a request against policies. Supports matrix expansion: use 'alice|bob' for alternatives, 'User::alice[admins|viewers]' for Cedar groups
     Check {
-        /// Principal to evaluate (falls back to last used in REPL)
+        /// Principal to evaluate (falls back to last used in REPL). Supports alternatives: alice|bob
         #[clap(long)]
         principal: Option<String>,
-        /// Action to evaluate (falls back to last used in REPL)
+        /// Action to evaluate (falls back to last used in REPL). Supports alternatives: create|delete
         #[clap(long)]
         action: Option<String>,
-        /// Resource type (falls back to last used in REPL)
+        /// Resource type (falls back to last used in REPL). Supports alternatives: Host|Document
         #[clap(long = "resource-type")]
         resource_type: Option<String>,
-        /// Repeatable: --resource-attribute key=value (quotes allowed around value)
+        /// Repeatable: --resource-attribute key=value (quotes allowed around value). Values support alternatives
         #[arg(long = "resource-attribute", value_parser = parse_kv)]
         attrs: Vec<(String, InputAttrValue)>,
-        /// Resource ID (falls back to last used in REPL)
+        /// Resource ID (falls back to last used in REPL). Supports alternatives: host1.com|host2.com
         #[clap(long = "resource-id")]
         resource_id: Option<String>,
         #[clap(long = "detailed")]
         detailed: bool,
+        /// Display results in table format instead of default format
+        #[clap(long = "table")]
+        table: bool,
     },
     /// Download policies (JSON by default, use --raw for plain text)
     GetPolicies {
@@ -144,29 +155,80 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let cli = Cli::from_arg_matches(&matches)?;
+
+    // Load configuration hierarchy: CLI > ENV > Config file > Built-in defaults
+    // At this point, clap has already handled CLI args and environment variables
+    // Now fill in any missing values from the config file
+    let (config, _config_loaded_from_file) = CliConfig::load();
+
+    let is_explicit = |id: &str| {
+        matches.value_source(id).is_some_and(|source| {
+            matches!(source, ValueSource::CommandLine | ValueSource::EnvVariable)
+        })
+    };
+
+    let host = if is_explicit("host") {
+        cli.host.clone()
+    } else {
+        config.host.clone().unwrap_or_else(|| cli.host.clone())
+    };
+
+    let port = if is_explicit("port") {
+        cli.port
+    } else {
+        config.port.unwrap_or(cli.port)
+    };
+
+    let show_debug = if is_explicit("debug") {
+        cli.debug
+    } else {
+        config.debug.unwrap_or(cli.debug)
+    };
+
+    let show_json = if is_explicit("json") {
+        cli.json
+    } else {
+        config.json.unwrap_or(cli.json)
+    } || show_debug;
+
+    let show_timing = if is_explicit("timing") {
+        cli.timing
+    } else {
+        config.timing.unwrap_or(cli.timing)
+    };
+
+    let table_style = if is_explicit("table_style") {
+        cli.table_style
+    } else {
+        config.table_style.or(cli.table_style)
+    }
+    .unwrap_or_default();
+
     let cli_command = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
     let correlation_id = make_correlation_id(&cli_command);
 
-    let mut api = ApiClient::from_host_port(&cli.host, cli.port);
+    let mut api = ApiClient::from_host_port(&host, port);
     api.set_correlation_id(correlation_id.clone());
 
     let mut ctx = ExecContext {
         api,
-        show_json: cli.json || cli.debug,
-        show_debug: cli.debug,
-        show_timing: cli.timing,
+        show_json,
+        show_debug,
+        show_timing,
         last_used: LastUsedValues::default(),
-        host: cli.host.clone(),
-        port: cli.port,
+        host: host.clone(),
+        port,
         correlation_id,
+        table_style,
     };
 
     if let Commands::Repl = cli.command {
         let ctx_arc = Arc::new(tokio::sync::Mutex::new(ctx));
         run_repl(
-            &cli.host,
-            cli.port,
+            &host,
+            port,
             {
                 let ctx_arc = ctx_arc.clone();
                 move |input: String| {
@@ -216,32 +278,38 @@ fn print_help() {
     help_line("help", "Show this help");
 }
 
-async fn handle_check(
-    ctx: &mut ExecContext,
+struct CheckParams {
     principal: Option<String>,
     action: Option<String>,
     resource_type: Option<String>,
     resource_id: Option<String>,
     attrs: Vec<(String, InputAttrValue)>,
     detailed: bool,
-) -> Result<()> {
-    let principal = principal
+    table: bool,
+}
+
+async fn handle_check(ctx: &mut ExecContext, params: CheckParams) -> Result<()> {
+    let principal = params
+        .principal
         .or_else(|| ctx.last_used.principal.clone())
         .ok_or_else(|| anyhow::anyhow!("--principal is required (no previous value)"))?;
-    let action = action
+    let action = params
+        .action
         .or_else(|| ctx.last_used.action.clone())
         .ok_or_else(|| anyhow::anyhow!("--action is required (no previous value)"))?;
-    let resource_type = resource_type
+    let resource_type = params
+        .resource_type
         .or_else(|| ctx.last_used.resource_type.clone())
         .ok_or_else(|| anyhow::anyhow!("--resource-type is required (no previous value)"))?;
-    let resource_id = resource_id
+    let resource_id = params
+        .resource_id
         .or_else(|| ctx.last_used.resource_id.clone())
         .ok_or_else(|| anyhow::anyhow!("--resource-id is required (no previous value)"))?;
 
-    let resolved_attrs = if attrs.is_empty() {
+    let resolved_attrs = if params.attrs.is_empty() {
         ctx.last_used.attrs.clone()
     } else {
-        attrs
+        params.attrs
     };
 
     ctx.last_used.principal = Some(principal.clone());
@@ -250,38 +318,125 @@ async fn handle_check(
     ctx.last_used.resource_id = Some(resource_id.clone());
     ctx.last_used.attrs = resolved_attrs.clone();
 
-    let mut resource = Resource::new(&resource_type, &resource_id);
-    for (k, v) in &resolved_attrs {
-        resource = resource.with_attr(k.clone(), AttrValue::from(v.clone()));
-    }
+    // Convert resolved_attrs to string pairs for matrix expansion
+    let attrs_tuples: Vec<(String, String)> = resolved_attrs
+        .iter()
+        .map(|(k, v)| (k.clone(), v.to_string()))
+        .collect();
 
-    let principal = Principal::User(
-        User::from_str(&principal).with_context(|| format!("invalid --principal `{principal}`"))?,
-    );
-
-    let action =
-        Action::from_str(&action).with_context(|| format!("invalid --action `{action}`"))?;
-
-    let req = Request {
-        principal,
-        action,
-        resource,
+    // Calculate total number of attribute value permutations
+    // Each attribute's values can have alternatives (|), and we need the product of all
+    let attr_permutations_count: usize = if attrs_tuples.is_empty() {
+        0
+    } else {
+        attrs_tuples
+            .iter()
+            .map(|(_, v)| v.split('|').count())
+            .product()
     };
 
+    // Expand matrix to generate all query permutations
+    let matrix_queries = expand_matrix(
+        &principal,
+        &action,
+        &resource_type,
+        &resource_id,
+        attrs_tuples,
+    );
+
+    // Show preview for matrix queries
+    if matrix_queries.len() > 1 {
+        let mut dimensions = Vec::new();
+        let principals_count = principal.split('|').count();
+        let actions_count = action.split('|').count();
+        let resource_types_count = resource_type.split('|').count();
+        let resource_ids_count = resource_id.split('|').count();
+
+        if principals_count > 1 {
+            dimensions.push(format!("{} principals", principals_count));
+        }
+        if actions_count > 1 {
+            dimensions.push(format!("{} actions", actions_count));
+        }
+        if resource_types_count > 1 {
+            dimensions.push(format!("{} resource-types", resource_types_count));
+        }
+        if resource_ids_count > 1 {
+            dimensions.push(format!("{} resource-ids", resource_ids_count));
+        }
+        if attr_permutations_count > 1 {
+            dimensions.push(format!("{} attributes", attr_permutations_count));
+        }
+
+        println!(
+            "{} Generating {} permutations: {}",
+            title("Matrix:"),
+            matrix_queries.len(),
+            dimensions.join(" × ")
+        );
+    }
+
+    // Build authorization requests with query IDs
+    let mut auth_requests = Vec::new();
+    for matrix_query in &matrix_queries {
+        let mut resource = Resource::new(&matrix_query.resource_type, &matrix_query.resource_id);
+        for (k, v) in &matrix_query.attrs {
+            // Parse the attribute value as a Cedar value
+            if let Ok(attr_val) = InputAttrValue::from_str(v) {
+                resource = resource.with_attr(k.clone(), AttrValue::from(attr_val));
+            } else {
+                resource = resource.with_attr(k.clone(), AttrValue::String(v.clone()));
+            }
+        }
+
+        let principal = Principal::User(
+            User::from_str(&matrix_query.principal)
+                .with_context(|| format!("invalid principal `{}`", matrix_query.principal))?,
+        );
+
+        let action = Action::from_str(&matrix_query.action)
+            .with_context(|| format!("invalid action `{}`", matrix_query.action))?;
+
+        let req = Request {
+            principal,
+            action,
+            resource,
+        };
+
+        auth_requests.push(AuthRequest {
+            id: Some(matrix_query.query_id.clone()),
+            request: req,
+        });
+    }
+
     if ctx.show_debug {
-        match serde_json::to_string_pretty(&req) {
-            Ok(body) => eprintln!("{}\n{}", warning("DEBUG request:"), body),
-            Err(err) => eprintln!("{}: {}", error("Failed to serialize request"), err),
+        for (idx, auth_req) in auth_requests.iter().enumerate() {
+            match serde_json::to_string_pretty(&auth_req.request) {
+                Ok(body) => eprintln!("{}\n{}", warning(&format!("DEBUG request {}:", idx)), body),
+                Err(err) => eprintln!("{}: {}", error("Failed to serialize request"), err),
+            }
         }
     }
 
-    if detailed {
-        let resp = ctx.api.post_check(true, &req).await?;
-        handle_response::<CheckResponse>(resp, ctx.show_json, ctx.show_debug).await?
-    } else {
-        let resp = ctx.api.post_check(false, &req).await?;
-        handle_response::<CheckResponseBrief>(resp, ctx.show_json, ctx.show_debug).await?
-    }
+    // Use the unified authorize endpoint with all queries
+    let auth_request_full = AuthorizeRequest {
+        requests: auth_requests,
+    };
+    let resp = ctx
+        .api
+        .post_authorize(&auth_request_full, params.detailed)
+        .await?;
+
+    // Auto-enable table mode for multiple queries
+    let use_table = params.table || matrix_queries.len() > 1;
+    handle_response_authorize(
+        resp,
+        ctx.show_json,
+        ctx.show_debug,
+        use_table,
+        ctx.table_style,
+    )
+    .await?;
 
     Ok(())
 }
@@ -362,6 +517,7 @@ fn show_settings(ctx: &ExecContext) {
     settings_line("JSON output:", status_flag(ctx.show_json));
     settings_line("Debug mode:", status_flag(ctx.show_debug));
     settings_line("Timing:", status_flag(ctx.show_timing));
+    settings_line("Table style:", &ctx.table_style.to_string());
 
     if ctx.last_used.principal.is_some() || ctx.last_used.action.is_some() {
         println!("\n{}", title("Last Used Values:"));
@@ -385,10 +541,18 @@ fn show_settings(ctx: &ExecContext) {
         }
     }
 
-    if let Some(data_dir) = dirs::data_dir() {
-        let history_path = data_dir.join("treetop-rest").join("cli_history");
+    let history_path = cli_history_path()
+        .or_else(|| data_dir().map(|dir| dir.join("treetop-cli").join("history")));
+    let config_path = cli_config_path();
+
+    if history_path.is_some() || config_path.is_some() {
         println!("\n{}", title("Files:"));
-        settings_line("History:", &history_path.display().to_string());
+        if let Some(path) = history_path {
+            settings_line("History:", &path.display().to_string());
+        }
+        if let Some(path) = config_path {
+            settings_line("Config:", &path.display().to_string());
+        }
     }
 }
 
@@ -409,15 +573,19 @@ async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()>
             resource_id,
             attrs,
             detailed,
+            table,
         } => {
             handle_check(
                 ctx,
-                principal,
-                action,
-                resource_type,
-                resource_id,
-                attrs,
-                detailed,
+                CheckParams {
+                    principal,
+                    action,
+                    resource_type,
+                    resource_id,
+                    attrs,
+                    detailed,
+                    table,
+                },
             )
             .await?;
         }
@@ -451,7 +619,10 @@ async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()>
     }
 
     if ctx.show_timing {
-        println!("Time: {:?} microseconds", now.elapsed().as_micros());
+        println!(
+            "Time: {} milliseconds",
+            now.elapsed().as_micros() as f64 / 1000.0
+        );
     }
     Ok(())
 }
@@ -538,13 +709,16 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
     Ok(())
 }
 
-async fn handle_response<T>(
+/// Generic response handler that takes a closure for display logic
+async fn handle_response_impl<T, F>(
     resp: reqwest::Response,
     show_json: bool,
     show_debug: bool,
+    display_fn: F,
 ) -> Result<()>
 where
-    T: serde::de::DeserializeOwned + CliDisplay,
+    T: serde::de::DeserializeOwned,
+    F: Fn(T) -> String,
 {
     let status = resp.status();
     let body = resp.text().await?;
@@ -565,7 +739,7 @@ where
 
         match serde_json::from_str::<T>(&body) {
             Ok(data) => {
-                println!("{}", data.display());
+                println!("{}", display_fn(data));
                 Ok(())
             }
             Err(parse_err) => {
@@ -595,4 +769,32 @@ where
         // Make non-2xx fail the command:
         anyhow::bail!("request failed with status {status}")
     }
+}
+
+async fn handle_response_authorize(
+    resp: reqwest::Response,
+    show_json: bool,
+    show_debug: bool,
+    use_table: bool,
+    table_style: TableStyle,
+) -> Result<()> {
+    handle_response_impl(resp, show_json, show_debug, |data: AuthorizeResult| {
+        if use_table {
+            data.display_as_table_with_style(table_style)
+        } else {
+            data.display()
+        }
+    })
+    .await
+}
+
+async fn handle_response<T>(
+    resp: reqwest::Response,
+    show_json: bool,
+    show_debug: bool,
+) -> Result<()>
+where
+    T: serde::de::DeserializeOwned + CliDisplay,
+{
+    handle_response_impl(resp, show_json, show_debug, |data: T| data.display()).await
 }

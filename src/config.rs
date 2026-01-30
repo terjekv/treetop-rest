@@ -11,43 +11,43 @@ use crate::models::Endpoint;
 #[derive(Parser, Debug, Clone)]
 pub struct Config {
     /// IP address to bind to
-    #[clap(long, default_value = "127.0.0.1", env = "APP_HOST")]
+    #[clap(long, default_value = "127.0.0.1", env = "TREETOP_LISTEN")]
     pub host: String,
 
     /// Port to listen on
-    #[clap(long, default_value = "9999", env = "APP_PORT")]
+    #[clap(long, default_value = "9999", env = "TREETOP_PORT")]
     pub port: u16,
 
     /// Nnumber of worker threads
-    #[clap(long, default_value = "4", env = "APP_WORKERS")]
+    #[clap(long, default_value = "4", env = "TREETOP_WORKERS")]
     pub workers: usize,
 
     /// Allow upload of policy (otherwise only support of fetching from a URL)
-    #[clap(long, default_value = "false", env = "APP_ALLOW_UPLOAD")]
+    #[clap(long, default_value = "false", env = "TREETOP_ALLOW_UPLOAD")]
     pub allow_upload: bool,
 
     /// URL to fetch policies from
-    #[clap(long, default_value = None, env = "APP_POLICY_URL")]
+    #[clap(long, default_value = None, env = "TREETOP_POLICY_URL")]
     pub policy_url: Option<Endpoint>,
 
-    /// Update frequency in seconds for fetching APP_POLICY_URL (default is 60 seconds)
-    #[clap(long, default_value = None, env = "APP_POLICY_UPDATE_FREQUENCY")]
+    /// Update frequency in seconds for fetching TREETOP_POLICY_URL (default is 60 seconds)
+    #[clap(long, default_value = None, env = "TREETOP_POLICY_UPDATE_FREQUENCY")]
     pub update_frequency: Option<u32>,
 
     /// Optional URL to fetch host labels from
-    #[clap(long, default_value = None, env = "APP_LABELS_URL")]
+    #[clap(long, default_value = None, env = "TREETOP_LABELS_URL")]
     pub labels_url: Option<Endpoint>,
 
     /// Update frequency in seconds for fetching host labels (default is 60 seconds)
-    #[clap(long, default_value = None, env = "APP_LABELS_UPDATE_FREQUENCY")]
+    #[clap(long, default_value = None, env = "TREETOP_LABELS_UPDATE_FREQUENCY")]
     pub labels_refresh: Option<u32>,
 
     /// Trust proxy IP headers (X-Forwarded-For/Forwarded). If false, use peer address only.
-    #[clap(long, default_value = "true", env = "APP_TRUST_IP_HEADERS")]
+    #[clap(long, default_value = "true", env = "TREETOP_TRUST_IP_HEADERS")]
     pub trust_ip_headers: bool,
 
     /// Whitelist of client IPs or CIDRs ("*" allows all)
-    #[clap(long, default_value = "127.0.0.1,::1", env = "APP_CLIENT_ALLOWLIST")]
+    #[clap(long, default_value = "127.0.0.1,::1", env = "TREETOP_CLIENT_ALLOWLIST")]
     pub client_allowlist: ClientAllowlist,
 
     #[clap(long)]

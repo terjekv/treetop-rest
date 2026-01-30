@@ -67,6 +67,17 @@ impl ApiClient {
         self.apply_headers(builder).send().await
     }
 
+    pub async fn post_authorize<T: serde::Serialize + ?Sized>(
+        &self,
+        req: &T,
+        detailed: bool,
+    ) -> reqwest::Result<Response> {
+        let detail_param = if detailed { "full" } else { "brief" };
+        let url = format!("{}/authorize?detail={}", self.base_url, detail_param);
+        let builder = self.client.post(url).json(req);
+        self.apply_headers(builder).send().await
+    }
+
     pub async fn get_policies(&self, raw: bool) -> reqwest::Result<Response> {
         let url = if raw {
             format!("{}/policies?format=raw", self.base_url)

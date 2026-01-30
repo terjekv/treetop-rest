@@ -4,7 +4,10 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
 use treetop_rest::handlers;
-use treetop_rest::models::{CheckResponseBrief, DecisionBrief, PoliciesMetadata};
+use treetop_rest::models::{
+    AuthorizeBriefResponse, AuthorizeDecisionBrief, AuthorizeDetailedResponse, AuthorizeRequest,
+    BatchResult, DecisionBrief, IndexedResult, PoliciesMetadata,
+};
 use treetop_rest::state::PolicyStore;
 
 /// Helper to create a test policy store with default policies
@@ -34,6 +37,29 @@ when { resource.ip.isInRange(ip("10.0.0.0/24")) };
 
     store.set_dsl(dsl, None, None).unwrap();
     Arc::new(Mutex::new(store))
+}
+
+fn assert_brief_result(
+    result: &IndexedResult<AuthorizeDecisionBrief>,
+    expected_id: Option<&str>,
+    expected: DecisionBrief,
+) {
+    if let Some(expected_id) = expected_id {
+        assert_eq!(result.id(), Some(expected_id));
+    }
+    match result.result() {
+        BatchResult::Success { data } => match expected {
+            DecisionBrief::Allow => assert!(matches!(data.decision, DecisionBrief::Allow)),
+            DecisionBrief::Deny => assert!(matches!(data.decision, DecisionBrief::Deny)),
+        },
+        BatchResult::Failed { message } => panic!("unexpected failure: {}", message),
+    }
+}
+
+fn assert_single_decision(body: &AuthorizeBriefResponse, expected: DecisionBrief) {
+    assert_eq!(body.results().len(), 1);
+    let result = body.iter().next().expect("missing result");
+    assert_brief_result(result, None, expected);
 }
 
 #[actix_web::test]
@@ -71,7 +97,7 @@ async fn test_check_endpoint_allow() {
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
-            .route("/api/v1/check", web::post().to(handlers::check)),
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
 
@@ -81,16 +107,18 @@ async fn test_check_endpoint_allow() {
         resource: Resource::new("Photo", "VacationPhoto94.jpg"),
     };
 
+    let auth_request = AuthorizeRequest::single(request);
+
     let req = test::TestRequest::post()
-        .uri("/api/v1/check")
-        .set_json(&request)
+        .uri("/api/v1/authorize")
+        .set_json(&auth_request)
         .to_request();
 
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
 
-    let body: CheckResponseBrief = test::read_body_json(resp).await;
-    assert!(matches!(body.decision, DecisionBrief::Allow));
+    let body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+    assert_single_decision(&body, DecisionBrief::Allow);
 }
 
 #[actix_web::test]
@@ -99,7 +127,7 @@ async fn test_check_endpoint_deny() {
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
-            .route("/api/v1/check", web::post().to(handlers::check)),
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
 
@@ -109,16 +137,18 @@ async fn test_check_endpoint_deny() {
         resource: Resource::new("Photo", "VacationPhoto94.jpg"),
     };
 
+    let auth_request = AuthorizeRequest::single(request);
+
     let req = test::TestRequest::post()
-        .uri("/api/v1/check")
-        .set_json(&request)
+        .uri("/api/v1/authorize")
+        .set_json(&auth_request)
         .to_request();
 
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
 
-    let body: CheckResponseBrief = test::read_body_json(resp).await;
-    assert!(matches!(body.decision, DecisionBrief::Deny));
+    let body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+    assert_single_decision(&body, DecisionBrief::Deny);
 }
 
 #[actix_web::test]
@@ -127,7 +157,7 @@ async fn test_check_endpoint_with_attributes() {
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
-            .route("/api/v1/check", web::post().to(handlers::check)),
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
 
@@ -140,16 +170,18 @@ async fn test_check_endpoint_with_attributes() {
         resource,
     };
 
+    let auth_request = AuthorizeRequest::single(request);
+
     let req = test::TestRequest::post()
-        .uri("/api/v1/check")
-        .set_json(&request)
+        .uri("/api/v1/authorize")
+        .set_json(&auth_request)
         .to_request();
 
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
 
-    let body: CheckResponseBrief = test::read_body_json(resp).await;
-    assert!(matches!(body.decision, DecisionBrief::Allow));
+    let body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+    assert_single_decision(&body, DecisionBrief::Allow);
 }
 
 #[actix_web::test]
@@ -158,7 +190,7 @@ async fn test_check_endpoint_deny_out_of_range() {
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
-            .route("/api/v1/check", web::post().to(handlers::check)),
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
 
@@ -171,16 +203,18 @@ async fn test_check_endpoint_deny_out_of_range() {
         resource,
     };
 
+    let auth_request = AuthorizeRequest::single(request);
+
     let req = test::TestRequest::post()
-        .uri("/api/v1/check")
-        .set_json(&request)
+        .uri("/api/v1/authorize")
+        .set_json(&auth_request)
         .to_request();
 
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
 
-    let body: CheckResponseBrief = test::read_body_json(resp).await;
-    assert!(matches!(body.decision, DecisionBrief::Deny));
+    let body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+    assert_single_decision(&body, DecisionBrief::Deny);
 }
 
 #[actix_web::test]
@@ -302,4 +336,92 @@ async fn test_list_policies_for_user() {
 
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
+}
+
+#[actix_web::test]
+async fn test_authorize_endpoint_brief() {
+    let store = create_test_store();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let request1 = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    let request2 = Request {
+        principal: Principal::User(User::from_str("bob").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    let auth_request = AuthorizeRequest::with_ids([("check-1", request1), ("check-2", request2)]);
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=brief")
+        .set_json(&auth_request)
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+    assert_eq!(body.results().len(), 2);
+
+    let mut results = body.iter();
+    assert_brief_result(
+        results.next().expect("missing result"),
+        Some("check-1"),
+        DecisionBrief::Allow,
+    );
+    // Second request should be a Deny (bob doesn't have view on this photo)
+    assert_brief_result(
+        results.next().expect("missing result"),
+        Some("check-2"),
+        DecisionBrief::Deny,
+    );
+    assert_eq!(body.successes(), 2);
+    assert_eq!(body.failures(), 0);
+}
+
+#[actix_web::test]
+async fn test_authorize_endpoint_detailed() {
+    let store = create_test_store();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let request = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    let auth_request = AuthorizeRequest::new().add_with_id("check-1", request);
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=full")
+        .set_json(&auth_request)
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body: AuthorizeDetailedResponse = test::read_body_json(resp).await;
+    assert_eq!(body.results().len(), 1);
+    match body.iter().next().expect("missing result").result() {
+        BatchResult::Success { data } => {
+            assert!(matches!(data.desicion, DecisionBrief::Allow));
+            assert!(data.policy.is_some());
+        }
+        BatchResult::Failed { message } => panic!("unexpected failure: {}", message),
+    }
 }

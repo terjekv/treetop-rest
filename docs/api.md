@@ -13,7 +13,7 @@ policy management and evaluation.
 ## Authentication
 
 - There is (currently) no authentication for GET endpoints.
-- Uploads to `/api/v1/policies` require `APP_ALLOW_UPLOAD=true` to be set on server start
+- Uploads to `/api/v1/policies` require `TREETOP_ALLOW_UPLOAD=true` to be set on server start
   and the header `X-Upload-Token: <token>` matching the server-generated upload token. This
   token is printed in the server logs on startup.
 
@@ -134,161 +134,63 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
 - Purpose: list policies that apply to a user.
 - Response: `{ "user": "<user>", "policies": [<policy_json_objects>] }`.
 
-### POST /api/v1/check
+### POST /api/v1/authorize (Unified Authorization Endpoint)
 
-- Purpose: evaluate a request and return an allow/deny decision.
+- Purpose: evaluate one or more authorization requests with optional client-provided identifiers.
+- Query parameters:
+  - `detail`: Response detail level. `brief` (default) returns only decision and version; `full` (or `detailed`)
+  includes matching policy information.
 - Request body (JSON):
-  - `principal`: principal object supported by treetop-core (namespaces
-    optional).
-  - `action`: action identifier (namespaces optional).
-  - `resource`: `{ kind, id, attrs? }` with optional `attrs` map. Supported
-    attribute value types: `String`, `Int`, `Bool`, `Ip`, `Set`.
+  - `requests`: Array of authorization requests, each containing:
+    - `id` (optional): Client-provided identifier for correlating responses
+    - `principal`: Principal object
+    - `action`: Action identifier
+    - `resource`: Resource object with `kind`, `id`, and optional `attrs`
 
-- Response shape:
-  - `decision`: `Allow` or `Deny`.
-  - `version`: `PolicyVersion` identifying the policy set used for the decision.
-
-Example request:
+**Example request:**
 
 ```bash
-curl -X POST http://localhost:9999/api/v1/check \
+curl -X POST http://localhost:9999/api/v1/authorize \
   -H "Content-Type: application/json" \
   -d '{
-    "principal": { "User": { "id": "alice", "namespace": ["DNS"], "groups": [{ "id": "admins", "namespace": ["DNS"] }] } },
-    "action": { "id": "create_host", "namespace": ["DNS"] },
-    "resource": {
-      "kind": "Host",
-      "id": "hostname.example.com",
-      "attrs": {
-        "ip":   { "type": "Ip", "value": "10.0.0.1" },
-        "name": { "type": "String", "value": "hostname.example.com" }
+    "requests": [
+      {
+        "id": "check-1",
+        "principal": { "User": { "id": "alice", "namespace": ["DNS"], "groups": [{ "id": "admins", "namespace": ["DNS"] }] } },
+        "action": { "id": "create_host", "namespace": ["DNS"] },
+        "resource": {
+          "kind": "Host",
+          "id": "hostname.example.com",
+          "attrs": {
+            "ip":   { "type": "Ip", "value": "10.0.0.1" },
+            "name": { "type": "String", "value": "hostname.example.com" }
+          }
+        }
+      },
+      {
+        "id": "check-2",
+        "principal": { "User": { "id": "bob", "namespace": ["Service"], "groups": [] } },
+        "action": { "id": "view", "namespace": ["Service"] },
+        "resource": {
+          "kind": "Photo",
+          "id": "photo.jpg",
+          "attrs": {
+            "owner": { "type": "String", "value": "alice" }
+          }
+        }
       }
-    }
+    ]
   }'
 ```
 
-Example response:
-
-```json
-{
-  "decision": "Allow",
-  "version": {
-    "hash": "...",
-    "updated": "2025-12-16T22:04:47.321459Z"
-  }
-}
-```
-
-### POST /api/v1/check_detailed
-
-Same request structure as `/api/v1/check` but returns the matching policy if the decision is `Allow`.
-
-- Response shape:
-  - `policy`: `PermitPolicy` when decision is `Allow`, otherwise `null`.
-  - `desicion`: `Allow` or `Deny` (field name is intentionally misspelled).
-  - `version`: `PolicyVersion` identifying the policy set used for the decision.
-
-Example response:
-
-```json
-{
-  "policy": {
-    "literal": "@id(\"DNS.admins_policy\")\npermit (\n    principal in DNS::Group::\"admins\",\n    action in\n        [DNS::Action::\"create_host\",\n         DNS::Action::\"delete_host\",\n         DNS::Action::\"view_host\",\n         DNS::Action::\"edit_host\"],\n    resource is Host\n);",
-    "json": {
-      "effect": "permit",
-      "principal": {
-        "op": "in",
-        "entity": {
-          "type": "DNS::Group",
-          "id": "admins"
-        }
-      },
-      "action": {
-        "op": "in",
-        "entities": [
-          {
-            "type": "DNS::Action",
-            "id": "create_host"
-          },
-          {
-            "type": "DNS::Action",
-            "id": "delete_host"
-          },
-          {
-            "type": "DNS::Action",
-            "id": "view_host"
-          },
-          {
-            "type": "DNS::Action",
-            "id": "edit_host"
-          }
-        ]
-      },
-      "resource": {
-        "op": "is",
-        "entity_type": "Host"
-      },
-      "conditions": [],
-      "annotations": {
-        "id": "DNS.admins_policy"
-      }
-    }
-  },
-  "version": {
-    "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
-    "loaded_at": "2025-12-19T00:14:38.577289000Z"
-  }
-}
-```
-
-## Batch API
-
-The batch API allows you to evaluate multiple authorization requests in a single HTTP call with parallel processing
-on the server side.
-
-### Features
-
-- **Parallel Processing**: All requests are evaluated in parallel using Rayon for maximum throughput
-- **Consistent Snapshot**: All requests in a batch are evaluated against the same policy version
-- **Individual Results**: Each request's result is tracked separately with success/failure status
-- **Index Tracking**: Results maintain the same order as the input requests with explicit index values
-
-### POST /api/v1/batch_check - Brief Results
-
-Process multiple authorization requests and return brief results (decision + version only).
-
-**Request:**
-
-```json
-{
-  "requests": [
-    {
-      "principal": "User::\"alice\"",
-      "action": "view",
-      "resource": {
-        "type": "Photo",
-        "id": "photo1.jpg"
-      }
-    },
-    {
-      "principal": "User::\"bob\"",
-      "action": "edit",
-      "resource": {
-        "type": "Photo",
-        "id": "photo2.jpg"
-      }
-    }
-  ]
-}
-```
-
-**Response:**
+**Response (brief, default):**
 
 ```json
 {
   "results": [
     {
       "index": 0,
+      "id": "check-1",
       "status": "success",
       "result": {
         "decision": "Allow",
@@ -300,7 +202,8 @@ Process multiple authorization requests and return brief results (decision + ver
     },
     {
       "index": 1,
-      "status": "error",
+      "id": "check-2",
+      "status": "failed",
       "error": "Evaluation failed: invalid resource"
     }
   ],
@@ -313,20 +216,14 @@ Process multiple authorization requests and return brief results (decision + ver
 }
 ```
 
-### POST /api/v1/batch_check_detailed - Detailed Results
-
-Process multiple authorization requests and return detailed results (includes policy information).
-
-**Request:**
-Same as `/batch_check`
-
-**Response:**
+**Response (detailed, ?detail=full):**
 
 ```json
 {
   "results": [
     {
       "index": 0,
+      "id": "check-1",
       "status": "success",
       "result": {
         "policy": {
@@ -342,7 +239,8 @@ Same as `/batch_check`
     },
     {
       "index": 1,
-      "status": "error",
+      "id": "check-2",
+      "status": "failed",
       "error": "Evaluation failed: invalid resource"
     }
   ],
@@ -355,140 +253,14 @@ Same as `/batch_check`
 }
 ```
 
-### Result Structure
+### Features
 
-#### Success Result
-
-```json
-{
-  "index": 0,
-  "status": "success",
-  "result": { /* CheckResponse data */ }
-}
-```
-
-#### Error Result
-
-```json
-{
-  "index": 1,
-  "status": "error",
-  "error": "Error message string"
-}
-```
-
-### Usage Examples
-
-#### curl Example
-
-```bash
-curl -X POST http://localhost:9999/api/v1/batch_check \
-  -H "Content-Type: application/json" \
-  -d '{
-    "requests": [
-      {
-        "principal": "User::\"alice\"",
-        "action": "view",
-        "resource": {
-          "type": "Photo",
-          "id": "vacation.jpg"
-        }
-      },
-      {
-        "principal": "User::\"alice\"",
-        "action": "delete",
-        "resource": {
-          "type": "Photo",
-          "id": "vacation.jpg"
-        }
-      }
-    ]
-  }'
-```
-
-#### Python Example
-
-```python
-import requests
-
-response = requests.post(
-    "http://localhost:9999/api/v1/batch_check",
-    json={
-        "requests": [
-            {
-                "principal": 'User::"alice"',
-                "action": "view",
-                "resource": {
-                    "type": "Photo",
-                    "id": "vacation.jpg"
-                }
-            },
-            {
-                "principal": 'User::"bob"',
-                "action": "edit",
-                "resource": {
-                    "type": "Photo",
-                    "id": "vacation.jpg"
-                }
-            }
-        ]
-    }
-)
-
-data = response.json()
-print(f"Successful: {data['successful']}, Failed: {data['failed']}")
-
-for result in data['results']:
-    index = result['index']
-    if result['status'] == 'success':
-        decision = result['result']['decision']
-        print(f"Request {index}: {decision}")
-    else:
-        error = result['error']
-        print(f"Request {index}: Error - {error}")
-```
-
-#### JavaScript/TypeScript Example
-
-```typescript
-const response = await fetch('http://localhost:9999/api/v1/batch_check', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    requests: [
-      {
-        principal: 'User::"alice"',
-        action: 'view',
-        resource: {
-          type: 'Photo',
-          id: 'vacation.jpg'
-        }
-      },
-      {
-        principal: 'User::"bob"',
-        action: 'edit',
-        resource: {
-          type: 'Photo',
-          id: 'vacation.jpg'
-        }
-      }
-    ]
-  })
-});
-
-const data = await response.json();
-console.log(`Successful: ${data.successful}, Failed: ${data.failed}`);
-
-data.results.forEach(result => {
-  if (result.status === 'success') {
-    console.log(`Request ${result.index}: ${result.result.decision}`);
-  } else {
-    console.log(`Request ${result.index}: Error - ${result.error}`);
-  }
-});
-```
+- **Single or Multiple Requests**: Handle one or many authorization requests in a single call
+- **Client Identifiers**: Optional `id` field on each request for easy correlation of responses
+- **Parallel Processing**: All requests evaluated in parallel using Rayon
+- **Consistent Snapshot**: All requests evaluated against the same policy version
+- **Detailed or Brief Results**: Control response verbosity with the `?detail` query parameter
+- **Index Tracking**: Results maintain input order with `index` field
 
 ### Performance Considerations
 
@@ -501,15 +273,4 @@ data.results.forEach(result => {
 1. **Batch Size**: For optimal performance, batch request counts per call depending on your use case and server capacity
 2. **Error Handling**: Check both the HTTP status code and individual result statuses
 3. **Consistency**: All requests in a batch are guaranteed to be evaluated against the same policy version
-4. **Indexing**: Use the `index` field in results to correlate responses with requests
-
-### Comparison with Single Request API
-
-| Feature | Single Request | Batch Request |
-| ------- | ------------- | ------------- |
-| Requests per call | 1 | Multiple |
-| HTTP overhead | Per request | Once per batch |
-| Lock acquisition | Per request | Once per batch |
-| Policy version | Per request | Consistent across batch |
-| Parallel processing | No | Yes (Rayon) |
-| Result tracking | Single result | Indexed results with success/error |
+4. **Indexing**: Use the `index` field or your results to correlate responses with requests, or use the optional `id` field for easier tracking

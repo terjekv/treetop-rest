@@ -9,6 +9,7 @@ use utoipa::ToSchema;
 
 use crate::state::{Metadata, OfLabels, OfPolicies, PolicyStore};
 
+/// Network endpoint URL for policy or label service communication
 #[derive(Deserialize, Serialize, Clone, Debug, ToSchema)]
 pub struct Endpoint {
     #[schema(value_type = String, example = "https://example.com/api")]
@@ -16,14 +17,17 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
+    /// Create a new endpoint from a URL
     pub fn new(url: Url) -> Self {
         Endpoint { url }
     }
 
+    /// Get the endpoint URL as a string slice
     pub fn as_str(&self) -> &str {
         self.url.as_str()
     }
 
+    /// Get a reference to the underlying URL
     pub fn url(&self) -> &Url {
         &self.url
     }
@@ -38,6 +42,7 @@ impl std::fmt::Display for Endpoint {
 impl std::str::FromStr for Endpoint {
     type Err = url::ParseError;
 
+    /// Parse an endpoint from a string
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match Url::parse(s) {
             Ok(url) => Ok(Endpoint { url }),
@@ -46,22 +51,24 @@ impl std::str::FromStr for Endpoint {
     }
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
-pub struct CheckResponse {
+/// Detailed authorization decision including the matching policy
+#[derive(Serialize, Deserialize, ToSchema, Clone)]
+pub struct AuthorizeDecisionDetailed {
     pub policy: Option<PermitPolicy>,
     pub desicion: DecisionBrief,
     pub version: PolicyVersion,
 }
 
-impl From<Decision> for CheckResponse {
+impl From<Decision> for AuthorizeDecisionDetailed {
+    /// Convert a core Decision into a detailed AuthorizeDecisionDetailed
     fn from(decision: Decision) -> Self {
         match decision {
-            Decision::Allow { policy, version } => CheckResponse {
+            Decision::Allow { policy, version } => AuthorizeDecisionDetailed {
                 policy: Some(policy),
                 desicion: DecisionBrief::Allow,
                 version,
             },
-            Decision::Deny { version } => CheckResponse {
+            Decision::Deny { version } => AuthorizeDecisionDetailed {
                 policy: None,
                 desicion: DecisionBrief::Deny,
                 version,
@@ -70,26 +77,29 @@ impl From<Decision> for CheckResponse {
     }
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
+/// Brief authorization decision without policy details
+#[derive(Serialize, Deserialize, ToSchema, Clone)]
 pub enum DecisionBrief {
     Allow,
     Deny,
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
-pub struct CheckResponseBrief {
+/// Brief authorization decision response with minimal information
+#[derive(Serialize, Deserialize, ToSchema, Clone)]
+pub struct AuthorizeDecisionBrief {
     pub decision: DecisionBrief,
     pub version: PolicyVersion,
 }
 
-impl From<Decision> for CheckResponseBrief {
+impl From<Decision> for AuthorizeDecisionBrief {
+    /// Convert a core Decision into a brief AuthorizeDecisionBrief
     fn from(decision: Decision) -> Self {
         match decision {
-            Decision::Allow { version, .. } => CheckResponseBrief {
+            Decision::Allow { version, .. } => AuthorizeDecisionBrief {
                 decision: DecisionBrief::Allow,
                 version,
             },
-            Decision::Deny { version, .. } => CheckResponseBrief {
+            Decision::Deny { version, .. } => AuthorizeDecisionBrief {
                 decision: DecisionBrief::Deny,
                 version,
             },
@@ -97,6 +107,7 @@ impl From<Decision> for CheckResponseBrief {
     }
 }
 
+/// Metadata about the policies and labels in the policy store
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct PoliciesMetadata {
     pub allow_upload: bool,
@@ -109,6 +120,7 @@ impl<T> From<T> for PoliciesMetadata
 where
     T: Deref<Target = PolicyStore>,
 {
+    /// Convert a PolicyStore into metadata
     fn from(store: T) -> Self {
         PoliciesMetadata {
             allow_upload: store.allow_upload,
@@ -118,11 +130,13 @@ where
     }
 }
 
+/// Policy data for download
 #[derive(Serialize, ToSchema)]
 pub struct PoliciesDownload {
     pub policies: Metadata<OfPolicies>,
 }
 
+/// Policies associated with a specific user
 #[derive(Serialize, ToSchema)]
 pub struct UserPolicies {
     pub user: String,
@@ -130,6 +144,7 @@ pub struct UserPolicies {
 }
 
 impl From<treetop_core::UserPolicies> for UserPolicies {
+    /// Convert core UserPolicies into a serializable UserPolicies
     fn from(user_policies: treetop_core::UserPolicies) -> Self {
         UserPolicies {
             user: user_policies.user().to_string(),
@@ -142,57 +157,321 @@ impl From<treetop_core::UserPolicies> for UserPolicies {
     }
 }
 
+/// Single authorization request with optional client-provided ID
+#[derive(Deserialize, Serialize, ToSchema)]
+pub struct AuthRequest {
+    /// Optional client-provided identifier for this request
+    pub id: Option<String>,
+    /// The actual authorization request
+    #[serde(flatten)]
+    pub request: Request,
+}
+
+impl AuthRequest {
+    /// Create a new authorization request without a client ID
+    pub fn new(request: Request) -> Self {
+        Self { id: None, request }
+    }
+
+    /// Create a new authorization request with a client-provided ID
+    ///
+    /// The ID will be returned in the response for request correlation.
+    pub fn with_id<I>(id: I, request: Request) -> Self
+    where
+        I: Into<String>,
+    {
+        Self {
+            id: Some(id.into()),
+            request,
+        }
+    }
+}
+
+impl From<Request> for AuthRequest {
+    /// Convert a Request into an AuthRequest without ID
+    fn from(request: Request) -> Self {
+        Self::new(request)
+    }
+}
+
+#[derive(Deserialize, Serialize, ToSchema)]
+pub struct AuthorizeRequest {
+    /// List of authorization requests to evaluate
+    pub requests: Vec<AuthRequest>,
+}
+
+impl AuthorizeRequest {
+    /// Create a new empty builder for constructing an authorize request
+    ///
+    /// # Example
+    /// ```ignore
+    /// let auth_req = AuthorizeRequest::new()
+    ///     .add_with_id("check-1", request1)
+    ///     .add_with_id("check-2", request2);
+    /// ```
+    pub fn new() -> Self {
+        Self {
+            requests: Vec::new(),
+        }
+    }
+
+    /// Add a request without a client-provided ID, using the fluent builder pattern
+    ///
+    /// # Example
+    /// ```ignore
+    /// let auth_req = AuthorizeRequest::new().add_request(request);
+    /// ```
+    pub fn add_request(mut self, request: Request) -> Self {
+        self.requests.push(AuthRequest::new(request));
+        self
+    }
+
+    /// Add a request with a client-provided ID, using the fluent builder pattern
+    ///
+    /// The ID is returned in the response for request correlation.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let auth_req = AuthorizeRequest::new()
+    ///     .add_with_id("req-1", request1)
+    ///     .add_with_id("req-2", request2);
+    /// ```
+    pub fn add_with_id<I>(mut self, id: I, request: Request) -> Self
+    where
+        I: Into<String>,
+    {
+        self.requests.push(AuthRequest::with_id(id, request));
+        self
+    }
+
+    /// Create a request with a single authorization check (convenience method)
+    pub fn single(request: Request) -> Self {
+        Self {
+            requests: vec![AuthRequest::new(request)],
+        }
+    }
+
+    /// Create a request from multiple authorization checks without IDs (convenience method)
+    pub fn from_requests<I>(requests: I) -> Self
+    where
+        I: IntoIterator<Item = Request>,
+    {
+        Self {
+            requests: requests.into_iter().map(AuthRequest::from).collect(),
+        }
+    }
+
+    /// Create a request from multiple authorization checks with IDs (convenience method)
+    pub fn with_ids<I, Id>(requests: I) -> Self
+    where
+        I: IntoIterator<Item = (Id, Request)>,
+        Id: Into<String>,
+    {
+        Self {
+            requests: requests
+                .into_iter()
+                .map(|(id, request)| AuthRequest::with_id(id, request))
+                .collect(),
+        }
+    }
+}
+
+impl Default for AuthorizeRequest {
+    /// Create a default empty AuthorizeRequest
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Batch authorization check request with multiple requests
 #[derive(Deserialize, ToSchema)]
 pub struct BatchCheckRequest {
     /// List of authorization requests to evaluate
     pub requests: Vec<Request>,
 }
 
-#[derive(Serialize, ToSchema)]
+/// Result of a single batch evaluation - either success or failure
+#[derive(Serialize, Deserialize, ToSchema)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum BatchResult<T> {
-    Success { 
+    Success {
         #[serde(rename = "result")]
-        data: T 
+        data: T,
     },
-    Error { 
+    Failed {
         #[serde(rename = "error")]
-        message: String 
+        message: String,
     },
 }
 
-#[derive(Serialize, ToSchema)]
+/// A single result from a batch operation with its original index and optional client ID
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct IndexedResult<T> {
     /// Index of the request in the original batch
-    pub index: usize,
+    index: usize,
+    /// Client-provided identifier for this request (if provided)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
     /// Result of the evaluation (success or error)
     #[serde(flatten)]
-    pub result: BatchResult<T>,
+    result: BatchResult<T>,
 }
 
-#[derive(Serialize, ToSchema)]
-pub struct BatchCheckResponse {
-    /// Results for each request in the same order as input
-    pub results: Vec<IndexedResult<CheckResponseBrief>>,
-    /// Policy version used for all evaluations
-    pub version: PolicyVersion,
-    /// Number of successful evaluations
-    pub successful: usize,
-    /// Number of failed evaluations
-    pub failed: usize,
+impl<T> IndexedResult<T> {
+    /// Create a new indexed result
+    ///
+    /// # Arguments
+    /// * `index` - Position of this result in the original batch
+    /// * `id` - Optional client-provided identifier for this request
+    /// * `result` - The evaluation result (success or failure)
+    pub fn new(index: usize, id: Option<String>, result: BatchResult<T>) -> Self {
+        Self { index, id, result }
+    }
+
+    /// Get the index of this result in the original batch
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    /// Get the result for this entry
+    pub fn result(&self) -> &BatchResult<T> {
+        &self.result
+    }
+
+    /// Get the client-provided identifier (if any)
+    pub fn id(&self) -> Option<&str> {
+        self.id.as_deref()
+    }
 }
 
-#[derive(Serialize, ToSchema)]
-pub struct BatchCheckDetailedResponse {
-    /// Detailed results for each request in the same order as input
-    pub results: Vec<IndexedResult<CheckResponse>>,
+/// Container for authorization response results with metadata
+///
+/// Generic over the decision type to support both brief and detailed responses.
+/// All fields are private; use accessor methods to retrieve data.
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct AuthorizeResponse<T> {
+    /// Results for each request with optional client IDs
+    results: Vec<IndexedResult<T>>,
     /// Policy version used for all evaluations
-    pub version: PolicyVersion,
+    version: PolicyVersion,
     /// Number of successful evaluations
-    pub successful: usize,
+    successful: usize,
     /// Number of failed evaluations
-    pub failed: usize,
+    failed: usize,
 }
+
+impl<T> AuthorizeResponse<T> {
+    /// Create a new authorize response
+    ///
+    /// # Arguments
+    /// * `results` - Vector of indexed results from the authorization evaluations
+    /// * `version` - Policy version used for all evaluations
+    /// * `successful` - Count of successful evaluations
+    /// * `failed` - Count of failed evaluations
+    pub fn new(
+        results: Vec<IndexedResult<T>>,
+        version: PolicyVersion,
+        successful: usize,
+        failed: usize,
+    ) -> Self {
+        Self {
+            results,
+            version,
+            successful,
+            failed,
+        }
+    }
+
+    /// Get the number of successful evaluations
+    pub fn successes(&self) -> usize {
+        self.successful
+    }
+
+    /// Get the number of failed evaluations
+    pub fn failures(&self) -> usize {
+        self.failed
+    }
+
+    /// Get the policy version used for evaluations
+    pub fn version(&self) -> &PolicyVersion {
+        &self.version
+    }
+
+    /// Get the total number of results
+    pub fn total(&self) -> usize {
+        self.results.len()
+    }
+
+    /// Get a slice of all results
+    pub fn results(&self) -> &[IndexedResult<T>] {
+        &self.results
+    }
+
+    /// Find a result by client-provided ID
+    ///
+    /// Returns the first matching result if multiple results have the same ID.
+    ///
+    /// # Arguments
+    /// * `id` - The client-provided identifier to search for
+    ///
+    /// # Returns
+    /// A reference to the matching result, or None if not found
+    pub fn find_by_id(&self, id: &str) -> Option<&IndexedResult<T>> {
+        self.results.iter().find(|r| r.id.as_deref() == Some(id))
+    }
+
+    /// Get a result by its index in the batch
+    ///
+    /// # Arguments
+    /// * `index` - The index position in the results vector
+    ///
+    /// # Returns
+    /// A reference to the result at that index, or None if out of bounds
+    pub fn get_at(&self, index: usize) -> Option<&IndexedResult<T>> {
+        self.results.get(index)
+    }
+
+    /// Iterate over results
+    pub fn iter(&self) -> impl Iterator<Item = &IndexedResult<T>> {
+        self.results.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a AuthorizeResponse<T> {
+    type Item = &'a IndexedResult<T>;
+    type IntoIter = std::slice::Iter<'a, IndexedResult<T>>;
+
+    /// Create an iterator over results by reference
+    fn into_iter(self) -> Self::IntoIter {
+        self.results.iter()
+    }
+}
+
+/// Type alias for brief authorization response variant
+pub type AuthorizeBriefResponse = AuthorizeResponse<AuthorizeDecisionBrief>;
+/// Type alias for detailed authorization response variant
+pub type AuthorizeDetailedResponse = AuthorizeResponse<AuthorizeDecisionDetailed>;
+
+/// Response from the authorize endpoint - either brief or detailed based on query parameter
+///
+/// Uses tagged serde enum to deserialize into the correct variant.
+#[derive(Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+pub enum AuthorizeResponseVariant {
+    /// Brief response with minimal decision information
+    Brief(AuthorizeBriefResponse),
+    /// Detailed response with full decision reasoning
+    Detailed(AuthorizeDetailedResponse),
+}
+
+/// Deserializable result type for authorize endpoint responses
+pub type AuthorizedResult = AuthorizeResponseVariant;
+
+/// Type alias for brief batch check response variant
+pub type BatchCheckResponse = AuthorizeResponse<AuthorizeDecisionBrief>;
+
+/// Type alias for detailed batch check response variant
+pub type BatchCheckDetailedResponse = AuthorizeResponse<AuthorizeDecisionDetailed>;
 
 #[cfg(test)]
 mod tests {
@@ -223,5 +502,262 @@ mod tests {
     fn test_endpoint_display() {
         let endpoint = Endpoint::from_str("https://example.com/api").unwrap();
         assert_eq!(format!("{}", endpoint), "https://example.com/api");
+    }
+
+    #[test]
+    fn test_indexed_result_accessors() {
+        // Test that IndexedResult accessors work correctly
+        let result = IndexedResult::new(
+            5,
+            Some("test-id".to_string()),
+            BatchResult::Success {
+                data: "success".to_string(),
+            },
+        );
+
+        assert_eq!(result.index(), 5);
+        assert_eq!(result.id(), Some("test-id"));
+        assert!(matches!(result.result(), BatchResult::Success { .. }));
+    }
+
+    #[test]
+    fn test_indexed_result_without_id() {
+        // Test IndexedResult with no client ID
+        let result: IndexedResult<String> = IndexedResult::new(
+            0,
+            None,
+            BatchResult::Failed {
+                message: "error".to_string(),
+            },
+        );
+
+        assert_eq!(result.index(), 0);
+        assert_eq!(result.id(), None);
+        assert!(matches!(result.result(), BatchResult::Failed { .. }));
+    }
+
+    #[test]
+    fn test_authorize_response_accessors() {
+        // Test AuthorizeResponse accessor methods
+        let results = vec![
+            IndexedResult::new(
+                0,
+                Some("req-1".to_string()),
+                BatchResult::Success {
+                    data: "success1".to_string(),
+                },
+            ),
+            IndexedResult::new(
+                1,
+                None,
+                BatchResult::Failed {
+                    message: "error".to_string(),
+                },
+            ),
+        ];
+
+        // Create a minimal PolicyVersion by deserializing from JSON (the only way to construct it)
+        let version_json =
+            r#"{"hash": "test-hash", "serial": 1, "loaded_at": "2024-01-01T00:00:00Z"}"#;
+        let version: PolicyVersion = serde_json::from_str(version_json).unwrap();
+
+        let response = AuthorizeResponse::new(results, version, 1, 1);
+
+        assert_eq!(response.successes(), 1);
+        assert_eq!(response.failures(), 1);
+        assert_eq!(response.total(), 2);
+        assert!(response.version().hash == "test-hash");
+    }
+
+    #[test]
+    fn test_find_by_id_existing() {
+        // Test finding a result by an existing ID
+        let results = vec![
+            IndexedResult::new(
+                0,
+                Some("req-1".to_string()),
+                BatchResult::Success {
+                    data: "success1".to_string(),
+                },
+            ),
+            IndexedResult::new(
+                1,
+                Some("req-2".to_string()),
+                BatchResult::Success {
+                    data: "success2".to_string(),
+                },
+            ),
+        ];
+        let version_json = r#"{"hash": "v1", "serial": 1, "loaded_at": "2024-01-01T00:00:00Z"}"#;
+        let version: PolicyVersion = serde_json::from_str(version_json).unwrap();
+        let response = AuthorizeResponse::new(results, version, 2, 0);
+
+        let found = response.find_by_id("req-2");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().index(), 1);
+        assert_eq!(found.unwrap().id(), Some("req-2"));
+    }
+
+    #[test]
+    fn test_find_by_id_not_found() {
+        // Test that find_by_id returns None for non-existent ID
+        let results = vec![IndexedResult::new(
+            0,
+            Some("req-1".to_string()),
+            BatchResult::Success {
+                data: "success1".to_string(),
+            },
+        )];
+        let version_json = r#"{"hash": "v1", "serial": 1, "loaded_at": "2024-01-01T00:00:00Z"}"#;
+        let version: PolicyVersion = serde_json::from_str(version_json).unwrap();
+        let response = AuthorizeResponse::new(results, version, 1, 0);
+
+        let found = response.find_by_id("req-nonexistent");
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn test_find_by_id_with_none_ids() {
+        // Test find_by_id when some results have no ID
+        let results = vec![
+            IndexedResult::new(
+                0,
+                None,
+                BatchResult::Success {
+                    data: "success1".to_string(),
+                },
+            ),
+            IndexedResult::new(
+                1,
+                Some("req-2".to_string()),
+                BatchResult::Success {
+                    data: "success2".to_string(),
+                },
+            ),
+            IndexedResult::new(
+                2,
+                None,
+                BatchResult::Success {
+                    data: "success3".to_string(),
+                },
+            ),
+        ];
+        let version_json = r#"{"hash": "v1", "serial": 1, "loaded_at": "2024-01-01T00:00:00Z"}"#;
+        let version: PolicyVersion = serde_json::from_str(version_json).unwrap();
+        let response = AuthorizeResponse::new(results, version, 3, 0);
+
+        // Should find the one with ID
+        let found = response.find_by_id("req-2");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().index(), 1);
+
+        // Should not match None entries
+        let not_found = response.find_by_id("none");
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_find_by_id_first_match() {
+        // Test that find_by_id returns the first matching result
+        let results = vec![
+            IndexedResult::new(
+                0,
+                Some("req-1".to_string()),
+                BatchResult::Success {
+                    data: "success1".to_string(),
+                },
+            ),
+            IndexedResult::new(
+                1,
+                Some("req-1".to_string()),
+                BatchResult::Success {
+                    data: "success2".to_string(),
+                },
+            ),
+        ];
+        let version_json = r#"{"hash": "v1", "serial": 1, "loaded_at": "2024-01-01T00:00:00Z"}"#;
+        let version: PolicyVersion = serde_json::from_str(version_json).unwrap();
+        let response = AuthorizeResponse::new(results, version, 2, 0);
+
+        let found = response.find_by_id("req-1");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().index(), 0); // Should return the first match
+    }
+
+    #[test]
+    fn test_find_by_id_empty_response() {
+        // Test find_by_id on an empty response
+        let results: Vec<IndexedResult<String>> = vec![];
+        let version_json = r#"{"hash": "v1", "serial": 1, "loaded_at": "2024-01-01T00:00:00Z"}"#;
+        let version: PolicyVersion = serde_json::from_str(version_json).unwrap();
+        let response = AuthorizeResponse::new(results, version, 0, 0);
+
+        let found = response.find_by_id("any-id");
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn test_authorize_response_iteration() {
+        // Test iterating over response results
+        let results = vec![
+            IndexedResult::new(
+                0,
+                Some("req-1".to_string()),
+                BatchResult::Success {
+                    data: "success1".to_string(),
+                },
+            ),
+            IndexedResult::new(
+                1,
+                Some("req-2".to_string()),
+                BatchResult::Success {
+                    data: "success2".to_string(),
+                },
+            ),
+        ];
+        let version_json = r#"{"hash": "v1", "serial": 1, "loaded_at": "2024-01-01T00:00:00Z"}"#;
+        let version: PolicyVersion = serde_json::from_str(version_json).unwrap();
+        let response = AuthorizeResponse::new(results, version, 2, 0);
+
+        let ids: Vec<_> = response.iter().filter_map(|r| r.id()).collect();
+
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"req-1"));
+        assert!(ids.contains(&"req-2"));
+    }
+
+    #[test]
+    fn test_authorize_response_get_at() {
+        // Test getting result by index
+        let results = vec![
+            IndexedResult::new(
+                0,
+                Some("req-1".to_string()),
+                BatchResult::Success {
+                    data: "success1".to_string(),
+                },
+            ),
+            IndexedResult::new(
+                1,
+                Some("req-2".to_string()),
+                BatchResult::Success {
+                    data: "success2".to_string(),
+                },
+            ),
+        ];
+        let version_json = r#"{"hash": "v1", "serial": 1, "loaded_at": "2024-01-01T00:00:00Z"}"#;
+        let version: PolicyVersion = serde_json::from_str(version_json).unwrap();
+        let response = AuthorizeResponse::new(results, version, 2, 0);
+
+        let first = response.get_at(0);
+        assert!(first.is_some());
+        assert_eq!(first.unwrap().index(), 0);
+
+        let second = response.get_at(1);
+        assert!(second.is_some());
+        assert_eq!(second.unwrap().index(), 1);
+
+        let out_of_bounds = response.get_at(2);
+        assert!(out_of_bounds.is_none());
     }
 }
