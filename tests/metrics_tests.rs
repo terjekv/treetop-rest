@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock};
 use treetop_core::{Action, Principal, Request, Resource, User};
 use treetop_rest::handlers;
+use treetop_rest::models::AuthorizeRequest;
 use treetop_rest::state::PolicyStore;
 
 // Shared metrics registry for all tests
@@ -134,8 +135,8 @@ async fn test_metrics_has_policy_eval_metrics() {
     };
 
     let req = test::TestRequest::post()
-        .uri("/api/v1/check")
-        .set_json(&check_req)
+        .uri("/api/v1/authorize")
+        .set_json(&AuthorizeRequest::single(check_req))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -148,8 +149,8 @@ async fn test_metrics_has_policy_eval_metrics() {
     };
 
     let req = test::TestRequest::post()
-        .uri("/api/v1/check")
-        .set_json(&check_req_denied)
+        .uri("/api/v1/authorize")
+        .set_json(&AuthorizeRequest::single(check_req_denied))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -202,8 +203,8 @@ async fn test_metrics_updated_after_evaluation() {
     };
 
     let req = test::TestRequest::post()
-        .uri("/api/v1/check")
-        .set_json(&check_req)
+        .uri("/api/v1/authorize")
+        .set_json(&AuthorizeRequest::single(check_req))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -260,8 +261,8 @@ async fn test_metrics_tracks_allowed_and_denied() {
     };
 
     let req = test::TestRequest::post()
-        .uri("/api/v1/check")
-        .set_json(&check_req)
+        .uri("/api/v1/authorize")
+        .set_json(&AuthorizeRequest::single(check_req))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -275,8 +276,8 @@ async fn test_metrics_tracks_allowed_and_denied() {
     };
 
     let req = test::TestRequest::post()
-        .uri("/api/v1/check")
-        .set_json(&check_req_denied)
+        .uri("/api/v1/authorize")
+        .set_json(&AuthorizeRequest::single(check_req_denied))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -318,8 +319,8 @@ async fn test_metrics_prometheus_format() {
     };
 
     let req = test::TestRequest::post()
-        .uri("/api/v1/check")
-        .set_json(&check_req)
+        .uri("/api/v1/authorize")
+        .set_json(&AuthorizeRequest::single(check_req))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -406,8 +407,8 @@ async fn test_metrics_has_histogram_buckets() {
     };
 
     let req = test::TestRequest::post()
-        .uri("/api/v1/check")
-        .set_json(&check_req)
+        .uri("/api/v1/authorize")
+        .set_json(&AuthorizeRequest::single(check_req))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -440,7 +441,9 @@ async fn test_http_metrics_include_client_ip_label() {
     let registry = get_metrics_registry();
     let app = test::init_service(
         App::new()
-            .wrap(treetop_rest::middeware::TracingMiddleware::new_with_trust(true))
+            .wrap(treetop_rest::middeware::TracingMiddleware::new_with_trust(
+                true,
+            ))
             .app_data(web::Data::new(store))
             .app_data(web::Data::new(registry.clone()))
             .configure(handlers::init),
@@ -466,7 +469,10 @@ async fn test_http_metrics_include_client_ip_label() {
             && line.contains("client_ip=\"203.0.113.10\"")
             && !line.starts_with('#')
     });
-    assert!(has_client_ip, "HTTP metrics should include client_ip label with the forwarded IP");
+    assert!(
+        has_client_ip,
+        "HTTP metrics should include client_ip label with the forwarded IP"
+    );
 }
 
 /// Helper function to extract a metric value from Prometheus text format

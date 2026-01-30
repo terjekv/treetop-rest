@@ -6,7 +6,9 @@ use tabled::{Table, Tabled, settings::Style};
 use treetop_core::AttrValue;
 
 use crate::cli::style::{error, success, warning};
-use crate::models::{CheckResponse, CheckResponseBrief, DecisionBrief, PoliciesMetadata};
+use crate::models::{
+    AuthorizeDecisionBrief, AuthorizeDecisionDetailed, DecisionBrief, PoliciesMetadata,
+};
 use crate::state::{Metadata, OfPolicies};
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -45,10 +47,18 @@ impl std::fmt::Display for TableStyle {
 impl TableStyle {
     pub fn apply_to_table(&self, mut table: Table) -> Table {
         match self {
-            TableStyle::Ascii => { table.with(Style::ascii()); },
-            TableStyle::Rounded => { table.with(Style::rounded()); },
-            TableStyle::Unicode => { table.with(Style::modern()); },
-            TableStyle::Markdown => { table.with(Style::markdown()); },
+            TableStyle::Ascii => {
+                table.with(Style::ascii());
+            }
+            TableStyle::Rounded => {
+                table.with(Style::rounded());
+            }
+            TableStyle::Unicode => {
+                table.with(Style::modern());
+            }
+            TableStyle::Markdown => {
+                table.with(Style::markdown());
+            }
         }
         table
     }
@@ -132,7 +142,7 @@ impl CliDisplay for PoliciesMetadata {
     }
 }
 
-impl CliDisplay for CheckResponseBrief {
+impl CliDisplay for AuthorizeDecisionBrief {
     fn display(&self) -> String {
         match self.decision {
             DecisionBrief::Allow => format!("{} ({})", success("Allow"), self.version.hash),
@@ -141,7 +151,7 @@ impl CliDisplay for CheckResponseBrief {
     }
 }
 
-impl CliDisplay for CheckResponse {
+impl CliDisplay for AuthorizeDecisionDetailed {
     fn display(&self) -> String {
         match &self.policy {
             Some(policy) => format!(
@@ -186,8 +196,8 @@ pub struct ErrorResponse {
 /// Union type for authorization check results (Brief or Detailed)
 #[derive(Clone)]
 pub enum AuthCheckResult {
-    Brief(CheckResponseBrief),
-    Detailed(CheckResponse),
+    Brief(AuthorizeDecisionBrief),
+    Detailed(AuthorizeDecisionDetailed),
 }
 
 impl<'de> serde::Deserialize<'de> for AuthCheckResult {
@@ -197,18 +207,18 @@ impl<'de> serde::Deserialize<'de> for AuthCheckResult {
     {
         let v = serde_json::Value::deserialize(deserializer)?;
 
-        // Try detailed first (has 'policy' field which is unique to CheckResponse)
-        if let Ok(detailed) = serde_json::from_value::<CheckResponse>(v.clone()) {
+        // Try detailed first (has 'policy' field which is unique to AuthorizeDecisionDetailed)
+        if let Ok(detailed) = serde_json::from_value::<AuthorizeDecisionDetailed>(v.clone()) {
             return Ok(AuthCheckResult::Detailed(detailed));
         }
 
         // Fall back to brief
-        if let Ok(brief) = serde_json::from_value::<CheckResponseBrief>(v) {
+        if let Ok(brief) = serde_json::from_value::<AuthorizeDecisionBrief>(v) {
             return Ok(AuthCheckResult::Brief(brief));
         }
 
         Err(serde::de::Error::custom(
-            "Could not deserialize as CheckResponse or CheckResponseBrief",
+            "Could not deserialize as AuthorizeDecisionDetailed or AuthorizeDecisionBrief",
         ))
     }
 }
