@@ -419,7 +419,7 @@ async fn test_authorize_endpoint_detailed() {
     assert_eq!(body.results().len(), 1);
     match body.iter().next().expect("missing result").result() {
         BatchResult::Success { data } => {
-            assert!(matches!(data.desicion, DecisionBrief::Allow));
+            assert!(matches!(data.decision, DecisionBrief::Allow));
             assert!(data.policy.is_some());
         }
         BatchResult::Failed { message } => panic!("unexpected failure: {}", message),

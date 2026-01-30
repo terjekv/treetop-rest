@@ -230,7 +230,7 @@ curl -X POST http://localhost:9999/api/v1/authorize \
           "literal": "permit (...)",
           "json": {...}
         },
-        "desicion": "Allow",
+        "decision": "Allow",
         "version": {
           "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
           "loaded_at": "2025-12-19T00:14:38.577289000Z"

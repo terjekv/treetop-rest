@@ -55,7 +55,7 @@ impl std::str::FromStr for Endpoint {
 #[derive(Serialize, Deserialize, ToSchema, Clone)]
 pub struct AuthorizeDecisionDetailed {
     pub policy: Option<PermitPolicy>,
-    pub desicion: DecisionBrief,
+    pub decision: DecisionBrief,
     pub version: PolicyVersion,
 }
 
@@ -65,12 +65,12 @@ impl From<Decision> for AuthorizeDecisionDetailed {
         match decision {
             Decision::Allow { policy, version } => AuthorizeDecisionDetailed {
                 policy: Some(policy),
-                desicion: DecisionBrief::Allow,
+                decision: DecisionBrief::Allow,
                 version,
             },
             Decision::Deny { version } => AuthorizeDecisionDetailed {
                 policy: None,
-                desicion: DecisionBrief::Deny,
+                decision: DecisionBrief::Deny,
                 version,
             },
         }

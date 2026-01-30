@@ -313,7 +313,7 @@ impl AuthorizeResult {
     fn result_to_row(&self, r: &SingleResult, use_colors: bool) -> ResultRow {
         let decision_str = match (&r.result, &r.error) {
             (Some(auth_result), _) => match auth_result {
-                AuthCheckResult::Detailed(detailed) => match detailed.desicion {
+                AuthCheckResult::Detailed(detailed) => match detailed.decision {
                     DecisionBrief::Allow => {
                         if use_colors {
                             success("Allow").to_string()
