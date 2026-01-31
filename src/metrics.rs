@@ -76,22 +76,22 @@ impl PrometheusMetricsSink {
     pub fn new(registry: &Registry) -> Result<Self, Box<dyn std::error::Error>> {
         let evals_total = IntCounterVec::new(
             prometheus::Opts::new("policy_evals_total", "Total policy evaluations"),
-            &["principal", "action"],
+            &["action"],
         )?;
         let evals_allowed = IntCounterVec::new(
             prometheus::Opts::new("policy_evals_allowed_total", "Allowed decisions"),
-            &["principal", "action"],
+            &["action"],
         )?;
         let evals_denied = IntCounterVec::new(
             prometheus::Opts::new("policy_evals_denied_total", "Denied decisions"),
-            &["principal", "action"],
+            &["action"],
         )?;
         let eval_duration_seconds = HistogramVec::new(
             HistogramOpts::new(
                 "policy_eval_duration_seconds",
                 "Policy evaluation latency in seconds",
             ),
-            &["principal", "action"],
+            &["action"],
         )?;
         let reloads_total =
             IntCounter::new("policy_reloads_total", "Total number of policy reloads")?;
@@ -114,16 +114,15 @@ impl PrometheusMetricsSink {
 
 impl MetricsSink for PrometheusMetricsSink {
     fn on_evaluation(&self, stats: &EvaluationStats) {
-        let labels = [stats.principal_id.clone(), stats.action_id.clone()];
-        let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-        self.evals_total.with_label_values(&label_refs).inc();
+        let labels = [stats.action_id.as_str()];
+        self.evals_total.with_label_values(&labels).inc();
         if stats.allowed {
-            self.evals_allowed.with_label_values(&label_refs).inc();
+            self.evals_allowed.with_label_values(&labels).inc();
         } else {
-            self.evals_denied.with_label_values(&label_refs).inc();
+            self.evals_denied.with_label_values(&labels).inc();
         }
         self.eval_duration_seconds
-            .with_label_values(&label_refs)
+            .with_label_values(&labels)
             .observe(stats.duration.as_secs_f64());
     }
 
