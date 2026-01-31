@@ -273,4 +273,5 @@ curl -X POST http://localhost:9999/api/v1/authorize \
 1. **Batch Size**: For optimal performance, batch request counts per call depending on your use case and server capacity
 2. **Error Handling**: Check both the HTTP status code and individual result statuses
 3. **Consistency**: All requests in a batch are guaranteed to be evaluated against the same policy version
-4. **Indexing**: Use the `index` field or your results to correlate responses with requests, or use the optional `id` field for easier tracking
+4. **Indexing**: Use the `index` field or your results to correlate responses with requests,
+or use the optional `id` field for easier tracking

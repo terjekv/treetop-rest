@@ -425,3 +425,309 @@ async fn test_authorize_endpoint_detailed() {
         BatchResult::Failed { message } => panic!("unexpected failure: {}", message),
     }
 }
+
+/// Test that brief and detailed return the same decision for Allow
+#[actix_web::test]
+async fn test_brief_and_detailed_both_allow() {
+    let store = create_test_store();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let request = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    // Test brief
+    let auth_request = AuthorizeRequest::single(request.clone());
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=brief")
+        .set_json(&auth_request)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let brief_body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+
+    // Test detailed
+    let auth_request = AuthorizeRequest::single(request);
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=full")
+        .set_json(&auth_request)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let detailed_body: AuthorizeDetailedResponse = test::read_body_json(resp).await;
+
+    // Compare decisions
+    match (
+        brief_body.iter().next().unwrap().result(),
+        detailed_body.iter().next().unwrap().result(),
+    ) {
+        (BatchResult::Success { data: brief }, BatchResult::Success { data: detailed }) => {
+            assert!(matches!(brief.decision, DecisionBrief::Allow));
+            assert!(matches!(detailed.decision, DecisionBrief::Allow));
+        }
+        _ => panic!("Expected success for both brief and detailed"),
+    }
+}
+
+/// Test that brief and detailed return the same decision for Deny
+#[actix_web::test]
+async fn test_brief_and_detailed_both_deny() {
+    let store = create_test_store();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let request = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("edit").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    // Test brief
+    let auth_request = AuthorizeRequest::single(request.clone());
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=brief")
+        .set_json(&auth_request)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let brief_body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+
+    // Test detailed
+    let auth_request = AuthorizeRequest::single(request);
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=full")
+        .set_json(&auth_request)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let detailed_body: AuthorizeDetailedResponse = test::read_body_json(resp).await;
+
+    // Compare decisions
+    match (
+        brief_body.iter().next().unwrap().result(),
+        detailed_body.iter().next().unwrap().result(),
+    ) {
+        (BatchResult::Success { data: brief }, BatchResult::Success { data: detailed }) => {
+            assert!(matches!(brief.decision, DecisionBrief::Deny));
+            assert!(matches!(detailed.decision, DecisionBrief::Deny));
+        }
+        _ => panic!("Expected success for both brief and detailed"),
+    }
+}
+
+/// Test that brief and detailed return consistent decisions with attributes (Allow)
+#[actix_web::test]
+async fn test_brief_and_detailed_with_attributes_allow() {
+    let store = create_test_store();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let resource = Resource::new("Host", "myhost.example.com")
+        .with_attr("ip", AttrValue::Ip("10.0.0.5".to_string()));
+
+    let request = Request {
+        principal: Principal::User(User::from_str("bob").unwrap()),
+        action: Action::from_str("create_host").unwrap(),
+        resource,
+    };
+
+    // Test brief
+    let auth_request = AuthorizeRequest::single(request.clone());
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=brief")
+        .set_json(&auth_request)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let brief_body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+
+    // Test detailed
+    let auth_request = AuthorizeRequest::single(request);
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=full")
+        .set_json(&auth_request)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let detailed_body: AuthorizeDetailedResponse = test::read_body_json(resp).await;
+
+    // Compare decisions
+    match (
+        brief_body.iter().next().unwrap().result(),
+        detailed_body.iter().next().unwrap().result(),
+    ) {
+        (BatchResult::Success { data: brief }, BatchResult::Success { data: detailed }) => {
+            assert!(matches!(brief.decision, DecisionBrief::Allow));
+            assert!(matches!(detailed.decision, DecisionBrief::Allow));
+        }
+        _ => panic!("Expected success for both brief and detailed"),
+    }
+}
+
+/// Test that brief and detailed return consistent decisions with attributes (Deny)
+#[actix_web::test]
+async fn test_brief_and_detailed_with_attributes_deny() {
+    let store = create_test_store();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let resource = Resource::new("Host", "myhost.example.com")
+        .with_attr("ip", AttrValue::Ip("192.168.1.5".to_string()));
+
+    let request = Request {
+        principal: Principal::User(User::from_str("bob").unwrap()),
+        action: Action::from_str("create_host").unwrap(),
+        resource,
+    };
+
+    // Test brief
+    let auth_request = AuthorizeRequest::single(request.clone());
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=brief")
+        .set_json(&auth_request)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let brief_body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+
+    // Test detailed
+    let auth_request = AuthorizeRequest::single(request);
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=full")
+        .set_json(&auth_request)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let detailed_body: AuthorizeDetailedResponse = test::read_body_json(resp).await;
+
+    // Compare decisions
+    match (
+        brief_body.iter().next().unwrap().result(),
+        detailed_body.iter().next().unwrap().result(),
+    ) {
+        (BatchResult::Success { data: brief }, BatchResult::Success { data: detailed }) => {
+            assert!(matches!(brief.decision, DecisionBrief::Deny));
+            assert!(matches!(detailed.decision, DecisionBrief::Deny));
+        }
+        _ => panic!("Expected success for both brief and detailed"),
+    }
+}
+
+/// Test multiple requests in batch - brief and detailed should match
+#[actix_web::test]
+async fn test_brief_and_detailed_batch_consistency() {
+    let store = create_test_store();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let request1 = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    let request2 = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("edit").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    let request3 = Request {
+        principal: Principal::User(User::from_str("bob").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    // Test brief
+    let auth_request = AuthorizeRequest::with_ids([
+        ("q1", request1.clone()),
+        ("q2", request2.clone()),
+        ("q3", request3.clone()),
+    ]);
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=brief")
+        .set_json(&auth_request)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let brief_body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+
+    // Test detailed
+    let auth_request =
+        AuthorizeRequest::with_ids([("q1", request1), ("q2", request2), ("q3", request3)]);
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize?detail=full")
+        .set_json(&auth_request)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let detailed_body: AuthorizeDetailedResponse = test::read_body_json(resp).await;
+
+    // Compare all decisions
+    assert_eq!(brief_body.results().len(), 3);
+    assert_eq!(detailed_body.results().len(), 3);
+
+    let brief_results: Vec<_> = brief_body.iter().collect();
+    let detailed_results: Vec<_> = detailed_body.iter().collect();
+
+    for (brief, detailed) in brief_results.iter().zip(detailed_results.iter()) {
+        match (brief.result(), detailed.result()) {
+            (
+                BatchResult::Success { data: brief_data },
+                BatchResult::Success {
+                    data: detailed_data,
+                },
+            ) => {
+                // Decisions must match
+                let brief_is_allow = matches!(brief_data.decision, DecisionBrief::Allow);
+                let detailed_is_allow = matches!(detailed_data.decision, DecisionBrief::Allow);
+                assert_eq!(
+                    brief_is_allow,
+                    detailed_is_allow,
+                    "Decision mismatch for query id {:?}: brief={}, detailed={}",
+                    brief.id(),
+                    if brief_is_allow { "Allow" } else { "Deny" },
+                    if detailed_is_allow { "Allow" } else { "Deny" }
+                );
+            }
+            _ => panic!("Expected success for both brief and detailed"),
+        }
+    }
+
+    // Verify expected results: Allow, Deny, Deny
+    match brief_results[0].result() {
+        BatchResult::Success { data } => assert!(matches!(data.decision, DecisionBrief::Allow)),
+        _ => panic!("Expected Allow for first request"),
+    }
+    match brief_results[1].result() {
+        BatchResult::Success { data } => assert!(matches!(data.decision, DecisionBrief::Deny)),
+        _ => panic!("Expected Deny for second request"),
+    }
+    match brief_results[2].result() {
+        BatchResult::Success { data } => assert!(matches!(data.decision, DecisionBrief::Deny)),
+        _ => panic!("Expected Deny for third request"),
+    }
+}

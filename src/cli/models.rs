@@ -153,16 +153,19 @@ impl CliDisplay for AuthorizeDecisionBrief {
 
 impl CliDisplay for AuthorizeDecisionDetailed {
     fn display(&self) -> String {
-        match &self.policy {
-            Some(policy) => format!(
-                "{} ({})\n{}\n{}\n{}",
-                success("Allow"),
-                self.version.hash,
-                "--- Matching policy ---".cyan(),
-                policy.literal,
-                "---".cyan()
-            ),
-            None => format!("{} ({})", error("Deny"), self.version.hash),
+        match self.decision {
+            DecisionBrief::Allow => match &self.policy {
+                Some(policy) => format!(
+                    "{} ({})\n{}\n{}\n{}",
+                    success("Allow"),
+                    self.version.hash,
+                    "--- Matching policy ---".cyan(),
+                    policy.literal,
+                    "---".cyan()
+                ),
+                None => format!("{} ({})", success("Allow"), self.version.hash),
+            },
+            DecisionBrief::Deny => format!("{} ({})", error("Deny"), self.version.hash),
         }
     }
 }
@@ -207,14 +210,17 @@ impl<'de> serde::Deserialize<'de> for AuthCheckResult {
     {
         let v = serde_json::Value::deserialize(deserializer)?;
 
-        // Try detailed first (has 'policy' field which is unique to AuthorizeDecisionDetailed)
-        if let Ok(detailed) = serde_json::from_value::<AuthorizeDecisionDetailed>(v.clone()) {
-            return Ok(AuthCheckResult::Detailed(detailed));
-        }
-
-        // Fall back to brief
-        if let Ok(brief) = serde_json::from_value::<AuthorizeDecisionBrief>(v) {
-            return Ok(AuthCheckResult::Brief(brief));
+        // Check if 'policy' field exists to distinguish between Brief and Detailed
+        if v.get("policy").is_some() {
+            // Has 'policy' field, must be Detailed
+            if let Ok(detailed) = serde_json::from_value::<AuthorizeDecisionDetailed>(v) {
+                return Ok(AuthCheckResult::Detailed(detailed));
+            }
+        } else {
+            // No 'policy' field, must be Brief
+            if let Ok(brief) = serde_json::from_value::<AuthorizeDecisionBrief>(v) {
+                return Ok(AuthCheckResult::Brief(brief));
+            }
         }
 
         Err(serde::de::Error::custom(
