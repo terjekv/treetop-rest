@@ -303,82 +303,70 @@ impl AuthorizeResult {
         self.display_as_table_with_style(TableStyle::default())
     }
 
-    /// Extract policy @id from the policy literal text
-    fn extract_policy_id(policy_literal: &str) -> String {
-        // Look for pattern: @id("...") or @id("...", ...)
-        if let Some(start) = policy_literal.find("@id(\"") {
-            let offset = start + 5; // Skip "@id(\""
-            if let Some(end) = policy_literal[offset..].find('"') {
-                return policy_literal[offset..offset + end].to_string();
-            }
-        }
-        "-".to_string()
-    }
-
     /// Convert a single result to a table row
     fn result_to_row(&self, r: &SingleResult, use_colors: bool) -> ResultRow {
-        let decision_str = match (&r.result, &r.error) {
-            (Some(auth_result), _) => match auth_result {
-                AuthCheckResult::Detailed(detailed) => match detailed.decision {
-                    DecisionBrief::Allow => {
-                        if use_colors {
-                            success("Allow").to_string()
-                        } else {
-                            "Allow".to_string()
-                        }
-                    }
-                    DecisionBrief::Deny => {
-                        if use_colors {
-                            error("Deny").to_string()
-                        } else {
-                            "Deny".to_string()
-                        }
-                    }
-                },
-                AuthCheckResult::Brief(brief) => match brief.decision {
-                    DecisionBrief::Allow => {
-                        if use_colors {
-                            success("Allow").to_string()
-                        } else {
-                            "Allow".to_string()
-                        }
-                    }
-                    DecisionBrief::Deny => {
-                        if use_colors {
-                            error("Deny").to_string()
-                        } else {
-                            "Deny".to_string()
-                        }
-                    }
-                },
-            },
-            (None, Some(err)) => {
+        ResultRow {
+            index: r.index.to_string(),
+            id: r.id.as_deref().unwrap_or("").to_string(),
+            status: r.status.clone(),
+            decision: self.format_decision(&r.result, &r.error, use_colors),
+            policy: self.extract_policy_id(&r.result),
+        }
+    }
+
+    /// Format a decision result string, optionally with colors
+    fn format_decision(
+        &self,
+        result: &Option<AuthCheckResult>,
+        err: &Option<String>,
+        use_colors: bool,
+    ) -> String {
+        match (result, err) {
+            (Some(auth_result), _) => {
+                let decision_brief = match auth_result {
+                    AuthCheckResult::Detailed(detailed) => detailed.decision.clone(),
+                    AuthCheckResult::Brief(brief) => brief.decision.clone(),
+                };
+                self.format_decision_value(decision_brief, use_colors)
+            }
+            (None, Some(err_msg)) => {
                 if use_colors {
-                    error(err).to_string()
+                    error(err_msg).to_string()
                 } else {
-                    err.clone()
+                    err_msg.clone()
                 }
             }
             (None, None) => "-".to_string(),
+        }
+    }
+
+    /// Format a decision value (Allow/Deny) with optional colors
+    fn format_decision_value(&self, decision: DecisionBrief, use_colors: bool) -> String {
+        let text = match decision {
+            DecisionBrief::Allow => "Allow",
+            DecisionBrief::Deny => "Deny",
         };
 
-        let policy_id = match &r.result {
-            Some(AuthCheckResult::Detailed(detailed)) => {
-                if let Some(policy) = &detailed.policy {
-                    Self::extract_policy_id(&policy.literal)
-                } else {
-                    "-".to_string()
-                }
+        if use_colors {
+            match decision {
+                DecisionBrief::Allow => success(text).to_string(),
+                DecisionBrief::Deny => error(text).to_string(),
             }
-            _ => "-".to_string(),
-        };
+        } else {
+            text.to_string()
+        }
+    }
 
-        ResultRow {
-            index: r.index.to_string(),
-            id: r.id.as_deref().unwrap_or("-").to_string(),
-            status: r.status.clone(),
-            decision: decision_str,
-            policy: policy_id,
+    /// Extract policy ID from an authorization result
+    fn extract_policy_id(&self, result: &Option<AuthCheckResult>) -> String {
+        match result {
+            Some(AuthCheckResult::Detailed(detailed)) => detailed
+                .policy
+                .as_ref()
+                .map(|p| p.id().clone())
+                .unwrap_or_else(|| "".to_string()),
+            Some(AuthCheckResult::Brief(brief)) => brief.policy_id.clone(),
+            None => "?".to_string(),
         }
     }
 }

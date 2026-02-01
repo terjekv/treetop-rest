@@ -89,19 +89,22 @@ pub enum DecisionBrief {
 pub struct AuthorizeDecisionBrief {
     pub decision: DecisionBrief,
     pub version: PolicyVersion,
+    pub policy_id: String,
 }
 
 impl From<Decision> for AuthorizeDecisionBrief {
     /// Convert a core Decision into a brief AuthorizeDecisionBrief
     fn from(decision: Decision) -> Self {
         match decision {
-            Decision::Allow { version, .. } => AuthorizeDecisionBrief {
+            Decision::Allow { version, policy } => AuthorizeDecisionBrief {
                 decision: DecisionBrief::Allow,
                 version,
+                policy_id: policy.id().clone(),
             },
             Decision::Deny { version, .. } => AuthorizeDecisionBrief {
                 decision: DecisionBrief::Deny,
                 version,
+                policy_id: String::new(),
             },
         }
     }
