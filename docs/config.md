@@ -27,7 +27,9 @@ The server uses **command-line flags** and **environment variables**. There is *
 | --- | --- | --- | --- |
 | `--host` | `TREETOP_LISTEN` | `127.0.0.1` | IP address to bind the server to. |
 | `--port` | `TREETOP_PORT` | `9999` | Port to listen on. |
-| `--workers` | `TREETOP_WORKERS` | `4` | Number of worker threads. |
+| `--workers` | `TREETOP_WORKERS` | auto | Number of Actix worker threads (computed from available CPUs). |
+| `--rayon-threads` | `TREETOP_RAYON_THREADS` | auto | Number of Rayon worker threads for batch evaluation (computed from available CPUs). |
+| `--par-threshold` | `TREETOP_PAR_THRESHOLD` | auto | Batch size threshold to enable parallel evaluation (0 or unset = auto). |
 | `--allow-upload` | `TREETOP_ALLOW_UPLOAD` | `false` | Allow uploading policies via the API. |
 | `--policy-url` | `TREETOP_POLICY_URL` | _(none)_ | URL to fetch policies from (Cedar). |
 | `--update-frequency` | `TREETOP_POLICY_UPDATE_FREQUENCY` | _(none → 60s)_ | Poll interval for `TREETOP_POLICY_URL`. |

@@ -11,7 +11,9 @@ The server supports the following environment variables:
 
 - `TREETOP_LISTEN`: The host to bind the server to (default: `localhost`)
 - `TREETOP_PORT`: The port to bind the server to (default: `9999`)
-- `TREETOP_WORKERS`: The number of worker threads to use (default: `4`)
+- `TREETOP_WORKERS`: The number of Actix worker threads to use (default: auto based on CPU)
+- `TREETOP_RAYON_THREADS`: The number of Rayon worker threads for batch evaluation (default: auto based on CPU)
+- `TREETOP_PAR_THRESHOLD`: Batch size threshold to enable parallel evaluation (default: auto based on CPU)
 - `TREETOP_ALLOW_UPLOAD`: Whether to allow manually uploading policies to the server. If set to `true`,
   you can upload policies via `POST` to the `/api/v1/policies` endpoint with the content type `text/plain`.
   You will need to provide the upload token in the header `X-Upload-Token`. This token is printed in the

@@ -18,9 +18,17 @@ pub struct Config {
     #[clap(long, default_value = "9999", env = "TREETOP_PORT")]
     pub port: u16,
 
-    /// Nnumber of worker threads
-    #[clap(long, default_value = "4", env = "TREETOP_WORKERS")]
-    pub workers: usize,
+    /// Number of Actix worker threads (default: auto based on available CPU)
+    #[clap(long, env = "TREETOP_WORKERS")]
+    pub workers: Option<usize>,
+
+    /// Number of Rayon worker threads used for batch evaluation (default: auto based on available CPU)
+    #[clap(long, env = "TREETOP_RAYON_THREADS")]
+    pub rayon_threads: Option<usize>,
+
+    /// Batch parallel threshold (0 or unset = auto)
+    #[clap(long, env = "TREETOP_PAR_THRESHOLD")]
+    pub par_threshold: Option<usize>,
 
     /// Allow upload of policy (otherwise only support of fetching from a URL)
     #[clap(long, default_value = "false", env = "TREETOP_ALLOW_UPLOAD")]
@@ -47,7 +55,11 @@ pub struct Config {
     pub trust_ip_headers: bool,
 
     /// Whitelist of client IPs or CIDRs ("*" allows all)
-    #[clap(long, default_value = "127.0.0.1,::1", env = "TREETOP_CLIENT_ALLOWLIST")]
+    #[clap(
+        long,
+        default_value = "127.0.0.1,::1",
+        env = "TREETOP_CLIENT_ALLOWLIST"
+    )]
     pub client_allowlist: ClientAllowlist,
 
     #[clap(long)]

@@ -70,3 +70,6 @@ path = "src/bin/server.rs"
 [[bin]]
 name = "treetop-cli"
 path = "src/bin/cli.rs"
+
+[profile.release]
+debug = true

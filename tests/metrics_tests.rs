@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use treetop_core::{Action, Principal, Request, Resource, User};
 use treetop_rest::handlers;
 use treetop_rest::models::AuthorizeRequest;
+use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
 
 // Shared metrics registry for all tests
@@ -29,11 +30,19 @@ fn create_test_app_with_metrics(
 > {
     // Get the shared registry
     let registry = get_metrics_registry();
+    let parallel = ParallelConfig::new(
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1),
+        1,
+        None,
+    );
 
     App::new()
         .wrap(treetop_rest::middeware::TracingMiddleware::new())
         .app_data(web::Data::new(store))
         .app_data(web::Data::new(registry))
+        .app_data(web::Data::new(parallel))
         .configure(handlers::init)
 }
 

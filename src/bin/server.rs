@@ -32,6 +32,21 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
+    let parallel_config = treetop_rest::parallel::init_parallelism(
+        config.workers,
+        config.rayon_threads,
+        config.par_threshold,
+    );
+
+    info!(
+        message = "Scale out config",
+        cpu_count = parallel_config.cpu_count,
+        actix_workers = parallel_config.workers,
+        rayon_threads = parallel_config.rayon_threads,
+        parallel_threshold = parallel_config.par_threshold,
+        allow_parallel = parallel_config.allow_parallel
+    );
+
     // Initialize Prometheus metrics and set treetop-core sink
     let metrics_registry =
         treetop_rest::metrics::init_prometheus().expect("Failed to init metrics");
@@ -89,11 +104,12 @@ async fn main() -> std::io::Result<()> {
                 treetop_rest::handlers::ApiDoc::openapi(),
             ))
             .app_data(actix_web::web::Data::new(store.clone()))
+            .app_data(actix_web::web::Data::new(parallel_config))
             .app_data(actix_web::web::Data::new(metrics_registry.clone()))
             .configure(treetop_rest::handlers::init)
     })
     .bind((config.host.as_str(), config.port))?
-    .workers(config.workers)
+    .workers(parallel_config.workers)
     .run()
     .await
 }

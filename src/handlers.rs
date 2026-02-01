@@ -1,12 +1,3 @@
-use crate::build_info::build_info;
-use crate::errors::ServiceError;
-use crate::models::{
-    AuthRequest, AuthorizeBriefResponse, AuthorizeDecisionBrief, AuthorizeDecisionDetailed,
-    AuthorizeDetailedResponse, AuthorizeRequest, AuthorizeResponseVariant, BatchResult,
-    IndexedResult, PoliciesDownload, PoliciesMetadata, UserPolicies,
-};
-use crate::state::SharedPolicyStore;
-
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
 use prometheus::Registry;
 use rayon::prelude::*;
@@ -15,6 +6,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use treetop_core::PolicyVersion;
 use utoipa::{OpenApi, ToSchema};
+
+use crate::build_info::build_info;
+use crate::errors::ServiceError;
+use crate::models::{
+    AuthRequest, AuthorizeBriefResponse, AuthorizeDecisionBrief, AuthorizeDecisionDetailed,
+    AuthorizeDetailedResponse, AuthorizeRequest, AuthorizeResponseVariant, BatchResult,
+    IndexedResult, PoliciesDownload, PoliciesMetadata, UserPolicies,
+};
+use crate::parallel::ParallelConfig;
+use crate::state::SharedPolicyStore;
 
 #[derive(Deserialize, ToSchema)]
 struct Upload {
@@ -117,31 +118,55 @@ impl DetailLevel {
     }
 }
 
+/// Evaluate a single authorization request and produce an indexed result.
+fn eval_one<T, F>(
+    index: usize,
+    auth_req: &AuthRequest,
+    engine_snapshot: &std::sync::Arc<treetop_core::PolicyEngine>,
+    map_fn: &F,
+) -> IndexedResult<T>
+where
+    T: Send,
+    F: Fn(treetop_core::Decision) -> T + Send + Sync,
+{
+    let result = match engine_snapshot.evaluate(&auth_req.request) {
+        Ok(decision) => BatchResult::Success {
+            data: map_fn(decision),
+        },
+        Err(e) => BatchResult::Failed {
+            message: e.to_string(),
+        },
+    };
+    IndexedResult::new(index, auth_req.id.clone(), result)
+}
+
 /// Generic helper to evaluate batch requests and return results with counts
 fn evaluate_batch_requests<T, F>(
     requests: &[AuthRequest],
     engine_snapshot: &std::sync::Arc<treetop_core::PolicyEngine>,
+    parallel: &ParallelConfig,
     map_fn: F,
 ) -> (Vec<IndexedResult<T>>, usize, usize)
 where
     T: Send,
     F: Fn(treetop_core::Decision) -> T + Send + Sync,
 {
-    let results: Vec<IndexedResult<T>> = requests
-        .par_iter()
-        .enumerate()
-        .map(|(index, auth_req)| {
-            let result = match engine_snapshot.evaluate(&auth_req.request) {
-                Ok(decision) => BatchResult::Success {
-                    data: map_fn(decision),
-                },
-                Err(e) => BatchResult::Failed {
-                    message: e.to_string(),
-                },
-            };
-            IndexedResult::new(index, auth_req.id.clone(), result)
-        })
-        .collect();
+    let use_parallel = parallel.allow_parallel && requests.len() >= parallel.par_threshold;
+
+    let results: Vec<IndexedResult<T>> = if use_parallel {
+        requests
+            .par_iter()
+            .with_min_len(parallel.par_threshold)
+            .enumerate()
+            .map(|(index, auth_req)| eval_one(index, auth_req, engine_snapshot, &map_fn))
+            .collect()
+    } else {
+        requests
+            .iter()
+            .enumerate()
+            .map(|(index, auth_req)| eval_one(index, auth_req, engine_snapshot, &map_fn))
+            .collect()
+    };
 
     let successful = results
         .iter()
@@ -172,6 +197,7 @@ pub struct AuthorizeQuery {
     )]
 pub async fn authorize(
     store: web::Data<SharedPolicyStore>,
+    parallel: web::Data<ParallelConfig>,
     query: web::Query<AuthorizeQuery>,
     req: web::Json<AuthorizeRequest>,
 ) -> Result<web::Json<AuthorizeResponseVariant>, ServiceError> {
@@ -189,6 +215,7 @@ pub async fn authorize(
             let (results, successful, failed) = evaluate_batch_requests(
                 &req.requests,
                 &engine_snapshot,
+                &parallel,
                 AuthorizeDecisionDetailed::from,
             );
 
@@ -200,6 +227,7 @@ pub async fn authorize(
             let (results, successful, failed) = evaluate_batch_requests(
                 &req.requests,
                 &engine_snapshot,
+                &parallel,
                 AuthorizeDecisionBrief::from,
             );
 

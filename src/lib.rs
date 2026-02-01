@@ -7,4 +7,5 @@ pub mod handlers;
 pub mod metrics;
 pub mod middeware;
 pub mod models;
+pub mod parallel;
 pub mod state;

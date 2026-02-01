@@ -8,6 +8,7 @@ use treetop_rest::models::{
     AuthorizeBriefResponse, AuthorizeDecisionBrief, AuthorizeDetailedResponse, AuthorizeRequest,
     BatchResult, DecisionBrief, IndexedResult, PoliciesMetadata,
 };
+use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
 
 /// Helper to create a test policy store with default policies
@@ -37,6 +38,17 @@ when { resource.ip.isInRange(ip("10.0.0.0/24")) };
 
     store.set_dsl(dsl, None, None).unwrap();
     Arc::new(Mutex::new(store))
+}
+
+/// Helper to create a test batch parallel config
+fn create_test_parallel_config() -> ParallelConfig {
+    ParallelConfig::new(
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1),
+        1,
+        None,
+    )
 }
 
 fn assert_brief_result(
@@ -94,9 +106,11 @@ async fn test_get_status_endpoint() {
 #[actix_web::test]
 async fn test_check_endpoint_allow() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
@@ -124,9 +138,11 @@ async fn test_check_endpoint_allow() {
 #[actix_web::test]
 async fn test_check_endpoint_deny() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
@@ -154,9 +170,11 @@ async fn test_check_endpoint_deny() {
 #[actix_web::test]
 async fn test_check_endpoint_with_attributes() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
@@ -187,9 +205,11 @@ async fn test_check_endpoint_with_attributes() {
 #[actix_web::test]
 async fn test_check_endpoint_deny_out_of_range() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
@@ -341,9 +361,11 @@ async fn test_list_policies_for_user() {
 #[actix_web::test]
 async fn test_authorize_endpoint_brief() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
@@ -392,9 +414,11 @@ async fn test_authorize_endpoint_brief() {
 #[actix_web::test]
 async fn test_authorize_endpoint_detailed() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
@@ -430,9 +454,11 @@ async fn test_authorize_endpoint_detailed() {
 #[actix_web::test]
 async fn test_brief_and_detailed_both_allow() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
@@ -480,9 +506,11 @@ async fn test_brief_and_detailed_both_allow() {
 #[actix_web::test]
 async fn test_brief_and_detailed_both_deny() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
@@ -530,9 +558,11 @@ async fn test_brief_and_detailed_both_deny() {
 #[actix_web::test]
 async fn test_brief_and_detailed_with_attributes_allow() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
@@ -583,9 +613,11 @@ async fn test_brief_and_detailed_with_attributes_allow() {
 #[actix_web::test]
 async fn test_brief_and_detailed_with_attributes_deny() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
@@ -636,9 +668,11 @@ async fn test_brief_and_detailed_with_attributes_deny() {
 #[actix_web::test]
 async fn test_brief_and_detailed_batch_consistency() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),
     )
     .await;
