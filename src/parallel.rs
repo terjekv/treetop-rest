@@ -1,4 +1,7 @@
-#[derive(Debug, Clone, Copy)]
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ParallelConfig {
     pub workers: usize,
     pub cpu_count: usize,

@@ -16,7 +16,7 @@ use treetop_rest::cli::{
     LastUsedValues, PoliciesDownload, UserPolicies, matrix::expand_matrix, models::TableStyle,
     repl::run_repl,
 };
-use treetop_rest::models::{AuthRequest, AuthorizeRequest, PoliciesMetadata};
+use treetop_rest::models::{AuthRequest, AuthorizeRequest, PoliciesMetadata, StatusResponse};
 use uuid::Uuid;
 
 // Completion is handled inside the REPL module now
@@ -123,8 +123,12 @@ enum Commands {
         #[clap(long = "table")]
         table: bool,
     },
-    /// Download policies (JSON by default, use --raw for plain text)
-    GetPolicies {
+    /// View or download policies. Without --user, downloads all policies. With --user, lists policies for that user. User can use Namespace::User::name[group1,group2] syntax.
+    Policies {
+        /// User principal with optional groups using Namespace::User::name[group1,group2] syntax. If not provided, downloads all policies.
+        #[clap(long)]
+        user: Option<String>,
+        /// Download in raw text format instead of JSON (only applies when no user specified)
         #[clap(long)]
         raw: bool,
     },
@@ -137,8 +141,6 @@ enum Commands {
         #[clap(long)]
         token: String,
     },
-    /// List policies relevant to a user
-    ListPolicies { user: String },
     /// Toggle display of JSON responses
     Json,
     /// Toggle debug mode - shows both requests and responses
@@ -441,12 +443,33 @@ async fn handle_check(ctx: &mut ExecContext, params: CheckParams) -> Result<()> 
     Ok(())
 }
 
-async fn handle_get_policies(ctx: &ExecContext, raw: bool) -> Result<()> {
-    let resp = ctx.api.get_policies(raw).await?;
-    if raw && resp.status().is_success() {
-        println!("{}", resp.text().await?);
-    } else {
-        handle_response::<PoliciesDownload>(resp, ctx.show_json, ctx.show_debug).await?;
+async fn handle_policies(ctx: &ExecContext, user: Option<String>, raw: bool) -> Result<()> {
+    // Send raw by default unless in JSON context
+    let effective_raw = raw || !ctx.show_json;
+
+    match user {
+        None => {
+            // Get all policies (download)
+            let resp = ctx.api.get_policies(effective_raw).await?;
+            if effective_raw && resp.status().is_success() {
+                println!("{}", resp.text().await?);
+            } else {
+                handle_response::<PoliciesDownload>(resp, ctx.show_json, ctx.show_debug).await?;
+            }
+        }
+        Some(user_str) => {
+            // Parse user with potential group syntax: Namespace::User::name[group1,group2]
+            let (principal, groups) = parse_principal_with_groups(&user_str)?;
+            let resp = ctx
+                .api
+                .get_user_policies(&principal, groups, effective_raw)
+                .await?;
+            if effective_raw && resp.status().is_success() {
+                println!("{}", resp.text().await?);
+            } else {
+                handle_response::<UserPolicies>(resp, ctx.show_json, ctx.show_debug).await?;
+            }
+        }
     }
     Ok(())
 }
@@ -467,10 +490,30 @@ async fn handle_upload(
     Ok(())
 }
 
-async fn handle_list_policies(ctx: &ExecContext, user: &str) -> Result<()> {
-    let resp = ctx.api.get_user_policies(user).await?;
-    handle_response::<UserPolicies>(resp, ctx.show_json, ctx.show_debug).await?;
-    Ok(())
+/// Parse a principal string with optional group syntax: Namespace::User::name[group1,group2]
+/// Returns the full principal (with namespace), and the groups
+fn parse_principal_with_groups(user_str: &str) -> Result<(String, Vec<String>)> {
+    if let Some(bracket_pos) = user_str.find('[') {
+        // Check for matching closing bracket
+        if let Some(close_pos) = user_str.find(']') {
+            if close_pos > bracket_pos {
+                let principal_part = user_str[..bracket_pos].to_string();
+                let groups_str = &user_str[bracket_pos + 1..close_pos];
+
+                // Split by comma and trim whitespace from each group
+                let groups: Vec<String> = groups_str
+                    .split(',')
+                    .map(|g| g.trim().to_string())
+                    .filter(|g| !g.is_empty())
+                    .collect();
+
+                return Ok((principal_part, groups));
+            }
+        }
+    }
+
+    // No brackets, return full principal as-is
+    Ok((user_str.to_string(), vec![]))
 }
 
 fn toggle_json(ctx: &mut ExecContext) {
@@ -589,14 +632,11 @@ async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()>
             )
             .await?;
         }
-        Commands::GetPolicies { raw } => {
-            handle_get_policies(ctx, raw).await?;
+        Commands::Policies { user, raw } => {
+            handle_policies(ctx, user, raw).await?;
         }
         Commands::Upload { file, raw, token } => {
             handle_upload(ctx, file, raw, token).await?;
-        }
-        Commands::ListPolicies { user } => {
-            handle_list_policies(ctx, &user).await?;
         }
         Commands::Json => {
             toggle_json(ctx);
@@ -652,7 +692,7 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
         }
     }
 
-    let metadata: PoliciesMetadata =
+    let metadata: StatusResponse =
         serde_json::from_str(&status_body).with_context(|| "failed to parse /status response")?;
 
     let version_info = match ctx.api.get_version().await {
@@ -677,7 +717,7 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
         settings_line("Version:", &warning("unavailable"));
     }
 
-    let p = &metadata.policies;
+    let p = &metadata.policy_configuration.policies;
     println!("\n{}", title("Policies"));
     settings_line("Hash:", &p.sha256);
     settings_line("Updated:", &p.timestamp.to_string());
@@ -691,9 +731,12 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
         settings_line("Refresh:", &format!("every {}s", freq));
     }
 
-    settings_line("Allow upload:", yes_no(metadata.allow_upload));
+    settings_line(
+        "Allow upload:",
+        yes_no(metadata.policy_configuration.allow_upload),
+    );
 
-    let l = &metadata.labels;
+    let l = &metadata.policy_configuration.labels;
     println!("\n{}", title("Labels"));
     settings_line("Hash:", &l.sha256);
     settings_line("Updated:", &l.timestamp.to_string());
@@ -705,6 +748,14 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
     if let Some(freq) = l.refresh_frequency {
         settings_line("Refresh:", &format!("every {}s", freq));
     }
+
+    let pc = &metadata.parallel_configuration;
+    println!("\n{}", title("Parallelism"));
+    settings_line("CPU count:", &pc.cpu_count.to_string());
+    settings_line("Worker threads:", &pc.workers.to_string());
+    settings_line("Parallelizing:", yes_no(pc.allow_parallel));
+    settings_line("Threads:", &pc.rayon_threads.to_string());
+    settings_line("Cutoff:", &pc.par_threshold.to_string());
 
     Ok(())
 }

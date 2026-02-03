@@ -4,7 +4,9 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::debug;
 use treetop_core::PolicyVersion;
+use url::form_urlencoded;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::build_info::build_info;
@@ -12,10 +14,31 @@ use crate::errors::ServiceError;
 use crate::models::{
     AuthRequest, AuthorizeBriefResponse, AuthorizeDecisionBrief, AuthorizeDecisionDetailed,
     AuthorizeDetailedResponse, AuthorizeRequest, AuthorizeResponseVariant, BatchResult,
-    IndexedResult, PoliciesDownload, PoliciesMetadata, UserPolicies,
+    IndexedResult, PoliciesDownload, PoliciesMetadata, StatusResponse, UserPolicies,
 };
 use crate::parallel::ParallelConfig;
 use crate::state::SharedPolicyStore;
+
+fn parse_group_and_namespace(req: &HttpRequest) -> (Vec<String>, Vec<String>) {
+    let mut groups = Vec::new();
+    let mut namespaces = Vec::new();
+
+    for (key, value) in form_urlencoded::parse(req.query_string().as_bytes()) {
+        match key.as_ref() {
+            "groups" | "groups[]" => groups.push(value.into_owned()),
+            "namespaces" | "namespaces[]" => namespaces.push(value.into_owned()),
+            _ => {}
+        }
+    }
+
+    (groups, namespaces)
+}
+
+fn should_return_raw_format(format: Option<&str>) -> bool {
+    format.map_or(false, |fmt| {
+        fmt.eq_ignore_ascii_case("raw") || fmt.eq_ignore_ascii_case("text")
+    })
+}
 
 #[derive(Deserialize, ToSchema)]
 struct Upload {
@@ -251,10 +274,10 @@ pub async fn get_policies(
     query: web::Query<HashMap<String, String>>,
     store: web::Data<SharedPolicyStore>,
 ) -> Result<HttpResponse, ServiceError> {
-    let format = query.get("format").map(String::as_str).unwrap_or("json");
+    let format = query.get("format").map(String::as_str);
     let store = store.lock()?;
 
-    if format.eq_ignore_ascii_case("raw") || format.eq_ignore_ascii_case("text") {
+    if should_return_raw_format(format) {
         Ok(HttpResponse::Ok()
             .content_type("text/plain")
             .body(store.policies.content.clone()))
@@ -318,6 +341,12 @@ pub async fn upload_policies(
 #[utoipa::path(
         get,
         path = "/api/v1/policies/{user}",
+        params(
+            ("user" = String, Path, description = "User principal identifier"),
+            ("groups" = Option<Vec<String>>, Query, description = "List of group names"),
+            ("namespaces" = Option<Vec<String>>, Query, description = "List of namespaces"),
+            ("format" = Option<String>, Query, description = "Response format: 'json' (default) or 'raw'/'text' for plain text"),
+        ),
         responses(
             (status = 200, description = "Policies for user retrieved successfully", body = UserPolicies),
             (status = 400, description = "Bad request", body = ServiceError),
@@ -327,26 +356,66 @@ pub async fn upload_policies(
 pub async fn list_policies(
     store: web::Data<SharedPolicyStore>,
     user: web::Path<String>,
-) -> Result<web::Json<UserPolicies>, ServiceError> {
+    req: HttpRequest,
+) -> Result<HttpResponse, ServiceError> {
     let store = store.lock()?;
-    println!("Listing policies for user: {user}");
-    let policies = store.engine.list_policies_for_user(&user, vec![])?;
-    Ok(web::Json(policies.into()))
+
+    // User path parameter is just the entity ID
+    let entity_id = user.into_inner();
+
+    // Use namespace and groups from query parameters
+    let (groups, namespaces) = parse_group_and_namespace(&req);
+    let namespace: Vec<&str> = namespaces.iter().map(|s| s.as_str()).collect();
+    let group_refs: Vec<&str> = groups.iter().map(|s| s.as_str()).collect();
+
+    debug!(message = "Listing policies for user", entity = %entity_id, namespaces = ?namespaces, groups = ?groups);
+
+    let policies = store
+        .engine
+        .list_policies_for_user(&entity_id, &group_refs, &namespace)?;
+
+    // Check format query parameter
+    let format = req
+        .query_string()
+        .split('&')
+        .find(|q| q.starts_with("format="))
+        .and_then(|q| q.strip_prefix("format="));
+
+    if should_return_raw_format(format) {
+        // Return policies as text/plain: just the policy DSL from the store
+        let content = policies
+            .policies()
+            .into_iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<String>>()
+            .join("\n");
+        return Ok(HttpResponse::Ok().content_type("text/plain").body(content));
+    }
+
+    // Default: return as JSON
+    Ok(HttpResponse::Ok().json(UserPolicies::from(policies)))
 }
 
 #[utoipa::path(
     get,
     path = "/api/v1/status",
     responses(
-        (status = 200, description = "Service status retrieved successfully", body = PoliciesMetadata),
+        (status = 200, description = "Service status retrieved successfully", body = StatusResponse),
         (status = 400, description = "Bad request", body = ServiceError),
         (status = 500, description = "Internal server error", body = ServiceError)
     ),
 )]
 pub async fn get_status(
     store: web::Data<SharedPolicyStore>,
-) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
-    Ok(web::Json(store.lock()?.into()))
+    parallel: web::Data<ParallelConfig>,
+) -> Result<web::Json<StatusResponse>, ServiceError> {
+    let store = store.lock()?;
+    let status = StatusResponse {
+        policy_configuration: store.into(),
+        parallel_configuration: *parallel.get_ref(),
+    };
+
+    Ok(web::Json(status))
 }
 
 #[utoipa::path(

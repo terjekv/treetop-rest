@@ -154,16 +154,24 @@ impl CliDisplay for AuthorizeDecisionBrief {
 impl CliDisplay for AuthorizeDecisionDetailed {
     fn display(&self) -> String {
         match self.decision {
-            DecisionBrief::Allow => match &self.policy {
-                Some(policy) => format!(
-                    "{} ({})\n{}\n{}\n{}",
-                    success("Allow"),
-                    self.version.hash,
-                    "--- Matching policy ---".cyan(),
-                    policy.literal,
-                    "---".cyan()
-                ),
-                None => format!("{} ({})", success("Allow"), self.version.hash),
+            DecisionBrief::Allow => {
+                if self.policy.is_empty() {
+                    format!("{} ({})", success("Allow"), self.version.hash)
+                } else {
+                    let policies_str = self.policy
+                        .iter()
+                        .map(|p| p.literal.clone())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    format!(
+                        "{} ({})\n{}\n{}\n{}",
+                        success("Allow"),
+                        self.version.hash,
+                        "--- Matching policies ---".cyan(),
+                        policies_str,
+                        "---".cyan()
+                    )
+                }
             },
             DecisionBrief::Deny => format!("{} ({})", error("Deny"), self.version.hash),
         }
@@ -362,8 +370,8 @@ impl AuthorizeResult {
         match result {
             Some(AuthCheckResult::Detailed(detailed)) => detailed
                 .policy
-                .as_ref()
-                .map(|p| p.id().clone())
+                .first()
+                .map(|p| p.literal.clone())
                 .unwrap_or_else(|| "".to_string()),
             Some(AuthCheckResult::Brief(brief)) => brief.policy_id.clone(),
             None => "?".to_string(),

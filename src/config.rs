@@ -26,8 +26,9 @@ pub struct Config {
     #[clap(long, env = "TREETOP_RAYON_THREADS")]
     pub rayon_threads: Option<usize>,
 
-    /// Batch parallel threshold (0 or unset = auto)
-    #[clap(long, env = "TREETOP_PAR_THRESHOLD")]
+    /// Batch parallel threshold: minimum number of authorization queries in a batch to enable parallel processing.
+    /// On single-core systems, parallelism is disabled regardless of this setting.
+    #[clap(long, env = "TREETOP_PAR_THRESHOLD", default_value = "8")]
     pub par_threshold: Option<usize>,
 
     /// Allow upload of policy (otherwise only support of fetching from a URL)

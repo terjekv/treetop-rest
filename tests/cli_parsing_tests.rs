@@ -19,14 +19,14 @@ fn get_completions(line: &str, pos: usize) -> Vec<String> {
 }
 
 #[rstest]
-#[case("", 0, vec!["status", "check", "get-policies", "upload", "list-policies", "json", "debug", "timing", "show", "version", "history", "metrics", "help", "exit"])]
+#[case("", 0, vec!["status", "check", "policies", "upload", "json", "debug", "timing", "show", "version", "history", "metrics", "help", "exit"])]
 #[case("s", 1, vec!["status", "show"])]
 #[case("st", 2, vec!["status"])]
 #[case("sta", 3, vec!["status"])]
 #[case("c", 1, vec!["check"])]
 #[case("v", 1, vec!["version"])]
-#[case("get", 3, vec!["get-policies"])]
-#[case("get-", 4, vec!["get-policies"])]
+#[case("p", 1, vec!["policies"])]
+#[case("po", 2, vec!["policies"])]
 fn test_command_completion(#[case] input: &str, #[case] pos: usize, #[case] expected: Vec<&str>) {
     let completions = get_completions(input, pos);
     assert_eq!(completions, expected);
@@ -87,10 +87,11 @@ fn test_repeatable_flag_completion(#[case] input: &str, #[case] pos: usize) {
 }
 
 #[rstest]
-#[case("get-policies ", 13, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--raw"])]
-#[case("get-policies --", 15, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--raw"])]
-#[case("get-policies --r", 16, vec!["--raw"])]
-fn test_get_policies_completion(
+#[case("policies ", 9, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--user", "--raw"])]
+#[case("policies --", 11, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--user", "--raw"])]
+#[case("policies --r", 12, vec!["--raw"])]
+#[case("policies --u", 12, vec!["--user"])]
+fn test_policies_completion(
     #[case] input: &str,
     #[case] pos: usize,
     #[case] expected: Vec<&str>,
@@ -119,12 +120,11 @@ fn test_no_completion_for_unknown_command() {
 }
 
 #[test]
-fn test_no_completion_for_list_policies() {
-    // list-policies takes positional argument, no command-specific flags
-    // but still get global flags
-    let completions = get_completions("list-policies ", 14);
-    assert!(completions.contains(&"--table-style".to_string()));
-    assert!(completions.len() == treetop_rest::cli::completion::GLOBAL_FLAGS.len());
+fn test_policies_with_user() {
+    // policies with --user should work with the new syntax
+    let completions = get_completions("policies --user ", 16);
+    // Should get global flags and the --raw flag alongside --user
+    assert!(completions.contains(&"--raw".to_string()));
 }
 
 #[test]
@@ -137,6 +137,12 @@ fn test_completion_at_beginning_of_word() {
 fn test_completion_with_partial_match() {
     let completions = get_completions("chec", 4);
     assert_eq!(completions, vec!["check"]);
+}
+
+#[test]
+fn test_completion_starting_with_p() {
+    let completions = get_completions("p", 1);
+    assert_eq!(completions, vec!["policies"]);
 }
 
 #[test]

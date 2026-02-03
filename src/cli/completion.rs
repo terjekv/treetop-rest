@@ -5,20 +5,8 @@
 
 // Top-level commands
 pub const COMMANDS_MAIN: &[&str] = &[
-    "status",
-    "check",
-    "get-policies",
-    "upload",
-    "list-policies",
-    "json",
-    "debug",
-    "timing",
-    "show",
-    "version",
-    "history",
-    "metrics",
-    "help",
-    "exit",
+    "status", "check", "policies", "upload", "json", "debug", "timing", "show", "version",
+    "history", "metrics", "help", "exit",
 ];
 
 // Global flags available for any command
@@ -47,7 +35,7 @@ pub const CHECK_FLAGS: &[&str] = &[
 // Flags that can be used multiple times
 pub const REPEATABLE_FLAGS: &[&str] = &["--resource-attribute"];
 
-pub const GET_POLICIES_FLAGS: &[&str] = &["--raw"];
+pub const POLICIES_FLAGS: &[&str] = &["--user", "--raw"];
 
 pub const UPLOAD_FLAGS: &[&str] = &["--file", "--raw", "--token"];
 
@@ -86,7 +74,7 @@ pub fn complete_line(line: &str, pos: usize) -> (usize, Vec<String>) {
     if !tokens.is_empty() {
         match tokens[0] {
             "check" => all_candidates.extend_from_slice(CHECK_FLAGS),
-            "get-policies" => all_candidates.extend_from_slice(GET_POLICIES_FLAGS),
+            "policies" => all_candidates.extend_from_slice(POLICIES_FLAGS),
             "upload" => all_candidates.extend_from_slice(UPLOAD_FLAGS),
             _ => {}
         }

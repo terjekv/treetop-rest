@@ -1,6 +1,12 @@
 use reqwest::{Client, RequestBuilder, Response};
+use url::form_urlencoded;
 
 const CORRELATION_HEADER: &str = "x-correlation-id";
+
+/// Percent-encode a string for use in a URL path segment
+fn encode_path_segment(s: &str) -> String {
+    form_urlencoded::byte_serialize(s.as_bytes()).collect()
+}
 
 pub struct ApiClient {
     base_url: String,
@@ -114,10 +120,50 @@ impl ApiClient {
         self.apply_headers(builder).send().await
     }
 
-    pub async fn get_user_policies(&self, user: &str) -> reqwest::Result<Response> {
-        let builder = self
-            .client
-            .get(format!("{}/policies/{}", self.base_url, user));
+    pub async fn get_user_policies(
+        &self,
+        principal: &str,
+        groups: Vec<String>,
+        raw: bool,
+    ) -> reqwest::Result<Response> {
+        // Parse principal to extract namespace and entity ID
+        let parts: Vec<&str> = principal.split("::").collect();
+
+        let (namespace, entity_id) = if parts.len() > 1 {
+            // Has namespace: parts[0..-1] are namespace, last part is entity ID
+            (parts[0..parts.len() - 1].to_vec(), parts[parts.len() - 1])
+        } else {
+            // No namespace
+            (vec![], parts[0])
+        };
+
+        let encoded_user = encode_path_segment(entity_id);
+        let mut url = format!("{}/policies/{}", self.base_url, encoded_user);
+
+        // Add namespace and groups as query parameters (array-style)
+        let mut params = Vec::new();
+
+        for ns in namespace {
+            if ns == "User" || ns == "Group" {
+                continue;
+            }
+            params.push(format!("namespaces[]={}", ns));
+        }
+
+        for group in groups {
+            params.push(format!("groups[]={}", group));
+        }
+
+        if raw {
+            params.push("format=raw".to_string());
+        }
+
+        if !params.is_empty() {
+            url.push('?');
+            url.push_str(&params.join("&"));
+        }
+
+        let builder = self.client.get(url);
         self.apply_headers(builder).send().await
     }
 

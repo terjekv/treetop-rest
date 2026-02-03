@@ -34,7 +34,7 @@ tracing-subscriber = { version = "0.3", features = [
     "serde",
     "serde_json",
 ] }
-treetop-core = { version = "0.0.14", features = ["observability"] }
+treetop-core = { version = "0.0.15", features = ["observability"] }
 prometheus = "0.14"
 url = { version = "2.5", features = ["serde"] }
 utoipa = { version = "5.4", features = ["actix_extras", "chrono", "yaml"] }

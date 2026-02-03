@@ -7,7 +7,10 @@ use url::Url;
 
 use utoipa::ToSchema;
 
-use crate::state::{Metadata, OfLabels, OfPolicies, PolicyStore};
+use crate::{
+    parallel::ParallelConfig,
+    state::{Metadata, OfLabels, OfPolicies, PolicyStore},
+};
 
 /// Network endpoint URL for policy or label service communication
 #[derive(Deserialize, Serialize, Clone, Debug, ToSchema)]
@@ -54,7 +57,7 @@ impl std::str::FromStr for Endpoint {
 /// Detailed authorization decision including the matching policy
 #[derive(Serialize, Deserialize, ToSchema, Clone)]
 pub struct AuthorizeDecisionDetailed {
-    pub policy: Option<PermitPolicy>,
+    pub policy: Vec<PermitPolicy>,
     pub decision: DecisionBrief,
     pub version: PolicyVersion,
 }
@@ -63,13 +66,13 @@ impl From<Decision> for AuthorizeDecisionDetailed {
     /// Convert a core Decision into a detailed AuthorizeDecisionDetailed
     fn from(decision: Decision) -> Self {
         match decision {
-            Decision::Allow { policy, version } => AuthorizeDecisionDetailed {
-                policy: Some(policy),
+            Decision::Allow { policies, version } => AuthorizeDecisionDetailed {
+                policy: policies.into_inner(),
                 decision: DecisionBrief::Allow,
                 version,
             },
             Decision::Deny { version } => AuthorizeDecisionDetailed {
-                policy: None,
+                policy: vec![],
                 decision: DecisionBrief::Deny,
                 version,
             },
@@ -96,10 +99,10 @@ impl From<Decision> for AuthorizeDecisionBrief {
     /// Convert a core Decision into a brief AuthorizeDecisionBrief
     fn from(decision: Decision) -> Self {
         match decision {
-            Decision::Allow { version, policy } => AuthorizeDecisionBrief {
+            Decision::Allow { version, policies } => AuthorizeDecisionBrief {
                 decision: DecisionBrief::Allow,
                 version,
-                policy_id: policy.id().clone(),
+                policy_id: policies.to_string(),
             },
             Decision::Deny { version, .. } => AuthorizeDecisionBrief {
                 decision: DecisionBrief::Deny,
@@ -108,6 +111,12 @@ impl From<Decision> for AuthorizeDecisionBrief {
             },
         }
     }
+}
+
+#[derive(Serialize, ToSchema, Deserialize)]
+pub struct StatusResponse {
+    pub policy_configuration: PoliciesMetadata,
+    pub parallel_configuration: ParallelConfig,
 }
 
 /// Metadata about the policies and labels in the policy store

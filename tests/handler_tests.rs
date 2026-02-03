@@ -6,7 +6,7 @@ use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
 use treetop_rest::handlers;
 use treetop_rest::models::{
     AuthorizeBriefResponse, AuthorizeDecisionBrief, AuthorizeDetailedResponse, AuthorizeRequest,
-    BatchResult, DecisionBrief, IndexedResult, PoliciesMetadata,
+    BatchResult, DecisionBrief, IndexedResult, StatusResponse,
 };
 use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
@@ -88,9 +88,11 @@ async fn test_health_endpoint() {
 #[actix_web::test]
 async fn test_get_status_endpoint() {
     let store = create_test_store();
+    let parallel = create_test_parallel_config();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
             .route("/api/v1/status", web::get().to(handlers::get_status)),
     )
     .await;
@@ -99,8 +101,8 @@ async fn test_get_status_endpoint() {
     let resp = test::call_service(&app, req).await;
 
     assert!(resp.status().is_success());
-    let body: PoliciesMetadata = test::read_body_json(resp).await;
-    assert_eq!(body.policies.entries, 3);
+    let body: StatusResponse = test::read_body_json(resp).await;
+    assert_eq!(body.policy_configuration.policies.entries, 3);
 }
 
 #[actix_web::test]
@@ -359,6 +361,152 @@ async fn test_list_policies_for_user() {
 }
 
 #[actix_web::test]
+async fn test_list_policies_for_user_with_groups() {
+    let store = create_test_store();
+    let app = test::init_service(App::new().app_data(web::Data::new(store)).route(
+        "/api/v1/policies/{user}",
+        web::get().to(handlers::list_policies),
+    ))
+    .await;
+
+    // Query with empty groups (no groups parameter)
+    let req = test::TestRequest::get()
+        .uri("/api/v1/policies/alice")
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    assert!(status.is_success(), "Expected success, got: {}", status);
+}
+
+#[actix_web::test]
+async fn test_list_policies_for_user_with_single_group() {
+    let store = create_test_store();
+    let app = test::init_service(App::new().app_data(web::Data::new(store)).route(
+        "/api/v1/policies/{user}",
+        web::get().to(handlers::list_policies),
+    ))
+    .await;
+
+    // Query without groups parameter - should work with empty vec
+    let req = test::TestRequest::get()
+        .uri("/api/v1/policies/bob")
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    assert!(status.is_success(), "Expected success, got: {}", status);
+}
+
+#[actix_web::test]
+async fn test_list_policies_with_group_membership_filtering() {
+    // Create a test store with simple valid policies
+    let mut store = PolicyStore::new().unwrap();
+
+    let dsl = r#"
+permit (
+    principal == User::"alice",
+    action == Action::"view",
+    resource is Photo
+);
+
+permit (
+    principal == User::"alice",
+    action == Action::"edit",
+    resource is Photo
+);
+
+permit (
+    principal == User::"bob",
+    action == Action::"delete",
+    resource is Photo
+);
+"#;
+
+    store.set_dsl(dsl, None, None).unwrap();
+    let store = Arc::new(Mutex::new(store));
+
+    let app = test::init_service(App::new().app_data(web::Data::new(store)).route(
+        "/api/v1/policies/{user}",
+        web::get().to(handlers::list_policies),
+    ))
+    .await;
+
+    // Get policies for alice without groups
+    let req_alice = test::TestRequest::get()
+        .uri("/api/v1/policies/alice")
+        .to_request();
+
+    let resp_alice = test::call_service(&app, req_alice).await;
+    assert!(
+        resp_alice.status().is_success(),
+        "Failed to get policies for alice"
+    );
+    let body_alice = actix_web::body::to_bytes(resp_alice.into_body())
+        .await
+        .unwrap();
+    let json_alice: serde_json::Value = serde_json::from_slice(&body_alice).unwrap();
+    let count_alice = json_alice["policies"].as_array().unwrap_or(&vec![]).len();
+    assert_eq!(count_alice, 2, "Expected 2 policies for alice");
+    assert_eq!(
+        json_alice["user"].as_str(),
+        Some("alice"),
+        "Expected user to be alice"
+    );
+
+    // Get policies for bob without groups
+    let req_bob = test::TestRequest::get()
+        .uri("/api/v1/policies/bob")
+        .to_request();
+
+    let resp_bob = test::call_service(&app, req_bob).await;
+    assert!(
+        resp_bob.status().is_success(),
+        "Failed to get policies for bob"
+    );
+    let body_bob = actix_web::body::to_bytes(resp_bob.into_body())
+        .await
+        .unwrap();
+    let json_bob: serde_json::Value = serde_json::from_slice(&body_bob).unwrap();
+    let count_bob = json_bob["policies"].as_array().unwrap_or(&vec![]).len();
+    assert_eq!(count_bob, 1, "Expected 1 policy for bob");
+    assert_eq!(
+        json_bob["user"].as_str(),
+        Some("bob"),
+        "Expected user to be bob"
+    );
+
+    // Test that groups parameter is accepted without errors
+    let req_alice_no_params = test::TestRequest::get()
+        .uri("/api/v1/policies/alice")
+        .to_request();
+
+    let resp = test::call_service(&app, req_alice_no_params).await;
+    assert!(
+        resp.status().is_success(),
+        "Failed to get policies without group parameter"
+    );
+    let body = actix_web::body::to_bytes(resp.into_body()).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // Verify the response structure is correct
+    assert!(json.is_object(), "Response should be an object");
+    assert!(
+        json["user"].is_string(),
+        "Response should have a user field"
+    );
+    assert!(
+        json["policies"].is_array(),
+        "Response should have a policies array"
+    );
+    assert_eq!(
+        json["user"].as_str(),
+        Some("alice"),
+        "User field should match requested user"
+    );
+}
+
+#[actix_web::test]
 async fn test_authorize_endpoint_brief() {
     let store = create_test_store();
     let parallel = create_test_parallel_config();
@@ -444,7 +592,7 @@ async fn test_authorize_endpoint_detailed() {
     match body.iter().next().expect("missing result").result() {
         BatchResult::Success { data } => {
             assert!(matches!(data.decision, DecisionBrief::Allow));
-            assert!(data.policy.is_some());
+            assert!(!data.policy.is_empty());
         }
         BatchResult::Failed { message } => panic!("unexpected failure: {}", message),
     }
