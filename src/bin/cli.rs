@@ -495,8 +495,8 @@ async fn handle_upload(
 fn parse_principal_with_groups(user_str: &str) -> Result<(String, Vec<String>)> {
     if let Some(bracket_pos) = user_str.find('[') {
         // Check for matching closing bracket
-        if let Some(close_pos) = user_str.find(']') {
-            if close_pos > bracket_pos {
+        if let Some(close_pos) = user_str.find(']')
+            && close_pos > bracket_pos {
                 let principal_part = user_str[..bracket_pos].to_string();
                 let groups_str = &user_str[bracket_pos + 1..close_pos];
 
@@ -509,7 +509,6 @@ fn parse_principal_with_groups(user_str: &str) -> Result<(String, Vec<String>)> 
 
                 return Ok((principal_part, groups));
             }
-        }
     }
 
     // No brackets, return full principal as-is

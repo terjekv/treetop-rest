@@ -35,7 +35,7 @@ fn parse_group_and_namespace(req: &HttpRequest) -> (Vec<String>, Vec<String>) {
 }
 
 fn should_return_raw_format(format: Option<&str>) -> bool {
-    format.map_or(false, |fmt| {
+    format.is_some_and(|fmt| {
         fmt.eq_ignore_ascii_case("raw") || fmt.eq_ignore_ascii_case("text")
     })
 }
@@ -385,7 +385,7 @@ pub async fn list_policies(
         // Return policies as text/plain: just the policy DSL from the store
         let content = policies
             .policies()
-            .into_iter()
+            .iter()
             .map(|p| p.to_string())
             .collect::<Vec<String>>()
             .join("\n");

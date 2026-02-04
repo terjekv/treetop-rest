@@ -228,13 +228,12 @@ impl<'de> serde::Deserialize<'de> for AuthCheckResult {
         if v.get("policy").is_some() {
             // Normalize policy field: if it's a single object, wrap it in an array
             // This is a backwards compatibility fix for older responses
-            if let Some(policy_value) = v.get_mut("policy") {
-                if policy_value.is_object() {
+            if let Some(policy_value) = v.get_mut("policy")
+                && policy_value.is_object() {
                     // Single policy object - wrap it in an array
                     let single_policy = policy_value.clone();
                     *policy_value = serde_json::json!([single_policy]);
                 }
-            }
 
             match serde_json::from_value::<AuthorizeDecisionDetailed>(v.clone()) {
                 Ok(detailed) => return Ok(AuthCheckResult::Detailed(detailed)),
