@@ -102,7 +102,7 @@ impl From<Decision> for AuthorizeDecisionBrief {
             Decision::Allow { version, policies } => AuthorizeDecisionBrief {
                 decision: DecisionBrief::Allow,
                 version,
-                policy_id: policies.to_string(),
+                policy_id: policies.ids().join("; "),
             },
             Decision::Deny { version, .. } => AuthorizeDecisionBrief {
                 decision: DecisionBrief::Deny,

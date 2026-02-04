@@ -145,7 +145,12 @@ impl CliDisplay for PoliciesMetadata {
 impl CliDisplay for AuthorizeDecisionBrief {
     fn display(&self) -> String {
         match self.decision {
-            DecisionBrief::Allow => format!("{} ({})", success("Allow"), self.version.hash),
+            DecisionBrief::Allow => format!(
+                "{} ({} @ {})",
+                success("Allow"),
+                self.policy_id,
+                self.version.hash,
+            ),
             DecisionBrief::Deny => format!("{} ({})", error("Deny"), self.version.hash),
         }
     }
@@ -158,9 +163,10 @@ impl CliDisplay for AuthorizeDecisionDetailed {
                 if self.policy.is_empty() {
                     format!("{} ({})", success("Allow"), self.version.hash)
                 } else {
-                    let policies_str = self.policy
+                    let policies_str = self
+                        .policy
                         .iter()
-                        .map(|p| p.literal.clone())
+                        .map(|p| p.id().clone())
                         .collect::<Vec<_>>()
                         .join("\n");
                     format!(
@@ -172,7 +178,7 @@ impl CliDisplay for AuthorizeDecisionDetailed {
                         "---".cyan()
                     )
                 }
-            },
+            }
             DecisionBrief::Deny => format!("{} ({})", error("Deny"), self.version.hash),
         }
     }
@@ -216,24 +222,43 @@ impl<'de> serde::Deserialize<'de> for AuthCheckResult {
     where
         D: serde::Deserializer<'de>,
     {
-        let v = serde_json::Value::deserialize(deserializer)?;
+        let mut v = serde_json::Value::deserialize(deserializer)?;
 
-        // Check if 'policy' field exists to distinguish between Brief and Detailed
+        // Try Detailed first (has 'policy' field)
         if v.get("policy").is_some() {
-            // Has 'policy' field, must be Detailed
-            if let Ok(detailed) = serde_json::from_value::<AuthorizeDecisionDetailed>(v) {
-                return Ok(AuthCheckResult::Detailed(detailed));
+            // Normalize policy field: if it's a single object, wrap it in an array
+            // This is a backwards compatibility fix for older responses
+            if let Some(policy_value) = v.get_mut("policy") {
+                if policy_value.is_object() {
+                    // Single policy object - wrap it in an array
+                    let single_policy = policy_value.clone();
+                    *policy_value = serde_json::json!([single_policy]);
+                }
             }
-        } else {
-            // No 'policy' field, must be Brief
-            if let Ok(brief) = serde_json::from_value::<AuthorizeDecisionBrief>(v) {
-                return Ok(AuthCheckResult::Brief(brief));
+
+            match serde_json::from_value::<AuthorizeDecisionDetailed>(v.clone()) {
+                Ok(detailed) => return Ok(AuthCheckResult::Detailed(detailed)),
+                Err(e) => {
+                    // Log the error but continue to try Brief
+                    eprintln!("Failed to deserialize as Detailed: {}", e);
+                }
             }
         }
 
-        Err(serde::de::Error::custom(
-            "Could not deserialize as AuthorizeDecisionDetailed or AuthorizeDecisionBrief",
-        ))
+        // Try Brief (should have 'policy_id')
+        if v.get("policy_id").is_some() {
+            match serde_json::from_value::<AuthorizeDecisionBrief>(v.clone()) {
+                Ok(brief) => return Ok(AuthCheckResult::Brief(brief)),
+                Err(e) => {
+                    eprintln!("Failed to deserialize as Brief: {}", e);
+                }
+            }
+        }
+
+        Err(serde::de::Error::custom(format!(
+            "Could not deserialize as AuthorizeDecisionDetailed or AuthorizeDecisionBrief. Received: {}",
+            serde_json::to_string(&v).unwrap_or_else(|_| "unknown".to_string())
+        )))
     }
 }
 
