@@ -44,6 +44,7 @@ anyhow = "1"
 
 [dev-dependencies]
 actix-rt = "2.11"
+actix-http = "3"
 rstest = "0.26"
 tempfile = "3.24"
 iai-callgrind = "0.13"
@@ -74,3 +75,59 @@ path = "src/bin/cli.rs"
 
 [profile.release]
 debug = true
+
+[[bench]]
+name = "authorize_batch"
+harness = false
+
+[[bench]]
+name = "cli_matrix"
+harness = false
+
+[[bench]]
+name = "labels"
+harness = false
+
+[[bench]]
+name = "middleware_ip"
+harness = false
+
+[[bench]]
+name = "middleware_tracing"
+harness = false
+
+[[bench]]
+name = "policy_store"
+harness = false
+
+[[bench]]
+name = "e2e_authorize_light"
+harness = false
+
+[[bench]]
+name = "e2e_authorize_groups"
+harness = false
+
+[[bench]]
+name = "e2e_authorize_nested_namespaces"
+harness = false
+
+[[bench]]
+name = "e2e_authorize_large_dsl"
+harness = false
+
+[[bench]]
+name = "e2e_list_policies_light"
+harness = false
+
+[[bench]]
+name = "e2e_list_policies_groups"
+harness = false
+
+[[bench]]
+name = "e2e_list_policies_nested_namespaces"
+harness = false
+
+[[bench]]
+name = "e2e_list_policies_large_dsl"
+harness = false

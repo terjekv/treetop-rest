@@ -3847,6 +3847,7 @@ dependencies = [
 name = "treetop-rest"
 version = "0.0.3"
 dependencies = [
+ "actix-http",
  "actix-rt",
  "actix-service",
  "actix-web",
