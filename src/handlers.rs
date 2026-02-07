@@ -19,19 +19,21 @@ use crate::models::{
 use crate::parallel::ParallelConfig;
 use crate::state::SharedPolicyStore;
 
-fn parse_group_and_namespace(req: &HttpRequest) -> (Vec<String>, Vec<String>) {
+fn parse_query_params(req: &HttpRequest) -> (Vec<String>, Vec<String>, Option<String>) {
     let mut groups = Vec::new();
     let mut namespaces = Vec::new();
+    let mut format = None;
 
     for (key, value) in form_urlencoded::parse(req.query_string().as_bytes()) {
         match key.as_ref() {
             "groups" | "groups[]" => groups.push(value.into_owned()),
             "namespaces" | "namespaces[]" => namespaces.push(value.into_owned()),
+            "format" => format = Some(value.into_owned()),
             _ => {}
         }
     }
 
-    (groups, namespaces)
+    (groups, namespaces, format)
 }
 
 fn should_return_raw_format(format: Option<&str>) -> bool {
@@ -176,25 +178,30 @@ where
 {
     let use_parallel = parallel.allow_parallel && requests.len() >= parallel.par_threshold;
 
-    let results: Vec<IndexedResult<T>> = if use_parallel {
-        requests
+    let (results, successful) = if use_parallel {
+        let results: Vec<IndexedResult<T>> = requests
             .par_iter()
             .with_min_len(parallel.par_threshold)
             .enumerate()
             .map(|(index, auth_req)| eval_one(index, auth_req, engine_snapshot, &map_fn))
-            .collect()
-    } else {
-        requests
+            .collect();
+        let successful = results
             .iter()
-            .enumerate()
-            .map(|(index, auth_req)| eval_one(index, auth_req, engine_snapshot, &map_fn))
-            .collect()
+            .filter(|r| matches!(r.result(), BatchResult::Success { .. }))
+            .count();
+        (results, successful)
+    } else {
+        let mut results = Vec::with_capacity(requests.len());
+        let mut successful = 0;
+        for (index, auth_req) in requests.iter().enumerate() {
+            let result = eval_one(index, auth_req, engine_snapshot, &map_fn);
+            if matches!(result.result(), BatchResult::Success { .. }) {
+                successful += 1;
+            }
+            results.push(result);
+        }
+        (results, successful)
     };
-
-    let successful = results
-        .iter()
-        .filter(|r| matches!(r.result(), BatchResult::Success { .. }))
-        .count();
     let failed = results.len() - successful;
 
     (results, successful, failed)
@@ -372,42 +379,25 @@ pub async fn list_policies(
     user: web::Path<String>,
     req: HttpRequest,
 ) -> Result<HttpResponse, ServiceError> {
-    let store = store.lock()?;
+    let mut store = store.lock()?;
 
     // User path parameter is just the entity ID
     let entity_id = user.into_inner();
 
     // Use namespace and groups from query parameters
-    let (groups, namespaces) = parse_group_and_namespace(&req);
-    let namespace: Vec<&str> = namespaces.iter().map(|s| s.as_str()).collect();
-    let group_refs: Vec<&str> = groups.iter().map(|s| s.as_str()).collect();
+    let (groups, namespaces, format) = parse_query_params(&req);
 
     debug!(message = "Listing policies for user", entity = %entity_id, namespaces = ?namespaces, groups = ?groups);
 
-    let policies = store
-        .engine
-        .list_policies_for_user(&entity_id, &group_refs, &namespace)?;
-
     // Check format query parameter
-    let format = req
-        .query_string()
-        .split('&')
-        .find(|q| q.starts_with("format="))
-        .and_then(|q| q.strip_prefix("format="));
-
-    if should_return_raw_format(format) {
-        // Return policies as text/plain: just the policy DSL from the store
-        let content = policies
-            .policies()
-            .iter()
-            .map(|p| p.to_string())
-            .collect::<Vec<String>>()
-            .join("\n");
+    if should_return_raw_format(format.as_deref()) {
+        let content = store.list_policies_raw(entity_id, groups, namespaces)?;
         return Ok(HttpResponse::Ok().content_type("text/plain").body(content));
     }
 
     // Default: return as JSON
-    Ok(HttpResponse::Ok().json(UserPolicies::from(policies)))
+    let response = store.list_policies_json(entity_id, groups, namespaces)?;
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[utoipa::path(

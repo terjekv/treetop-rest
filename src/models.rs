@@ -149,7 +149,7 @@ pub struct PoliciesDownload {
 }
 
 /// Policies associated with a specific user
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct UserPolicies {
     pub user: String,
     pub policies: Vec<Value>,
