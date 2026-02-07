@@ -1,10 +1,11 @@
 use chrono::{DateTime, Utc};
+use lru::LruCache;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, VecDeque};
 use std::fmt::{Display, Formatter, Result as FmtResult, Write as FmtWrite};
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, trace};
 use treetop_core::{LabelRegistryBuilder, Labeler, PolicyEngine, RegexLabeler};
@@ -250,10 +251,8 @@ pub struct PolicyStore {
     pub policies: Metadata<OfPolicies>,
     pub labels: Metadata<OfLabels>,
     pub label_registry_labelers: Vec<Arc<dyn Labeler>>,
-    list_policies_raw_cache: HashMap<ListPoliciesCacheKey, String>,
-    list_policies_raw_lru: VecDeque<ListPoliciesCacheKey>,
-    list_policies_json_cache: HashMap<ListPoliciesCacheKey, UserPolicies>,
-    list_policies_json_lru: VecDeque<ListPoliciesCacheKey>,
+    list_policies_raw_cache: LruCache<ListPoliciesCacheKey, Arc<String>>,
+    list_policies_json_cache: LruCache<ListPoliciesCacheKey, Arc<UserPolicies>>,
 }
 
 impl Default for PolicyStore {
@@ -267,10 +266,12 @@ impl Default for PolicyStore {
             policies: Metadata::<OfPolicies>::new(String::new(), None, None).unwrap(),
             labels: Metadata::<OfLabels>::new(String::new(), None, None).unwrap(),
             label_registry_labelers: Vec::new(),
-            list_policies_raw_cache: HashMap::new(),
-            list_policies_raw_lru: VecDeque::new(),
-            list_policies_json_cache: HashMap::new(),
-            list_policies_json_lru: VecDeque::new(),
+            list_policies_raw_cache: LruCache::new(
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+            ),
+            list_policies_json_cache: LruCache::new(
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+            ),
         }
     }
 }
@@ -287,10 +288,12 @@ impl PolicyStore {
             policies: Metadata::<OfPolicies>::new(String::new(), None, None)?,
             labels: Metadata::<OfLabels>::new(String::new(), None, None)?,
             label_registry_labelers: Vec::new(),
-            list_policies_raw_cache: HashMap::new(),
-            list_policies_raw_lru: VecDeque::new(),
-            list_policies_json_cache: HashMap::new(),
-            list_policies_json_lru: VecDeque::new(),
+            list_policies_raw_cache: LruCache::new(
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+            ),
+            list_policies_json_cache: LruCache::new(
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+            ),
         })
     }
 
@@ -359,22 +362,16 @@ impl PolicyStore {
         user: String,
         mut groups: Vec<String>,
         mut namespaces: Vec<String>,
-    ) -> Result<String, ServiceError> {
+    ) -> Result<Arc<String>, ServiceError> {
         normalize_list_filters(&mut groups, &mut namespaces);
         let key = ListPoliciesCacheKey::new(user, groups, namespaces);
         if let Some(cached) = self.list_policies_raw_cache.get(&key) {
-            touch_lru(&mut self.list_policies_raw_lru, &key);
-            return Ok(cached.clone());
+            return Ok(Arc::clone(cached));
         }
 
         let policies = self.list_policies_for_key(&key)?;
-        let content = format_policies_raw(&policies);
-        cache_insert(
-            &mut self.list_policies_raw_cache,
-            &mut self.list_policies_raw_lru,
-            key,
-            content.clone(),
-        );
+        let content = Arc::new(format_policies_raw(&policies));
+        self.list_policies_raw_cache.put(key, Arc::clone(&content));
         Ok(content)
     }
 
@@ -383,22 +380,16 @@ impl PolicyStore {
         user: String,
         mut groups: Vec<String>,
         mut namespaces: Vec<String>,
-    ) -> Result<UserPolicies, ServiceError> {
+    ) -> Result<Arc<UserPolicies>, ServiceError> {
         normalize_list_filters(&mut groups, &mut namespaces);
         let key = ListPoliciesCacheKey::new(user, groups, namespaces);
         if let Some(cached) = self.list_policies_json_cache.get(&key) {
-            touch_lru(&mut self.list_policies_json_lru, &key);
-            return Ok(cached.clone());
+            return Ok(Arc::clone(cached));
         }
 
         let policies = self.list_policies_for_key(&key)?;
-        let response = UserPolicies::from(policies);
-        cache_insert(
-            &mut self.list_policies_json_cache,
-            &mut self.list_policies_json_lru,
-            key,
-            response.clone(),
-        );
+        let response = Arc::new(UserPolicies::from(policies));
+        self.list_policies_json_cache.put(key, Arc::clone(&response));
         Ok(response)
     }
 
@@ -415,9 +406,7 @@ impl PolicyStore {
 
     fn clear_list_policies_cache(&mut self) {
         self.list_policies_raw_cache.clear();
-        self.list_policies_raw_lru.clear();
         self.list_policies_json_cache.clear();
-        self.list_policies_json_lru.clear();
     }
 }
 
@@ -451,35 +440,6 @@ fn format_policies_raw(policies: &treetop_core::UserPolicies) -> String {
         let _ = write!(content, "{policy}");
     }
     content
-}
-
-fn touch_lru(lru: &mut VecDeque<ListPoliciesCacheKey>, key: &ListPoliciesCacheKey) {
-    if let Some(pos) = lru.iter().position(|k| k == key) {
-        lru.remove(pos);
-        lru.push_back(key.clone());
-    }
-}
-
-fn cache_insert<V>(
-    cache: &mut HashMap<ListPoliciesCacheKey, V>,
-    lru: &mut VecDeque<ListPoliciesCacheKey>,
-    key: ListPoliciesCacheKey,
-    value: V,
-) {
-    if cache.contains_key(&key) {
-        cache.insert(key.clone(), value);
-        touch_lru(lru, &key);
-        return;
-    }
-
-    if lru.len() >= LIST_POLICIES_CACHE_LIMIT {
-        if let Some(evicted) = lru.pop_front() {
-            cache.remove(&evicted);
-        }
-    }
-
-    lru.push_back(key.clone());
-    cache.insert(key, value);
 }
 
 fn normalize_list_filters(groups: &mut Vec<String>, namespaces: &mut Vec<String>) {
@@ -737,7 +697,7 @@ permit (
             .list_policies_raw("alice".to_string(), vec![], vec![])
             .unwrap();
 
-        assert_eq!(raw, expected_raw);
+        assert_eq!(*raw, expected_raw);
     }
 
     #[test]
@@ -768,7 +728,7 @@ permit (
             .unwrap();
 
         let expected_value = serde_json::to_value(expected_json).unwrap_or(Value::Null);
-        let response_value = serde_json::to_value(response).unwrap_or(Value::Null);
+        let response_value = serde_json::to_value(response.as_ref()).unwrap_or(Value::Null);
         assert_eq!(response_value, expected_value);
     }
 

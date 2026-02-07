@@ -1,5 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
+use itoa;
 use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Registry,
     TextEncoder,
@@ -44,12 +45,15 @@ impl HttpMetrics {
         client_ip: Option<&str>,
         duration_secs: f64,
     ) {
-        let status = status_code.to_string();
+        // Use itoa for efficient u16 to &str conversion (avoids allocation)
+        let mut status_buf = itoa::Buffer::new();
+        let status_str = status_buf.format(status_code);
+
         let ip = client_ip.unwrap_or("");
-        let req_labels: [&str; 4] = [method, path, &status, ip];
+        let req_labels: [&str; 4] = [method, path, status_str, ip];
         self.requests_total.with_label_values(&req_labels).inc();
 
-        let dur_labels: [&str; 3] = [method, path, &status];
+        let dur_labels: [&str; 3] = [method, path, status_str];
         self.request_duration_seconds
             .with_label_values(&dur_labels)
             .observe(duration_secs);

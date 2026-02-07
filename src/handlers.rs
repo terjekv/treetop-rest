@@ -37,9 +37,7 @@ fn parse_query_params(req: &HttpRequest) -> (Vec<String>, Vec<String>, Option<St
 }
 
 fn should_return_raw_format(format: Option<&str>) -> bool {
-    format.is_some_and(|fmt| {
-        fmt.eq_ignore_ascii_case("raw") || fmt.eq_ignore_ascii_case("text")
-    })
+    matches!(format, Some(fmt) if fmt.eq_ignore_ascii_case("raw") || fmt.eq_ignore_ascii_case("text"))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -185,6 +183,7 @@ where
             .enumerate()
             .map(|(index, auth_req)| eval_one(index, auth_req, engine_snapshot, &map_fn))
             .collect();
+        // Count successes in the collected results
         let successful = results
             .iter()
             .filter(|r| matches!(r.result(), BatchResult::Success { .. }))
@@ -324,8 +323,23 @@ pub async fn upload_policies(
     body: web::Bytes,
     store: web::Data<SharedPolicyStore>,
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
-    // Check that upload is allowed, and if it is, check that the upload token is set in the headers
+    // Parse and validate the body BEFORE acquiring the lock (this can be expensive)
+    let content_type = req.content_type();
+    let dsl_string = if content_type.starts_with("application/json") {
+        let upload: Upload = serde_json::from_slice(&body)?;
+        upload.policies
+    } else {
+        String::from_utf8(body.to_vec()).map_err(|_| ServiceError::InvalidTextPayload)?
+    };
+
+    // Validate the DSL before acquiring lock (computationally expensive)
+    if dsl_string.is_empty() {
+        return Err(ServiceError::InvalidTextPayload);
+    }
+
+    // Now acquire lock for authentication and applying changes
     let mut guard = store.lock()?;
+
     if !guard.allow_upload {
         return Err(ServiceError::UploadNotAllowed);
     }
@@ -342,14 +356,7 @@ pub async fn upload_policies(
         return Err(ServiceError::UploadTokenNotSet);
     }
 
-    let content_type = req.content_type();
-    let dsl_string = if content_type.starts_with("application/json") {
-        let upload: Upload = serde_json::from_slice(&body)?;
-        upload.policies
-    } else {
-        String::from_utf8(body.to_vec()).map_err(|_| ServiceError::InvalidTextPayload)?
-    };
-
+    // Apply the validated DSL (this is fast, mostly just Arc assignments)
     guard.set_dsl(&dsl_string, None, None)?;
 
     Ok(web::Json(PoliciesMetadata {
@@ -391,13 +398,18 @@ pub async fn list_policies(
 
     // Check format query parameter
     if should_return_raw_format(format.as_deref()) {
-        let content = store.list_policies_raw(entity_id, groups, namespaces)?;
-        return Ok(HttpResponse::Ok().content_type("text/plain").body(content));
+        let content: std::sync::Arc<String> =
+            store.list_policies_raw(entity_id, groups, namespaces)?;
+        // Clone the Arc (cheap pointer copy), then clone the String for response
+        return Ok(HttpResponse::Ok()
+            .content_type("text/plain")
+            .body((*content).clone()));
     }
 
     // Default: return as JSON
-    let response = store.list_policies_json(entity_id, groups, namespaces)?;
-    Ok(HttpResponse::Ok().json(response))
+    let response: std::sync::Arc<UserPolicies> =
+        store.list_policies_json(entity_id, groups, namespaces)?;
+    Ok(HttpResponse::Ok().json(response.as_ref()))
 }
 
 #[utoipa::path(
