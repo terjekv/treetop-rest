@@ -496,19 +496,20 @@ fn parse_principal_with_groups(user_str: &str) -> Result<(String, Vec<String>)> 
     if let Some(bracket_pos) = user_str.find('[') {
         // Check for matching closing bracket
         if let Some(close_pos) = user_str.find(']')
-            && close_pos > bracket_pos {
-                let principal_part = user_str[..bracket_pos].to_string();
-                let groups_str = &user_str[bracket_pos + 1..close_pos];
+            && close_pos > bracket_pos
+        {
+            let principal_part = user_str[..bracket_pos].to_string();
+            let groups_str = &user_str[bracket_pos + 1..close_pos];
 
-                // Split by comma and trim whitespace from each group
-                let groups: Vec<String> = groups_str
-                    .split(',')
-                    .map(|g| g.trim().to_string())
-                    .filter(|g| !g.is_empty())
-                    .collect();
+            // Split by comma and trim whitespace from each group
+            let groups: Vec<String> = groups_str
+                .split(',')
+                .map(|g| g.trim().to_string())
+                .filter(|g| !g.is_empty())
+                .collect();
 
-                return Ok((principal_part, groups));
-            }
+            return Ok((principal_part, groups));
+        }
     }
 
     // No brackets, return full principal as-is

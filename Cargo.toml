@@ -46,6 +46,7 @@ anyhow = "1"
 actix-rt = "2.11"
 rstest = "0.26"
 tempfile = "3.24"
+iai-callgrind = "0.13"
 
 [build-dependencies]
 vergen = { version = "9", features = [

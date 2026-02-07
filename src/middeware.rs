@@ -115,6 +115,14 @@ fn extract_client_ip(req: &ServiceRequest, trust_headers: bool) -> Option<IpAddr
     header_ip.or_else(|| req.peer_addr().map(|addr| addr.ip()))
 }
 
+#[doc(hidden)]
+pub fn extract_client_ip_for_bench(
+    req: &ServiceRequest,
+    trust_headers: bool,
+) -> Option<IpAddr> {
+    extract_client_ip(req, trust_headers)
+}
+
 fn parse_socket(raw: &str) -> Option<IpAddr> {
     if let Ok(sa) = raw.parse::<SocketAddr>() {
         return Some(sa.ip());
@@ -251,4 +259,3 @@ where
         )
     }
 }
-

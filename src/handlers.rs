@@ -200,6 +200,20 @@ where
     (results, successful, failed)
 }
 
+#[doc(hidden)]
+pub fn evaluate_batch_requests_for_bench<T, F>(
+    requests: &[AuthRequest],
+    engine_snapshot: &std::sync::Arc<treetop_core::PolicyEngine>,
+    parallel: &ParallelConfig,
+    map_fn: F,
+) -> (Vec<IndexedResult<T>>, usize, usize)
+where
+    T: Send,
+    F: Fn(treetop_core::Decision) -> T + Send + Sync,
+{
+    evaluate_batch_requests(requests, engine_snapshot, parallel, map_fn)
+}
+
 #[derive(serde::Deserialize)]
 pub struct AuthorizeQuery {
     /// Response detail level: 'brief' (default) or 'full'
