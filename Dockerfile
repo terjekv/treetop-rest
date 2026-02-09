@@ -22,6 +22,7 @@ RUN apk add --no-cache \
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY build.rs ./
+COPY benches ./benches
 COPY testdata ./testdata
 
 RUN cargo build --release --bin treetop-server
