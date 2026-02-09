@@ -19,25 +19,25 @@ use crate::models::{
 use crate::parallel::ParallelConfig;
 use crate::state::SharedPolicyStore;
 
-fn parse_group_and_namespace(req: &HttpRequest) -> (Vec<String>, Vec<String>) {
+fn parse_query_params(req: &HttpRequest) -> (Vec<String>, Vec<String>, Option<String>) {
     let mut groups = Vec::new();
     let mut namespaces = Vec::new();
+    let mut format = None;
 
     for (key, value) in form_urlencoded::parse(req.query_string().as_bytes()) {
         match key.as_ref() {
             "groups" | "groups[]" => groups.push(value.into_owned()),
             "namespaces" | "namespaces[]" => namespaces.push(value.into_owned()),
+            "format" => format = Some(value.into_owned()),
             _ => {}
         }
     }
 
-    (groups, namespaces)
+    (groups, namespaces, format)
 }
 
 fn should_return_raw_format(format: Option<&str>) -> bool {
-    format.is_some_and(|fmt| {
-        fmt.eq_ignore_ascii_case("raw") || fmt.eq_ignore_ascii_case("text")
-    })
+    matches!(format, Some(fmt) if fmt.eq_ignore_ascii_case("raw") || fmt.eq_ignore_ascii_case("text"))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -176,25 +176,31 @@ where
 {
     let use_parallel = parallel.allow_parallel && requests.len() >= parallel.par_threshold;
 
-    let results: Vec<IndexedResult<T>> = if use_parallel {
-        requests
+    let (results, successful) = if use_parallel {
+        let results: Vec<IndexedResult<T>> = requests
             .par_iter()
             .with_min_len(parallel.par_threshold)
             .enumerate()
             .map(|(index, auth_req)| eval_one(index, auth_req, engine_snapshot, &map_fn))
-            .collect()
-    } else {
-        requests
+            .collect();
+        // Count successes in the collected results
+        let successful = results
             .iter()
-            .enumerate()
-            .map(|(index, auth_req)| eval_one(index, auth_req, engine_snapshot, &map_fn))
-            .collect()
+            .filter(|r| matches!(r.result(), BatchResult::Success { .. }))
+            .count();
+        (results, successful)
+    } else {
+        let mut results = Vec::with_capacity(requests.len());
+        let mut successful = 0;
+        for (index, auth_req) in requests.iter().enumerate() {
+            let result = eval_one(index, auth_req, engine_snapshot, &map_fn);
+            if matches!(result.result(), BatchResult::Success { .. }) {
+                successful += 1;
+            }
+            results.push(result);
+        }
+        (results, successful)
     };
-
-    let successful = results
-        .iter()
-        .filter(|r| matches!(r.result(), BatchResult::Success { .. }))
-        .count();
     let failed = results.len() - successful;
 
     (results, successful, failed)
@@ -317,8 +323,23 @@ pub async fn upload_policies(
     body: web::Bytes,
     store: web::Data<SharedPolicyStore>,
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
-    // Check that upload is allowed, and if it is, check that the upload token is set in the headers
+    // Parse and validate the body BEFORE acquiring the lock (this can be expensive)
+    let content_type = req.content_type();
+    let dsl_string = if content_type.starts_with("application/json") {
+        let upload: Upload = serde_json::from_slice(&body)?;
+        upload.policies
+    } else {
+        String::from_utf8(body.to_vec()).map_err(|_| ServiceError::InvalidTextPayload)?
+    };
+
+    // Validate the DSL before acquiring lock (computationally expensive)
+    if dsl_string.is_empty() {
+        return Err(ServiceError::InvalidTextPayload);
+    }
+
+    // Now acquire lock for authentication and applying changes
     let mut guard = store.lock()?;
+
     if !guard.allow_upload {
         return Err(ServiceError::UploadNotAllowed);
     }
@@ -335,14 +356,7 @@ pub async fn upload_policies(
         return Err(ServiceError::UploadTokenNotSet);
     }
 
-    let content_type = req.content_type();
-    let dsl_string = if content_type.starts_with("application/json") {
-        let upload: Upload = serde_json::from_slice(&body)?;
-        upload.policies
-    } else {
-        String::from_utf8(body.to_vec()).map_err(|_| ServiceError::InvalidTextPayload)?
-    };
-
+    // Apply the validated DSL (this is fast, mostly just Arc assignments)
     guard.set_dsl(&dsl_string, None, None)?;
 
     Ok(web::Json(PoliciesMetadata {
@@ -372,42 +386,30 @@ pub async fn list_policies(
     user: web::Path<String>,
     req: HttpRequest,
 ) -> Result<HttpResponse, ServiceError> {
-    let store = store.lock()?;
+    let mut store = store.lock()?;
 
     // User path parameter is just the entity ID
     let entity_id = user.into_inner();
 
     // Use namespace and groups from query parameters
-    let (groups, namespaces) = parse_group_and_namespace(&req);
-    let namespace: Vec<&str> = namespaces.iter().map(|s| s.as_str()).collect();
-    let group_refs: Vec<&str> = groups.iter().map(|s| s.as_str()).collect();
+    let (groups, namespaces, format) = parse_query_params(&req);
 
     debug!(message = "Listing policies for user", entity = %entity_id, namespaces = ?namespaces, groups = ?groups);
 
-    let policies = store
-        .engine
-        .list_policies_for_user(&entity_id, &group_refs, &namespace)?;
-
     // Check format query parameter
-    let format = req
-        .query_string()
-        .split('&')
-        .find(|q| q.starts_with("format="))
-        .and_then(|q| q.strip_prefix("format="));
-
-    if should_return_raw_format(format) {
-        // Return policies as text/plain: just the policy DSL from the store
-        let content = policies
-            .policies()
-            .iter()
-            .map(|p| p.to_string())
-            .collect::<Vec<String>>()
-            .join("\n");
-        return Ok(HttpResponse::Ok().content_type("text/plain").body(content));
+    if should_return_raw_format(format.as_deref()) {
+        let content: std::sync::Arc<String> =
+            store.list_policies_raw(entity_id, groups, namespaces)?;
+        // Clone the Arc (cheap pointer copy), then clone the String for response
+        return Ok(HttpResponse::Ok()
+            .content_type("text/plain")
+            .body((*content).clone()));
     }
 
     // Default: return as JSON
-    Ok(HttpResponse::Ok().json(UserPolicies::from(policies)))
+    let response: std::sync::Arc<UserPolicies> =
+        store.list_policies_json(entity_id, groups, namespaces)?;
+    Ok(HttpResponse::Ok().json(response.as_ref()))
 }
 
 #[utoipa::path(

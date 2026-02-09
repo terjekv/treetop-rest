@@ -1,15 +1,17 @@
 use chrono::{DateTime, Utc};
+use lru::LruCache;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{Display, Formatter, Result as FmtResult, Write as FmtWrite};
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, trace};
 use treetop_core::{LabelRegistryBuilder, Labeler, PolicyEngine, RegexLabeler};
 use utoipa::ToSchema;
 
-use crate::{errors::ServiceError, models::Endpoint};
+use crate::{errors::ServiceError, models::{Endpoint, UserPolicies}};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OfPolicies;
@@ -249,6 +251,8 @@ pub struct PolicyStore {
     pub policies: Metadata<OfPolicies>,
     pub labels: Metadata<OfLabels>,
     pub label_registry_labelers: Vec<Arc<dyn Labeler>>,
+    list_policies_raw_cache: LruCache<ListPoliciesCacheKey, Arc<String>>,
+    list_policies_json_cache: LruCache<ListPoliciesCacheKey, Arc<UserPolicies>>,
 }
 
 impl Default for PolicyStore {
@@ -262,6 +266,12 @@ impl Default for PolicyStore {
             policies: Metadata::<OfPolicies>::new(String::new(), None, None).unwrap(),
             labels: Metadata::<OfLabels>::new(String::new(), None, None).unwrap(),
             label_registry_labelers: Vec::new(),
+            list_policies_raw_cache: LruCache::new(
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+            ),
+            list_policies_json_cache: LruCache::new(
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+            ),
         }
     }
 }
@@ -278,6 +288,12 @@ impl PolicyStore {
             policies: Metadata::<OfPolicies>::new(String::new(), None, None)?,
             labels: Metadata::<OfLabels>::new(String::new(), None, None)?,
             label_registry_labelers: Vec::new(),
+            list_policies_raw_cache: LruCache::new(
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+            ),
+            list_policies_json_cache: LruCache::new(
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+            ),
         })
     }
 
@@ -306,6 +322,7 @@ impl PolicyStore {
 
         self.engine = Arc::new(engine);
         self.policies = metadata;
+        self.clear_list_policies_cache();
         Ok(())
     }
 
@@ -336,17 +353,108 @@ impl PolicyStore {
         }
 
         self.labels = metadata;
+        self.clear_list_policies_cache();
         Ok(())
+    }
+
+    pub fn list_policies_raw(
+        &mut self,
+        user: String,
+        mut groups: Vec<String>,
+        mut namespaces: Vec<String>,
+    ) -> Result<Arc<String>, ServiceError> {
+        normalize_list_filters(&mut groups, &mut namespaces);
+        let key = ListPoliciesCacheKey::new(user, groups, namespaces);
+        if let Some(cached) = self.list_policies_raw_cache.get(&key) {
+            return Ok(Arc::clone(cached));
+        }
+
+        let policies = self.list_policies_for_key(&key)?;
+        let content = Arc::new(format_policies_raw(&policies));
+        self.list_policies_raw_cache.put(key, Arc::clone(&content));
+        Ok(content)
+    }
+
+    pub fn list_policies_json(
+        &mut self,
+        user: String,
+        mut groups: Vec<String>,
+        mut namespaces: Vec<String>,
+    ) -> Result<Arc<UserPolicies>, ServiceError> {
+        normalize_list_filters(&mut groups, &mut namespaces);
+        let key = ListPoliciesCacheKey::new(user, groups, namespaces);
+        if let Some(cached) = self.list_policies_json_cache.get(&key) {
+            return Ok(Arc::clone(cached));
+        }
+
+        let policies = self.list_policies_for_key(&key)?;
+        let response = Arc::new(UserPolicies::from(policies));
+        self.list_policies_json_cache.put(key, Arc::clone(&response));
+        Ok(response)
+    }
+
+    fn list_policies_for_key(
+        &self,
+        key: &ListPoliciesCacheKey,
+    ) -> Result<treetop_core::UserPolicies, ServiceError> {
+        let namespace: Vec<&str> = key.namespaces.iter().map(|s| s.as_str()).collect();
+        let group_refs: Vec<&str> = key.groups.iter().map(|s| s.as_str()).collect();
+        Ok(self
+            .engine
+            .list_policies_for_user(&key.user, &group_refs, &namespace)?)
+    }
+
+    fn clear_list_policies_cache(&mut self) {
+        self.list_policies_raw_cache.clear();
+        self.list_policies_json_cache.clear();
     }
 }
 
 pub type SharedPolicyStore = Arc<Mutex<PolicyStore>>;
+
+const LIST_POLICIES_CACHE_LIMIT: usize = 128;
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+struct ListPoliciesCacheKey {
+    user: String,
+    groups: Vec<String>,
+    namespaces: Vec<String>,
+}
+
+impl ListPoliciesCacheKey {
+    fn new(user: String, groups: Vec<String>, namespaces: Vec<String>) -> Self {
+        Self {
+            user,
+            groups,
+            namespaces,
+        }
+    }
+}
+
+fn format_policies_raw(policies: &treetop_core::UserPolicies) -> String {
+    let mut content = String::new();
+    for (index, policy) in policies.policies().iter().enumerate() {
+        if index > 0 {
+            content.push('\n');
+        }
+        let _ = write!(content, "{policy}");
+    }
+    content
+}
+
+fn normalize_list_filters(groups: &mut Vec<String>, namespaces: &mut Vec<String>) {
+    groups.sort_unstable();
+    groups.dedup();
+    namespaces.sort_unstable();
+    namespaces.dedup();
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::Endpoint;
     use std::str::FromStr;
+    use serde_json::Value;
 
     #[test]
     fn test_metadata_empty() {
@@ -560,5 +668,136 @@ permit (
         assert!(display.contains("https://example.com/api"));
         assert!(display.contains("120"));
         assert!(display.contains(&metadata.sha256));
+    }
+
+    #[test]
+    fn test_list_policies_raw_matches_engine() {
+        let mut store = PolicyStore::new().unwrap();
+        let dsl = r#"
+permit (
+    principal == User::"alice",
+    action == Action::"view",
+    resource == Photo::"VacationPhoto94.jpg"
+);
+
+permit (
+    principal == User::"bob",
+    action == Action::"view",
+    resource == Photo::"VacationPhoto94.jpg"
+);
+"#;
+        store.set_dsl(dsl, None, None).unwrap();
+
+        let expected = store
+            .engine
+            .list_policies_for_user("alice", &[], &[])
+            .unwrap();
+        let expected_raw = format_policies_raw(&expected);
+        let raw = store
+            .list_policies_raw("alice".to_string(), vec![], vec![])
+            .unwrap();
+
+        assert_eq!(*raw, expected_raw);
+    }
+
+    #[test]
+    fn test_list_policies_json_matches_engine() {
+        let mut store = PolicyStore::new().unwrap();
+        let dsl = r#"
+permit (
+    principal == User::"alice",
+    action == Action::"view",
+    resource == Photo::"VacationPhoto94.jpg"
+);
+
+permit (
+    principal == User::"bob",
+    action == Action::"view",
+    resource == Photo::"VacationPhoto94.jpg"
+);
+"#;
+        store.set_dsl(dsl, None, None).unwrap();
+
+        let expected = store
+            .engine
+            .list_policies_for_user("alice", &[], &[])
+            .unwrap();
+        let expected_json = UserPolicies::from(expected);
+        let response = store
+            .list_policies_json("alice".to_string(), vec![], vec![])
+            .unwrap();
+
+        let expected_value = serde_json::to_value(expected_json).unwrap_or(Value::Null);
+        let response_value = serde_json::to_value(response.as_ref()).unwrap_or(Value::Null);
+        assert_eq!(response_value, expected_value);
+    }
+
+    #[test]
+    fn test_list_policies_cache_cleared_on_set_dsl() {
+        let mut store = PolicyStore::new().unwrap();
+        let dsl = r#"
+permit (
+    principal == User::"alice",
+    action == Action::"view",
+    resource == Photo::"VacationPhoto94.jpg"
+);
+"#;
+        store.set_dsl(dsl, None, None).unwrap();
+        let _ = store
+            .list_policies_raw("alice".to_string(), vec![], vec![])
+            .unwrap();
+        let _ = store
+            .list_policies_json("alice".to_string(), vec![], vec![])
+            .unwrap();
+
+        assert_eq!(store.list_policies_raw_cache.len(), 1);
+        assert_eq!(store.list_policies_json_cache.len(), 1);
+
+        let updated = r#"
+permit (
+    principal == User::"alice",
+    action == Action::"edit",
+    resource == Photo::"VacationPhoto94.jpg"
+);
+"#;
+        store.set_dsl(updated, None, None).unwrap();
+
+        assert!(store.list_policies_raw_cache.is_empty());
+        assert!(store.list_policies_json_cache.is_empty());
+    }
+
+    #[test]
+    fn test_list_policies_cache_normalizes_groups_and_namespaces() {
+        let mut store = PolicyStore::new().unwrap();
+        let dsl = r#"
+permit (
+    principal == User::"alice",
+    action == Action::"view",
+    resource == Photo::"VacationPhoto94.jpg"
+);
+"#;
+        store.set_dsl(dsl, None, None).unwrap();
+
+        let _ = store
+            .list_policies_raw(
+                "alice".to_string(),
+                vec!["admins".to_string(), "users".to_string()],
+                vec!["Team".to_string(), "Org".to_string()],
+            )
+            .unwrap();
+
+        let _ = store
+            .list_policies_raw(
+                "alice".to_string(),
+                vec![
+                    "users".to_string(),
+                    "admins".to_string(),
+                    "admins".to_string(),
+                ],
+                vec!["Org".to_string(), "Org".to_string(), "Team".to_string()],
+            )
+            .unwrap();
+
+        assert_eq!(store.list_policies_raw_cache.len(), 1);
     }
 }

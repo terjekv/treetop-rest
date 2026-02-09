@@ -36,9 +36,8 @@ fn parse_alternatives(input: &str) -> Vec<String> {
         } else if ch == '|' && bracket_depth == 0 {
             // This is a top-level pipe separator
             if !current_segment.is_empty() {
-                segments.push(current_segment.clone());
+                segments.push(std::mem::take(&mut current_segment));
             }
-            current_segment.clear();
         } else {
             current_segment.push(ch);
         }
@@ -125,29 +124,36 @@ fn expand_brackets(segment: &str) -> Vec<String> {
 fn generate_smart_query_ids(queries: &mut [MatrixQuery]) {
     // Determine which fields vary across queries
     let has_multiple_principals = queries
-        .iter()
-        .map(|q| &q.principal)
-        .collect::<std::collections::HashSet<_>>()
-        .len()
-        > 1;
+        .first()
+        .map(|first| {
+            queries
+                .iter()
+                .skip(1)
+                .any(|q| q.principal != first.principal)
+        })
+        .unwrap_or(false);
     let has_multiple_actions = queries
-        .iter()
-        .map(|q| &q.action)
-        .collect::<std::collections::HashSet<_>>()
-        .len()
-        > 1;
+        .first()
+        .map(|first| queries.iter().skip(1).any(|q| q.action != first.action))
+        .unwrap_or(false);
     let has_multiple_resource_types = queries
-        .iter()
-        .map(|q| &q.resource_type)
-        .collect::<std::collections::HashSet<_>>()
-        .len()
-        > 1;
+        .first()
+        .map(|first| {
+            queries
+                .iter()
+                .skip(1)
+                .any(|q| q.resource_type != first.resource_type)
+        })
+        .unwrap_or(false);
     let has_multiple_resource_ids = queries
-        .iter()
-        .map(|q| &q.resource_id)
-        .collect::<std::collections::HashSet<_>>()
-        .len()
-        > 1;
+        .first()
+        .map(|first| {
+            queries
+                .iter()
+                .skip(1)
+                .any(|q| q.resource_id != first.resource_id)
+        })
+        .unwrap_or(false);
 
     // Determine which attribute keys vary across queries
     let varying_attr_keys: std::collections::HashSet<String> = if queries.is_empty() {
@@ -163,13 +169,13 @@ fn generate_smart_query_ids(queries: &mut [MatrixQuery]) {
         all_keys
             .into_iter()
             .filter(|key| {
-                let values: std::collections::HashSet<String> = queries
+                let values: std::collections::HashSet<&str> = queries
                     .iter()
                     .filter_map(|q| {
                         q.attrs
                             .iter()
                             .find(|(k, _)| k == key)
-                            .map(|(_, v)| v.clone())
+                            .map(|(_, v)| v.as_str())
                     })
                     .collect();
                 values.len() > 1
@@ -251,7 +257,7 @@ pub fn expand_matrix(
 
         for (key, value) in attrs {
             let value_alts = parse_alternatives(&value);
-            let mut new_perms = Vec::new();
+            let mut new_perms = Vec::with_capacity(perms.len() * value_alts.len());
 
             for value_alt in value_alts {
                 for perm in &perms {
@@ -267,7 +273,12 @@ pub fn expand_matrix(
     };
 
     // Generate cartesian product
-    let mut queries = Vec::new();
+    let total = actions.len()
+        * principals.len()
+        * resource_types.len()
+        * resource_ids.len()
+        * attr_permutations.len();
+    let mut queries = Vec::with_capacity(total);
 
     for action in &actions {
         for principal in &principals {
