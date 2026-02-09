@@ -3,6 +3,7 @@ name = "treetop-rest"
 version = "0.0.3"
 edition = "2024"
 build = "build.rs"
+autobenches = false
 
 [dependencies]
 actix-service = "2.0"
@@ -79,7 +80,15 @@ path = "src/bin/cli.rs"
 debug = true
 
 [[bench]]
-name = "authorize_batch"
+name = "authorize_batch_small"
+harness = false
+
+[[bench]]
+name = "authorize_batch_brief_128"
+harness = false
+
+[[bench]]
+name = "authorize_batch_detailed_128"
 harness = false
 
 [[bench]]
