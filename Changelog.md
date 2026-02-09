@@ -5,15 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.4] - 2026-02-09
 
 ### Added
 
 - Group membership support for policy retrieval via `groups` query parameter on `/api/v1/policies/{user}` endpoint
 - Test suite for group membership filtering functionality
+- Performance tracking via `iai-callgrind` action
+- Dependabot support
 
 ### Changed
 
+- Updated `treetop-core` to version 0.0.16.
 - **CLI**: Consolidated `get-policies` and `list-policies` commands into single `policies` command
 - **CLI**: Added `--user` flag to `policies` command for retrieving user-specific policies
 - **CLI**: Added support for group membership syntax using bracket notation (e.g., `DNS::User::alice[admins,developers]`)
