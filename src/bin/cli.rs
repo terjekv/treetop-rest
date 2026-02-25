@@ -3,7 +3,9 @@ use clap::parser::ValueSource;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use colored::*;
 use dirs::data_dir;
+use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
@@ -16,7 +18,9 @@ use treetop_rest::cli::{
     LastUsedValues, PoliciesDownload, UserPolicies, matrix::expand_matrix, models::TableStyle,
     repl::run_repl,
 };
-use treetop_rest::models::{AuthRequest, AuthorizeRequest, PoliciesMetadata, StatusResponse};
+use treetop_rest::models::{
+    AuthRequest, AuthorizeRequest, PoliciesMetadata, SchemaDownload, StatusResponse,
+};
 use uuid::Uuid;
 
 // Completion is handled inside the REPL module now
@@ -84,6 +88,47 @@ fn sanitize_command(cmd: &str) -> String {
         .collect()
 }
 
+fn json_value_to_attr_value(value: serde_json::Value) -> Result<AttrValue> {
+    if let Ok(attr) = serde_json::from_value::<AttrValue>(value.clone()) {
+        return Ok(attr);
+    }
+
+    match value {
+        serde_json::Value::String(s) => Ok(AttrValue::String(s)),
+        serde_json::Value::Bool(b) => Ok(AttrValue::Bool(b)),
+        serde_json::Value::Number(n) => n.as_i64().map(AttrValue::Long).ok_or_else(|| {
+            anyhow::anyhow!("context numeric values must fit in signed 64-bit integers")
+        }),
+        serde_json::Value::Array(items) => {
+            let converted = items
+                .into_iter()
+                .map(json_value_to_attr_value)
+                .collect::<Result<Vec<_>>>()?;
+            Ok(AttrValue::Set(converted))
+        }
+        serde_json::Value::Null => Err(anyhow::anyhow!("context value cannot be null")),
+        serde_json::Value::Object(_) => Err(anyhow::anyhow!(
+            "context object values must use typed Cedar format {{\"type\":...,\"value\":...}}"
+        )),
+    }
+}
+
+fn load_context_file(path: &Path) -> Result<HashMap<String, AttrValue>> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read context file `{}`", path.display()))?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw)
+        .with_context(|| format!("failed to parse context file `{}` as JSON", path.display()))?;
+
+    let mut context = HashMap::new();
+    let obj = parsed
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("context file must contain a JSON object"))?;
+    for (key, value) in obj {
+        context.insert(key.clone(), json_value_to_attr_value(value.clone())?);
+    }
+    Ok(context)
+}
+
 fn make_correlation_id(cmd: &str) -> String {
     let sanitized = sanitize_command(cmd);
     let uuid = Uuid::new_v4();
@@ -114,6 +159,12 @@ enum Commands {
         /// Repeatable: --resource-attribute key=value (quotes allowed around value). Values support alternatives
         #[arg(long = "resource-attribute", value_parser = parse_kv)]
         attrs: Vec<(String, InputAttrValue)>,
+        /// Repeatable context attributes, merged with --context-file (flags override file keys).
+        #[arg(long = "context-attribute", value_parser = parse_kv)]
+        context_attrs: Vec<(String, InputAttrValue)>,
+        /// JSON file with request context key/value pairs.
+        #[clap(long = "context-file")]
+        context_file: Option<std::path::PathBuf>,
         /// Resource ID (falls back to last used in REPL). Supports alternatives: host1.com|host2.com
         #[clap(long = "resource-id")]
         resource_id: Option<String>,
@@ -128,16 +179,25 @@ enum Commands {
         /// User principal with optional groups using Namespace::User::name[group1,group2] syntax. If not provided, downloads all policies.
         #[clap(long)]
         user: Option<String>,
-        /// Download in raw text format instead of JSON (only applies when no user specified)
+        /// Download in raw text format instead of structured output
         #[clap(long)]
         raw: bool,
     },
-    /// Upload new policies from a file
+    /// View or download schema
+    Schema {
+        /// Download in raw text format instead of structured output
+        #[clap(long)]
+        raw: bool,
+    },
+    /// Upload policies or schema from a file
     Upload {
         #[clap(long)]
         file: std::path::PathBuf,
         #[clap(long)]
         raw: bool,
+        /// Upload file as Cedar schema instead of policies
+        #[clap(long)]
+        schema: bool,
         #[clap(long)]
         token: String,
     },
@@ -286,6 +346,8 @@ struct CheckParams {
     resource_type: Option<String>,
     resource_id: Option<String>,
     attrs: Vec<(String, InputAttrValue)>,
+    context_attrs: Vec<(String, InputAttrValue)>,
+    context_file: Option<std::path::PathBuf>,
     detailed: bool,
     table: bool,
 }
@@ -312,6 +374,19 @@ async fn handle_check(ctx: &mut ExecContext, params: CheckParams) -> Result<()> 
         ctx.last_used.attrs.clone()
     } else {
         params.attrs
+    };
+
+    let mut request_context = match params.context_file {
+        Some(path) => load_context_file(&path)?,
+        None => HashMap::new(),
+    };
+    for (k, v) in params.context_attrs {
+        request_context.insert(k, AttrValue::from(v));
+    }
+    let request_context = if request_context.is_empty() {
+        None
+    } else {
+        Some(request_context)
     };
 
     ctx.last_used.principal = Some(principal.clone());
@@ -407,6 +482,7 @@ async fn handle_check(ctx: &mut ExecContext, params: CheckParams) -> Result<()> 
 
         auth_requests.push(AuthRequest {
             id: Some(matrix_query.query_id.clone()),
+            context: request_context.clone(),
             request: req,
         });
     }
@@ -444,11 +520,10 @@ async fn handle_check(ctx: &mut ExecContext, params: CheckParams) -> Result<()> 
 }
 
 async fn handle_policies(ctx: &ExecContext, user: Option<String>, raw: bool) -> Result<()> {
-    // Send raw by default unless in JSON context
-    let effective_raw = raw || !ctx.show_json;
-
     match user {
         None => {
+            // Send raw by default unless in JSON context for full policy download
+            let effective_raw = raw || !ctx.show_json;
             // Get all policies (download)
             let resp = ctx.api.get_policies(effective_raw).await?;
             if effective_raw && resp.status().is_success() {
@@ -460,6 +535,8 @@ async fn handle_policies(ctx: &ExecContext, user: Option<String>, raw: bool) -> 
         Some(user_str) => {
             // Parse user with potential group syntax: Namespace::User::name[group1,group2]
             let (principal, groups) = parse_principal_with_groups(&user_str)?;
+            // User listing is structured by default so we can show match reasons.
+            let effective_raw = raw;
             let resp = ctx
                 .api
                 .get_user_policies(&principal, groups, effective_raw)
@@ -474,17 +551,35 @@ async fn handle_policies(ctx: &ExecContext, user: Option<String>, raw: bool) -> 
     Ok(())
 }
 
+async fn handle_schema(ctx: &ExecContext, raw: bool) -> Result<()> {
+    let effective_raw = raw || !ctx.show_json;
+    let resp = ctx.api.get_schema(effective_raw).await?;
+    if effective_raw && resp.status().is_success() {
+        println!("{}", resp.text().await?);
+    } else {
+        handle_response::<SchemaDownload>(resp, ctx.show_json, ctx.show_debug).await?;
+    }
+    Ok(())
+}
+
 async fn handle_upload(
     ctx: &ExecContext,
     file: std::path::PathBuf,
     raw: bool,
+    schema: bool,
     token: String,
 ) -> Result<()> {
     let content = fs::read_to_string(&file)?;
-    let resp = if raw {
+    let resp = if schema {
+        if raw {
+            ctx.api.post_schema_raw(&token, content).await?
+        } else {
+            ctx.api.post_schema_json(&token, content).await?
+        }
+    } else if raw {
         ctx.api.post_policies_raw(&token, content).await?
     } else {
-        ctx.api.post_policies_json(content).await?
+        ctx.api.post_policies_json(&token, content).await?
     };
     handle_response::<PoliciesMetadata>(resp, ctx.show_json, ctx.show_debug).await?;
     Ok(())
@@ -615,6 +710,8 @@ async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()>
             resource_type,
             resource_id,
             attrs,
+            context_attrs,
+            context_file,
             detailed,
             table,
         } => {
@@ -626,6 +723,8 @@ async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()>
                     resource_type,
                     resource_id,
                     attrs,
+                    context_attrs,
+                    context_file,
                     detailed,
                     table,
                 },
@@ -635,8 +734,16 @@ async fn execute_command(command: Commands, ctx: &mut ExecContext) -> Result<()>
         Commands::Policies { user, raw } => {
             handle_policies(ctx, user, raw).await?;
         }
-        Commands::Upload { file, raw, token } => {
-            handle_upload(ctx, file, raw, token).await?;
+        Commands::Schema { raw } => {
+            handle_schema(ctx, raw).await?;
+        }
+        Commands::Upload {
+            file,
+            raw,
+            schema,
+            token,
+        } => {
+            handle_upload(ctx, file, raw, schema, token).await?;
         }
         Commands::Json => {
             toggle_json(ctx);
@@ -735,6 +842,10 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
         "Allow upload:",
         yes_no(metadata.policy_configuration.allow_upload),
     );
+    settings_line(
+        "Schema mode:",
+        &metadata.policy_configuration.schema_validation_mode,
+    );
 
     let l = &metadata.policy_configuration.labels;
     println!("\n{}", title("Labels"));
@@ -749,6 +860,19 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
         settings_line("Refresh:", &format!("every {}s", freq));
     }
 
+    let s = &metadata.policy_configuration.schema;
+    println!("\n{}", title("Schema"));
+    settings_line("Hash:", &s.sha256);
+    settings_line("Updated:", &s.timestamp.to_string());
+    settings_line("Entries:", &s.entries.to_string());
+    settings_line("Size:", &format!("{} bytes", s.size).white());
+    if let Some(src) = &s.source {
+        settings_line("Source:", &src.to_string());
+    }
+    if let Some(freq) = s.refresh_frequency {
+        settings_line("Refresh:", &format!("every {}s", freq));
+    }
+
     let pc = &metadata.parallel_configuration;
     println!("\n{}", title("Parallelism"));
     settings_line("CPU count:", &pc.cpu_count.to_string());
@@ -756,6 +880,12 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
     settings_line("Parallelizing:", yes_no(pc.allow_parallel));
     settings_line("Threads:", &pc.rayon_threads.to_string());
     settings_line("Cutoff:", &pc.par_threshold.to_string());
+
+    let rc = &metadata.request_limits;
+    println!("\n{}", title("Request Limits"));
+    settings_line("Context bytes:", &rc.max_context_bytes.to_string());
+    settings_line("Context depth:", &rc.max_context_depth.to_string());
+    settings_line("Context keys:", &rc.max_context_keys.to_string());
 
     Ok(())
 }

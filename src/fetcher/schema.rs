@@ -3,22 +3,22 @@ use crate::models::Endpoint;
 use crate::state::PolicyStore;
 use std::sync::{Arc, Mutex};
 
-/// Wraps a PolicyStore to implement Fetchable
-pub struct PolicyFetchAdapter {
+/// Adapter that replaces the global schema definition.
+pub struct SchemaFetchAdapter {
     store: Arc<Mutex<PolicyStore>>,
     hash: Option<String>,
 }
 
-impl PolicyFetchAdapter {
+impl SchemaFetchAdapter {
     pub fn new(store: Arc<Mutex<PolicyStore>>) -> Self {
         Self { store, hash: None }
     }
 }
 
-impl Fetchable for PolicyFetchAdapter {
+impl Fetchable for SchemaFetchAdapter {
     fn update_store(&mut self, body: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut s = self.store.lock().unwrap();
-        s.set_dsl(body, None, None)?;
+        s.set_schema(body, None, None)?;
         Ok(())
     }
 
@@ -31,14 +31,14 @@ impl Fetchable for PolicyFetchAdapter {
     }
 }
 
-impl PolicyFetchAdapter {
+impl SchemaFetchAdapter {
     /// Spawn the background loop
     pub fn spawn(self, url: Endpoint, refresh_secs: u64) {
         let adapter = self;
         {
             let mut s = adapter.store.lock().unwrap();
-            s.policies.source = Some(url.clone());
-            s.policies.refresh_frequency = Some(refresh_secs as u32);
+            s.schema.source = Some(url.clone());
+            s.schema.refresh_frequency = Some(refresh_secs as u32);
         }
         GenericFetcher::new(adapter, url.to_string(), refresh_secs).spawn();
     }

@@ -1,3 +1,7 @@
+use cedar_policy::{
+    PolicySet as CedarPolicySet, Schema as CedarSchema, ValidationMode as CedarValidationMode,
+    Validator as CedarValidator,
+};
 use chrono::{DateTime, Utc};
 use lru::LruCache;
 use regex::Regex;
@@ -7,16 +11,23 @@ use std::fmt::{Display, Formatter, Result as FmtResult, Write as FmtWrite};
 use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 use treetop_core::{LabelRegistryBuilder, Labeler, PolicyEngine, RegexLabeler};
 use utoipa::ToSchema;
 
-use crate::{errors::ServiceError, models::{Endpoint, UserPolicies}};
+use crate::{
+    config::SchemaValidationMode,
+    errors::ServiceError,
+    metrics,
+    models::{Endpoint, UserPolicies},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OfPolicies;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OfLabels;
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct OfSchema;
 
 pub trait MetadataParser {
     /// Count the number of entries in the content.
@@ -215,7 +226,10 @@ impl MetadataParser for OfPolicies {
     fn count_entries(content: &str) -> Result<usize, ServiceError> {
         Ok(content
             .lines()
-            .filter(|line| line.starts_with("permit (") || line.starts_with("forbid ("))
+            .filter(|line| {
+                let line = line.trim_start();
+                line.starts_with("permit (") || line.starts_with("forbid (")
+            })
             .count())
     }
 }
@@ -243,13 +257,31 @@ impl MetadataParser for OfLabels {
     }
 }
 
+impl MetadataParser for OfSchema {
+    fn count_entries(content: &str) -> Result<usize, ServiceError> {
+        let schema_json: serde_json::Value = serde_json::from_str(content)?;
+        match schema_json {
+            serde_json::Value::Object(obj) => Ok(obj.len()),
+            _ => Ok(1),
+        }
+    }
+
+    fn validate_content(content: &str) -> Result<(), ServiceError> {
+        CedarSchema::from_json_str(content)
+            .map(|_| ())
+            .map_err(|e| ServiceError::SchemaValidationError(e.to_string()))
+    }
+}
+
 pub struct PolicyStore {
     pub engine: Arc<PolicyEngine>,
     pub allow_upload: bool,
     pub upload_token: Option<String>,
+    pub schema_validation_mode: SchemaValidationMode,
 
     pub policies: Metadata<OfPolicies>,
     pub labels: Metadata<OfLabels>,
+    pub schema: Metadata<OfSchema>,
     pub label_registry_labelers: Vec<Arc<dyn Labeler>>,
     list_policies_raw_cache: LruCache<ListPoliciesCacheKey, Arc<String>>,
     list_policies_json_cache: LruCache<ListPoliciesCacheKey, Arc<UserPolicies>>,
@@ -263,14 +295,16 @@ impl Default for PolicyStore {
             ),
             allow_upload: false,
             upload_token: None,
+            schema_validation_mode: SchemaValidationMode::Permissive,
             policies: Metadata::<OfPolicies>::new(String::new(), None, None).unwrap(),
             labels: Metadata::<OfLabels>::new(String::new(), None, None).unwrap(),
+            schema: Metadata::<OfSchema>::new(String::new(), None, None).unwrap(),
             label_registry_labelers: Vec::new(),
             list_policies_raw_cache: LruCache::new(
-                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap(),
             ),
             list_policies_json_cache: LruCache::new(
-                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap(),
             ),
         }
     }
@@ -285,16 +319,85 @@ impl PolicyStore {
             ),
             allow_upload: false,
             upload_token: None,
+            schema_validation_mode: SchemaValidationMode::Permissive,
             policies: Metadata::<OfPolicies>::new(String::new(), None, None)?,
             labels: Metadata::<OfLabels>::new(String::new(), None, None)?,
+            schema: Metadata::<OfSchema>::new(String::new(), None, None)?,
             label_registry_labelers: Vec::new(),
             list_policies_raw_cache: LruCache::new(
-                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap(),
             ),
             list_policies_json_cache: LruCache::new(
-                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap()
+                NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap(),
             ),
         })
+    }
+
+    pub fn set_schema_validation_mode(&mut self, mode: SchemaValidationMode) {
+        self.schema_validation_mode = mode;
+    }
+
+    fn current_schema(&self) -> Result<Option<CedarSchema>, ServiceError> {
+        if self.schema.content.is_empty() {
+            return Ok(None);
+        }
+        CedarSchema::from_json_str(&self.schema.content)
+            .map(Some)
+            .map_err(|e| ServiceError::SchemaValidationError(e.to_string()))
+    }
+
+    fn validate_policies_with_schema(
+        &self,
+        dsl: &str,
+        schema: &CedarSchema,
+    ) -> Result<(), ServiceError> {
+        let policy_set: CedarPolicySet = dsl
+            .parse::<CedarPolicySet>()
+            .map_err(|e| ServiceError::CompileError(e.to_string()))?;
+
+        let validator = CedarValidator::new(schema.clone());
+        let result = validator.validate(&policy_set, CedarValidationMode::Strict);
+
+        if result.validation_passed() {
+            return Ok(());
+        }
+
+        let reasons = result
+            .validation_errors()
+            .take(5)
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        let detail = if reasons.is_empty() {
+            "schema validation failed".to_string()
+        } else {
+            reasons.join("; ")
+        };
+        Err(ServiceError::SchemaValidationError(detail))
+    }
+
+    fn prevalidate_policy_reload(&self, dsl: &str) -> Result<(), ServiceError> {
+        let Some(schema) = self.current_schema()? else {
+            if self.schema_validation_mode == SchemaValidationMode::Strict {
+                return Err(ServiceError::SchemaValidationError(
+                    "strict schema validation requires an uploaded schema before policy reload"
+                        .to_string(),
+                ));
+            }
+            return Ok(());
+        };
+
+        match self.validate_policies_with_schema(dsl, &schema) {
+            Ok(()) => Ok(()),
+            Err(e) if self.schema_validation_mode == SchemaValidationMode::Permissive => {
+                warn!(message = "Policy/schema mismatch in permissive mode", error = %e);
+                metrics::record_schema_validation_failure("policy_schema_mismatch");
+                Ok(())
+            }
+            Err(e) => {
+                metrics::record_schema_validation_failure("policy_schema_mismatch");
+                Err(e)
+            }
+        }
     }
 
     pub fn set_dsl(
@@ -303,6 +406,8 @@ impl PolicyStore {
         source: Option<Endpoint>,
         refresh_frequency: Option<u32>,
     ) -> Result<(), ServiceError> {
+        self.prevalidate_policy_reload(dsl)?;
+
         let old_metadata = self.policies.clone();
         let source = source.or(old_metadata.source);
         let refresh_frequency = refresh_frequency.or(old_metadata.refresh_frequency);
@@ -323,6 +428,48 @@ impl PolicyStore {
         self.engine = Arc::new(engine);
         self.policies = metadata;
         self.clear_list_policies_cache();
+        Ok(())
+    }
+
+    pub fn set_schema(
+        &mut self,
+        schema: &str,
+        source: Option<Endpoint>,
+        refresh_frequency: Option<u32>,
+    ) -> Result<(), ServiceError> {
+        let old_metadata = self.schema.clone();
+        let source = source.or(old_metadata.source);
+        let refresh_frequency = refresh_frequency.or(old_metadata.refresh_frequency);
+
+        let metadata =
+            match Metadata::<OfSchema>::new(schema.to_string(), source, refresh_frequency) {
+                Ok(metadata) => metadata,
+                Err(e) => {
+                    metrics::record_schema_validation_failure("schema_parse");
+                    return Err(e);
+                }
+            };
+        let parsed_schema = match CedarSchema::from_json_str(schema) {
+            Ok(schema) => schema,
+            Err(e) => {
+                metrics::record_schema_validation_failure("schema_parse");
+                return Err(ServiceError::SchemaValidationError(e.to_string()));
+            }
+        };
+
+        if self.schema_validation_mode == SchemaValidationMode::Strict
+            && !self.policies.content.is_empty()
+        {
+            if let Err(e) =
+                self.validate_policies_with_schema(&self.policies.content, &parsed_schema)
+            {
+                metrics::record_schema_validation_failure("schema_policy_mismatch");
+                return Err(e);
+            }
+        }
+
+        self.schema = metadata;
+        metrics::record_schema_reload();
         Ok(())
     }
 
@@ -389,7 +536,8 @@ impl PolicyStore {
 
         let policies = self.list_policies_for_key(&key)?;
         let response = Arc::new(UserPolicies::from(policies));
-        self.list_policies_json_cache.put(key, Arc::clone(&response));
+        self.list_policies_json_cache
+            .put(key, Arc::clone(&response));
         Ok(response)
     }
 
@@ -453,8 +601,8 @@ fn normalize_list_filters(groups: &mut Vec<String>, namespaces: &mut Vec<String>
 mod tests {
     use super::*;
     use crate::models::Endpoint;
-    use std::str::FromStr;
     use serde_json::Value;
+    use std::str::FromStr;
 
     #[test]
     fn test_metadata_empty() {

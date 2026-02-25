@@ -35,6 +35,12 @@ The server uses **command-line flags** and **environment variables**. There is *
 | `--update-frequency` | `TREETOP_POLICY_UPDATE_FREQUENCY` | _(none → 60s)_ | Poll interval for `TREETOP_POLICY_URL`. |
 | `--labels-url` | `TREETOP_LABELS_URL` | _(none)_ | URL to fetch labels from (JSON). |
 | `--labels-refresh` | `TREETOP_LABELS_UPDATE_FREQUENCY` | _(none → 60s)_ | Poll interval for `TREETOP_LABELS_URL`. |
+| `--schema-url` | `TREETOP_SCHEMA_URL` | _(none)_ | URL to fetch Cedar schema from (JSON). |
+| `--schema-refresh` | `TREETOP_SCHEMA_UPDATE_FREQUENCY` | _(none → 60s)_ | Poll interval for `TREETOP_SCHEMA_URL`. |
+| `--schema-validation-mode` | `TREETOP_SCHEMA_VALIDATION_MODE` | `permissive` | Schema enforcement mode (`permissive` or `strict`) for policy/schema reloads. |
+| `--max-context-bytes` | `TREETOP_MAX_CONTEXT_BYTES` | `16384` | Maximum request context payload size in bytes. |
+| `--max-context-depth` | `TREETOP_MAX_CONTEXT_DEPTH` | `8` | Maximum nesting depth for request context values. |
+| `--max-context-keys` | `TREETOP_MAX_CONTEXT_KEYS` | `64` | Maximum number of top-level keys in request context. |
 | `--trust-ip-headers` | `TREETOP_TRUST_IP_HEADERS` | `true` | Trust proxy headers (`X-Forwarded-For`, `Forwarded`). |
 | `--client-allowlist` | `TREETOP_CLIENT_ALLOWLIST` | `127.0.0.1,::1` | Allowed client IPs/CIDRs. Use `*` to allow all. |
 | `--version` | _(none)_ | `false` | Print version information and exit. |
@@ -43,6 +49,7 @@ The server uses **command-line flags** and **environment variables**. There is *
 
 - If `--policy-url` or `--labels-url` is provided, the server polls every 60 seconds unless the corresponding refresh
 value is set.
+- If `--schema-url` is provided, the server polls every 60 seconds unless `--schema-refresh` is set.
 - The client allowlist accepts comma-separated IPv4/IPv6 addresses or CIDRs. Use `*` to allow all.
 
 ## Client configuration (treetop-cli / REPL)

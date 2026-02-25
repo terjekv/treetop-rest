@@ -1,15 +1,16 @@
+use std::collections::HashMap;
 use std::ops::Deref;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use treetop_core::{Decision, PermitPolicy, PolicyVersion, Request};
+use treetop_core::{AttrValue, Decision, PermitPolicy, PolicyVersion, Request};
 use url::Url;
 
 use utoipa::ToSchema;
 
 use crate::{
     parallel::ParallelConfig,
-    state::{Metadata, OfLabels, OfPolicies, PolicyStore},
+    state::{Metadata, OfLabels, OfPolicies, OfSchema, PolicyStore},
 };
 
 /// Network endpoint URL for policy or label service communication
@@ -117,15 +118,36 @@ impl From<Decision> for AuthorizeDecisionBrief {
 pub struct StatusResponse {
     pub policy_configuration: PoliciesMetadata,
     pub parallel_configuration: ParallelConfig,
+    #[serde(default)]
+    pub request_limits: RequestLimits,
+}
+
+#[derive(Serialize, ToSchema, Deserialize, Clone, Copy)]
+pub struct RequestLimits {
+    pub max_context_bytes: usize,
+    pub max_context_depth: usize,
+    pub max_context_keys: usize,
+}
+
+impl Default for RequestLimits {
+    fn default() -> Self {
+        Self {
+            max_context_bytes: 16 * 1024,
+            max_context_depth: 8,
+            max_context_keys: 64,
+        }
+    }
 }
 
 /// Metadata about the policies and labels in the policy store
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct PoliciesMetadata {
     pub allow_upload: bool,
+    pub schema_validation_mode: String,
 
     pub policies: Metadata<OfPolicies>,
     pub labels: Metadata<OfLabels>,
+    pub schema: Metadata<OfSchema>,
 }
 
 impl<T> From<T> for PoliciesMetadata
@@ -136,16 +158,77 @@ where
     fn from(store: T) -> Self {
         PoliciesMetadata {
             allow_upload: store.allow_upload,
+            schema_validation_mode: store.schema_validation_mode.to_string(),
             policies: store.policies.clone(),
             labels: store.labels.clone(),
+            schema: store.schema.clone(),
         }
     }
 }
 
 /// Policy data for download
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct PoliciesDownload {
     pub policies: Metadata<OfPolicies>,
+}
+
+/// Schema data for download
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct SchemaDownload {
+    pub schema: Metadata<OfSchema>,
+}
+
+/// Why a policy was selected by list policies APIs.
+#[derive(Clone, Serialize, Deserialize, ToSchema)]
+pub enum PolicyMatchReason {
+    PrincipalEq,
+    PrincipalIn,
+    PrincipalAny,
+    PrincipalIs,
+    PrincipalIsIn,
+    ResourceEq,
+    ResourceIn,
+    ResourceAny,
+    ResourceIs,
+    ResourceIsIn,
+}
+
+impl From<treetop_core::PolicyMatchReason> for PolicyMatchReason {
+    fn from(reason: treetop_core::PolicyMatchReason) -> Self {
+        match reason {
+            treetop_core::PolicyMatchReason::PrincipalEq => PolicyMatchReason::PrincipalEq,
+            treetop_core::PolicyMatchReason::PrincipalIn => PolicyMatchReason::PrincipalIn,
+            treetop_core::PolicyMatchReason::PrincipalAny => PolicyMatchReason::PrincipalAny,
+            treetop_core::PolicyMatchReason::PrincipalIs => PolicyMatchReason::PrincipalIs,
+            treetop_core::PolicyMatchReason::PrincipalIsIn => PolicyMatchReason::PrincipalIsIn,
+            treetop_core::PolicyMatchReason::ResourceEq => PolicyMatchReason::ResourceEq,
+            treetop_core::PolicyMatchReason::ResourceIn => PolicyMatchReason::ResourceIn,
+            treetop_core::PolicyMatchReason::ResourceAny => PolicyMatchReason::ResourceAny,
+            treetop_core::PolicyMatchReason::ResourceIs => PolicyMatchReason::ResourceIs,
+            treetop_core::PolicyMatchReason::ResourceIsIn => PolicyMatchReason::ResourceIsIn,
+        }
+    }
+}
+
+/// Match metadata for one listed policy.
+#[derive(Clone, Serialize, Deserialize, ToSchema)]
+pub struct PolicyMatch {
+    pub cedar_id: String,
+    pub reasons: Vec<PolicyMatchReason>,
+}
+
+impl From<&treetop_core::PolicyMatch> for PolicyMatch {
+    fn from(policy_match: &treetop_core::PolicyMatch) -> Self {
+        Self {
+            cedar_id: policy_match.cedar_id.clone(),
+            reasons: policy_match
+                .reasons
+                .iter()
+                .cloned()
+                .map(PolicyMatchReason::from)
+                .collect(),
+        }
+    }
 }
 
 /// Policies associated with a specific user
@@ -153,6 +236,7 @@ pub struct PoliciesDownload {
 pub struct UserPolicies {
     pub user: String,
     pub policies: Vec<Value>,
+    pub matches: Vec<PolicyMatch>,
 }
 
 impl From<treetop_core::UserPolicies> for UserPolicies {
@@ -165,6 +249,11 @@ impl From<treetop_core::UserPolicies> for UserPolicies {
                 .iter()
                 .map(|p| p.to_json().unwrap()) // Yuck.
                 .collect(),
+            matches: user_policies
+                .matches()
+                .iter()
+                .map(PolicyMatch::from)
+                .collect(),
         }
     }
 }
@@ -174,6 +263,9 @@ impl From<treetop_core::UserPolicies> for UserPolicies {
 pub struct AuthRequest {
     /// Optional client-provided identifier for this request
     pub id: Option<String>,
+    /// Optional request-scoped context values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<HashMap<String, AttrValue>>,
     /// The actual authorization request
     #[serde(flatten)]
     pub request: Request,
@@ -182,7 +274,11 @@ pub struct AuthRequest {
 impl AuthRequest {
     /// Create a new authorization request without a client ID
     pub fn new(request: Request) -> Self {
-        Self { id: None, request }
+        Self {
+            id: None,
+            context: None,
+            request,
+        }
     }
 
     /// Create a new authorization request with a client-provided ID
@@ -194,8 +290,17 @@ impl AuthRequest {
     {
         Self {
             id: Some(id.into()),
+            context: None,
             request,
         }
+    }
+
+    /// Create a new authorization request with context values.
+    pub fn with_context(mut self, context: HashMap<String, AttrValue>) -> Self {
+        if !context.is_empty() {
+            self.context = Some(context);
+        }
+        self
     }
 }
 

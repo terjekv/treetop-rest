@@ -7,15 +7,17 @@ policy management and evaluation.
 
 - Default base URL: `http://localhost:9999`
 - All requests and responses use JSON unless noted.
-- Upload requests accept either `application/json` with a `policies` string field
-  or `text/plain` containing the Cedar policy DSL.
+- Policy upload requests accept either `application/json` with a `policies` string
+  field or `text/plain` containing Cedar policy DSL.
+- Schema upload requests accept either `application/json` with a `schema` string
+  field or `text/plain` containing Cedar schema JSON.
 
 ## Authentication
 
 - There is (currently) no authentication for GET endpoints.
-- Uploads to `/api/v1/policies` require `TREETOP_ALLOW_UPLOAD=true` to be set on server start
-  and the header `X-Upload-Token: <token>` matching the server-generated upload token. This
-  token is printed in the server logs on startup.
+- Uploads to `/api/v1/policies` and `/api/v1/schema` require `TREETOP_ALLOW_UPLOAD=true`
+  to be set on server start and the header `X-Upload-Token: <token>` matching the
+  server-generated upload token. This token is printed in the server logs on startup.
 
 ## Endpoints
 
@@ -33,6 +35,7 @@ policy management and evaluation.
   - `policies`: `{ hash, loaded_at }` identifying the currently loaded policy set.
      The hash is a SHA-256 of the policy content, and `loaded_at` is an RFC 3339
      timestamp of when the policies were loaded.
+  - `schema` (optional): `{ hash, loaded_at }` identifying the currently loaded schema.
 
 Example response:
 
@@ -52,14 +55,17 @@ Example response:
 
 ### GET /api/v1/status
 
-- Purpose: server status plus metadata for currently loaded policies and labels.
+- Purpose: server status plus metadata for currently loaded policies, labels, and schema.
 - Response: `PoliciesMetadata` object with fields:
   - `allow_upload`: whether policy uploads are currently permitted.
+  - `schema_validation_mode`: `permissive` or `strict`.
   - `policies`: metadata for the active policy DSL (timestamp, sha256, size,
     optional source URL, optional refresh_frequency seconds, entries count,
     content).
   - `labels`: metadata for the active labels file (same shape as policies
     metadata).
+  - `schema`: metadata for the active Cedar schema JSON.
+  - `request_limits`: currently enforced context limits.
 
 Example response:
 
@@ -129,10 +135,27 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
 - Response: `PoliciesMetadata` reflecting the newly loaded policies and labels. As per the
   status endpoint (minus `allow_upload`).
 
+### GET /api/v1/schema
+
+- Purpose: download the current Cedar schema.
+- Query: `format=raw` (or `text`) to receive raw schema JSON; otherwise JSON.
+- Responses:
+  - JSON: `{ "schema": Metadata }` with `content` containing schema JSON.
+  - Raw: `text/plain` body with schema JSON.
+
+### POST /api/v1/schema
+
+- Purpose: upload or replace the Cedar schema (if allowed).
+- Headers: `X-Upload-Token` when upload token is configured and `Content-Type`
+  as described above.
+- Response: `PoliciesMetadata` with updated schema metadata.
+
 ### GET /api/v1/policies/{user}
 
 - Purpose: list policies that apply to a user.
-- Response: `{ "user": "<user>", "policies": [<policy_json_objects>] }`.
+- Response: `{ "user": "<user>", "policies": [<policy_json_objects>], "matches": [<match_metadata>] }`.
+  - `matches[].cedar_id`: Cedar policy identifier.
+  - `matches[].reasons`: Why each policy matched (for example `PrincipalEq`, `PrincipalIn`, `ResourceIs`).
 
 ### POST /api/v1/authorize (Unified Authorization Endpoint)
 
