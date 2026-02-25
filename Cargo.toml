@@ -24,7 +24,7 @@ rustyline = "17.0"
 serde = "1"
 tabled = "0.20"
 serde_json = "1"
-toml = "0.9"
+toml = "1.0"
 sha2 = "0.10"
 tokio = { version = "1.49", features = ["full"] }
 tracing = "0.1"
