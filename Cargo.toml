@@ -6,7 +6,7 @@ build = "build.rs"
 
 [dependencies]
 actix-service = "2.0"
-actix-web = "4.12"
+actix-web = "4.13"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 colored = "3"
