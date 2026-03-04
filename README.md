@@ -66,7 +66,7 @@ Size: 843 bytes
 $ cargo run --bin cli -- check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
   Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
   Running `target/debug/cli check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1`
-Allow (c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
+Allow (default @ c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
 ```
 
 The CLI client can also be run in REPL mode:
@@ -83,7 +83,7 @@ Policies SHA256: c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd772621
 Uploaded at: 2025-06-23T22:25:50.285684Z
 Size: 843 bytes
 policy> check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
-Allow (c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
+Allow (default @ c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
 policy> status
 
 treetop-cli
@@ -119,7 +119,9 @@ After any `check`, run `show` to see them:
 
 ```bash
 policy> check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
-Allow (c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
+Allow (default @ c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
+policy> check --principal DNS::User::alice --action DNS::Action::delete_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
+Deny (c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
 policy> show
 
 Current Settings:

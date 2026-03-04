@@ -217,6 +217,7 @@ curl -X POST http://localhost:9999/api/v1/authorize \
       "status": "success",
       "result": {
         "decision": "Allow",
+        "policy_id": "default",
         "version": {
           "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
           "loaded_at": "2025-12-19T00:14:38.577289000Z"
@@ -226,6 +227,19 @@ curl -X POST http://localhost:9999/api/v1/authorize \
     {
       "index": 1,
       "id": "check-2",
+      "status": "success",
+      "result": {
+        "decision": "Deny",
+        "policy_id": "",
+        "version": {
+          "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
+          "loaded_at": "2025-12-19T00:14:38.577289000Z"
+        }
+      }
+    },
+    {
+      "index": 2,
+      "id": "check-3",
       "status": "failed",
       "error": "Evaluation failed: invalid resource"
     }
@@ -234,7 +248,7 @@ curl -X POST http://localhost:9999/api/v1/authorize \
     "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
     "loaded_at": "2025-12-19T00:14:38.577289000Z"
   },
-  "successful": 1,
+  "successful": 2,
   "failed": 1
 }
 ```
@@ -249,10 +263,12 @@ curl -X POST http://localhost:9999/api/v1/authorize \
       "id": "check-1",
       "status": "success",
       "result": {
-        "policy": {
-          "literal": "permit (...)",
-          "json": {...}
-        },
+        "policy": [
+          {
+            "literal": "permit (...)",
+            "json": {...}
+          }
+        ],
         "decision": "Allow",
         "version": {
           "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
@@ -263,16 +279,23 @@ curl -X POST http://localhost:9999/api/v1/authorize \
     {
       "index": 1,
       "id": "check-2",
-      "status": "failed",
-      "error": "Evaluation failed: invalid resource"
+      "status": "success",
+      "result": {
+        "policy": [],
+        "decision": "Deny",
+        "version": {
+          "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
+          "loaded_at": "2025-12-19T00:14:38.577289000Z"
+        }
+      }
     }
   ],
   "version": {
     "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
     "loaded_at": "2025-12-19T00:14:38.577289000Z"
   },
-  "successful": 1,
-  "failed": 1
+  "successful": 2,
+  "failed": 0
 }
 ```
 
