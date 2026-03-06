@@ -1,19 +1,18 @@
+use crate::{config::ClientAllowlist, metrics};
 use actix_service::{Service, Transform};
 use actix_web::{
-    error::ErrorForbidden,
-    Error,
+    Error, HttpMessage,
     dev::ServiceRequest,
     dev::ServiceResponse,
+    error::ErrorForbidden,
     http::header::{HeaderName, HeaderValue},
-    HttpMessage,
 };
 use futures_util::future::{self, LocalBoxFuture, Ready};
 use std::net::{IpAddr, SocketAddr};
 use std::task::{Context, Poll};
 use std::time::Instant;
-use tracing::{info, span, Instrument, Level, warn};
+use tracing::{Instrument, Level, info, span, warn};
 use uuid::Uuid;
-use crate::{config::ClientAllowlist, metrics};
 
 #[derive(Clone)]
 pub struct RequestIds {
@@ -29,11 +28,17 @@ pub struct ClientAllowlistMiddleware {
 
 impl ClientAllowlistMiddleware {
     pub fn new(allowlist: ClientAllowlist) -> Self {
-        Self { allowlist, trust_ip_headers: true }
+        Self {
+            allowlist,
+            trust_ip_headers: true,
+        }
     }
 
     pub fn new_with_trust(allowlist: ClientAllowlist, trust_ip_headers: bool) -> Self {
-        Self { allowlist, trust_ip_headers }
+        Self {
+            allowlist,
+            trust_ip_headers,
+        }
     }
 }
 
@@ -107,7 +112,12 @@ fn extract_client_ip(req: &ServiceRequest, trust_headers: bool) -> Option<IpAddr
         req.connection_info()
             .realip_remote_addr()
             .and_then(|raw| raw.split(',').next())
-            .and_then(|raw| raw.trim().parse::<IpAddr>().ok().or_else(|| parse_socket(raw)))
+            .and_then(|raw| {
+                raw.trim()
+                    .parse::<IpAddr>()
+                    .ok()
+                    .or_else(|| parse_socket(raw))
+            })
     } else {
         None
     };
@@ -116,10 +126,7 @@ fn extract_client_ip(req: &ServiceRequest, trust_headers: bool) -> Option<IpAddr
 }
 
 #[doc(hidden)]
-pub fn extract_client_ip_for_bench(
-    req: &ServiceRequest,
-    trust_headers: bool,
-) -> Option<IpAddr> {
+pub fn extract_client_ip_for_bench(req: &ServiceRequest, trust_headers: bool) -> Option<IpAddr> {
     extract_client_ip(req, trust_headers)
 }
 
@@ -148,7 +155,9 @@ impl Default for TracingMiddleware {
 
 impl TracingMiddleware {
     pub fn new() -> Self {
-        Self { trust_ip_headers: true }
+        Self {
+            trust_ip_headers: true,
+        }
     }
 
     pub fn new_with_trust(trust_ip_headers: bool) -> Self {
@@ -229,7 +238,7 @@ where
         Box::pin(
             async move {
                 let mut res = fut.await?;
-                
+
                 let elapsed_time = start_time.elapsed();
                 info!(message = "Request end", request_id = %request_id, correlation_id = %correlation_id, method = &method, path = &path, client_ip = client_ip_s.as_deref(), run_time = ?elapsed_time, status_code = ?res.status());
                 // Record HTTP metrics

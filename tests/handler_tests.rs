@@ -285,6 +285,36 @@ async fn test_get_policies_raw() {
 }
 
 #[actix_web::test]
+async fn test_get_schema_raw() {
+    let store = create_test_store();
+    {
+        let mut guard = store.lock().unwrap();
+        guard
+            .set_schema(r#"{"": {"entityTypes": {}, "actions": {}}}"#, None, None)
+            .unwrap();
+    }
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/schema", web::get().to(handlers::get_schema)),
+    )
+    .await;
+
+    let req = test::TestRequest::get()
+        .uri("/api/v1/schema?format=raw")
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    assert_eq!(resp.headers().get("content-type").unwrap(), "text/plain");
+
+    let body = test::read_body(resp).await;
+    let body_str = std::str::from_utf8(&body).unwrap();
+    assert!(body_str.contains("entityTypes"));
+}
+
+#[actix_web::test]
 async fn test_upload_policies_not_allowed() {
     let store = create_test_store();
     let app = test::init_service(App::new().app_data(web::Data::new(store)).route(
@@ -336,6 +366,44 @@ async fn test_upload_with_token(
         .uri("/api/v1/policies")
         .set_payload(new_policy)
         .insert_header(("content-type", "application/json"))
+        .insert_header(("X-Upload-Token", provided_token))
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status().is_success(), should_succeed);
+}
+
+#[rstest]
+#[case("test-token", "test-token", true)]
+#[case("correct-token", "correct-token", true)]
+#[case("correct-token", "wrong-token", false)]
+#[case("secret123", "wrong123", false)]
+#[actix_web::test]
+async fn test_upload_schema_with_token(
+    #[case] expected_token: &str,
+    #[case] provided_token: &str,
+    #[case] should_succeed: bool,
+) {
+    let store = create_test_store();
+    {
+        let mut store_guard = store.lock().unwrap();
+        store_guard.allow_upload = true;
+        store_guard.upload_token = Some(expected_token.to_string());
+    }
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/schema", web::post().to(handlers::upload_schema)),
+    )
+    .await;
+
+    let schema = r#"{"": {"entityTypes": {}, "actions": {}}}"#;
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/schema")
+        .set_payload(schema)
+        .insert_header(("content-type", "text/plain"))
         .insert_header(("X-Upload-Token", provided_token))
         .to_request();
 
@@ -447,7 +515,31 @@ permit (
         .unwrap();
     let json_alice: serde_json::Value = serde_json::from_slice(&body_alice).unwrap();
     let count_alice = json_alice["policies"].as_array().unwrap_or(&vec![]).len();
+    let matches_alice = json_alice["matches"]
+        .as_array()
+        .expect("Expected matches to be an array for alice");
     assert_eq!(count_alice, 2, "Expected 2 policies for alice");
+    assert_eq!(
+        matches_alice.len(),
+        count_alice,
+        "Expected one match entry per returned policy for alice"
+    );
+    assert!(
+        matches_alice.iter().all(|m| {
+            m["reasons"]
+                .as_array()
+                .is_some_and(|reasons| !reasons.is_empty())
+        }),
+        "Expected non-empty match reasons for each alice policy"
+    );
+    assert!(
+        matches_alice.iter().all(|m| {
+            m["reasons"]
+                .as_array()
+                .is_some_and(|reasons| reasons.iter().any(|r| r == "PrincipalEq"))
+        }),
+        "Expected principal match reason for alice policies"
+    );
     assert_eq!(
         json_alice["user"].as_str(),
         Some("alice"),
@@ -469,7 +561,23 @@ permit (
         .unwrap();
     let json_bob: serde_json::Value = serde_json::from_slice(&body_bob).unwrap();
     let count_bob = json_bob["policies"].as_array().unwrap_or(&vec![]).len();
+    let matches_bob = json_bob["matches"]
+        .as_array()
+        .expect("Expected matches to be an array for bob");
     assert_eq!(count_bob, 1, "Expected 1 policy for bob");
+    assert_eq!(
+        matches_bob.len(),
+        count_bob,
+        "Expected one match entry per returned policy for bob"
+    );
+    assert!(
+        matches_bob.iter().all(|m| {
+            m["reasons"]
+                .as_array()
+                .is_some_and(|reasons| reasons.iter().any(|r| r == "PrincipalEq"))
+        }),
+        "Expected principal match reason for bob policies"
+    );
     assert_eq!(
         json_bob["user"].as_str(),
         Some("bob"),
@@ -498,6 +606,10 @@ permit (
     assert!(
         json["policies"].is_array(),
         "Response should have a policies array"
+    );
+    assert!(
+        json["matches"].is_array(),
+        "Response should have a matches array"
     );
     assert_eq!(
         json["user"].as_str(),

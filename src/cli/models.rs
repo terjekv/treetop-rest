@@ -8,6 +8,7 @@ use treetop_core::AttrValue;
 use crate::cli::style::{error, success, warning};
 use crate::models::{
     AuthorizeDecisionBrief, AuthorizeDecisionDetailed, DecisionBrief, PoliciesMetadata,
+    PolicyMatchReason, SchemaDownload,
 };
 use crate::state::{Metadata, OfPolicies};
 
@@ -133,11 +134,23 @@ impl CliDisplay for PoliciesMetadata {
     fn display(&self) -> String {
         format!(
             "Allow upload: {}
+ Schema validation mode: {}
  Policies:
 {}
  Host labels:
+{}
+ Schema:
 {}",
-            self.allow_upload, self.policies, self.labels,
+            self.allow_upload, self.schema_validation_mode, self.policies, self.labels, self.schema,
+        )
+    }
+}
+
+impl CliDisplay for SchemaDownload {
+    fn display(&self) -> String {
+        format!(
+            "Metadata:\n{}\nContent:\n{}",
+            self.schema, self.schema.content
         )
     }
 }
@@ -198,10 +211,60 @@ impl CliDisplay for PoliciesDownload {
 }
 
 #[derive(Deserialize, Clone)]
-pub struct UserPolicies(pub serde_json::Value);
+pub struct UserPolicyMatch {
+    pub cedar_id: String,
+    #[serde(default)]
+    pub reasons: Vec<PolicyMatchReason>,
+}
+
+fn format_match_reason(reason: &PolicyMatchReason) -> &'static str {
+    match reason {
+        PolicyMatchReason::PrincipalEq => "PrincipalEq",
+        PolicyMatchReason::PrincipalIn => "PrincipalIn",
+        PolicyMatchReason::PrincipalAny => "PrincipalAny",
+        PolicyMatchReason::PrincipalIs => "PrincipalIs",
+        PolicyMatchReason::PrincipalIsIn => "PrincipalIsIn",
+        PolicyMatchReason::ResourceEq => "ResourceEq",
+        PolicyMatchReason::ResourceIn => "ResourceIn",
+        PolicyMatchReason::ResourceAny => "ResourceAny",
+        PolicyMatchReason::ResourceIs => "ResourceIs",
+        PolicyMatchReason::ResourceIsIn => "ResourceIsIn",
+    }
+}
+
+#[derive(Deserialize, Clone)]
+pub struct UserPolicies {
+    pub user: String,
+    pub policies: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub matches: Vec<UserPolicyMatch>,
+}
+
 impl CliDisplay for UserPolicies {
     fn display(&self) -> String {
-        serde_json::to_string_pretty(&self.0).unwrap()
+        let mut out = String::new();
+        out.push_str(&format!("User: {}\n", self.user));
+        out.push_str(&format!("Policies: {}\n", self.policies.len()));
+
+        if self.matches.is_empty() {
+            out.push_str("Match reasons: none\n");
+            return out;
+        }
+
+        out.push_str("Match reasons:\n");
+        for m in &self.matches {
+            let reasons = if m.reasons.is_empty() {
+                "none".to_string()
+            } else {
+                m.reasons
+                    .iter()
+                    .map(format_match_reason)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            out.push_str(&format!("  - {}: {}\n", m.cedar_id, reasons));
+        }
+        out
     }
 }
 
@@ -229,11 +292,12 @@ impl<'de> serde::Deserialize<'de> for AuthCheckResult {
             // Normalize policy field: if it's a single object, wrap it in an array
             // This is a backwards compatibility fix for older responses
             if let Some(policy_value) = v.get_mut("policy")
-                && policy_value.is_object() {
-                    // Single policy object - wrap it in an array
-                    let single_policy = policy_value.clone();
-                    *policy_value = serde_json::json!([single_policy]);
-                }
+                && policy_value.is_object()
+            {
+                // Single policy object - wrap it in an array
+                let single_policy = policy_value.clone();
+                *policy_value = serde_json::json!([single_policy]);
+            }
 
             match serde_json::from_value::<AuthorizeDecisionDetailed>(v.clone()) {
                 Ok(detailed) => return Ok(AuthCheckResult::Detailed(detailed)),

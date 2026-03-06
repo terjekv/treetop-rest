@@ -5,8 +5,8 @@
 
 // Top-level commands
 pub const COMMANDS_MAIN: &[&str] = &[
-    "status", "check", "policies", "upload", "json", "debug", "timing", "show", "version",
-    "history", "metrics", "help", "exit",
+    "status", "check", "policies", "schema", "upload", "json", "debug", "timing", "show",
+    "version", "history", "metrics", "help", "exit",
 ];
 
 // Global flags available for any command
@@ -29,15 +29,19 @@ pub const CHECK_FLAGS: &[&str] = &[
     "--resource-type",
     "--resource-id",
     "--resource-attribute",
+    "--context-attribute",
+    "--context-file",
     "--detailed",
 ];
 
 // Flags that can be used multiple times
-pub const REPEATABLE_FLAGS: &[&str] = &["--resource-attribute"];
+pub const REPEATABLE_FLAGS: &[&str] = &["--resource-attribute", "--context-attribute"];
 
 pub const POLICIES_FLAGS: &[&str] = &["--user", "--raw"];
 
-pub const UPLOAD_FLAGS: &[&str] = &["--file", "--raw", "--token"];
+pub const SCHEMA_FLAGS: &[&str] = &["--raw"];
+
+pub const UPLOAD_FLAGS: &[&str] = &["--file", "--raw", "--schema", "--token"];
 
 /// Extract completion logic for testability
 /// Returns (start_position, matching_completions)
@@ -75,6 +79,7 @@ pub fn complete_line(line: &str, pos: usize) -> (usize, Vec<String>) {
         match tokens[0] {
             "check" => all_candidates.extend_from_slice(CHECK_FLAGS),
             "policies" => all_candidates.extend_from_slice(POLICIES_FLAGS),
+            "schema" => all_candidates.extend_from_slice(SCHEMA_FLAGS),
             "upload" => all_candidates.extend_from_slice(UPLOAD_FLAGS),
             _ => {}
         }

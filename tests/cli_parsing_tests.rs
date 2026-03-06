@@ -19,8 +19,8 @@ fn get_completions(line: &str, pos: usize) -> Vec<String> {
 }
 
 #[rstest]
-#[case("", 0, vec!["status", "check", "policies", "upload", "json", "debug", "timing", "show", "version", "history", "metrics", "help", "exit"])]
-#[case("s", 1, vec!["status", "show"])]
+#[case("", 0, vec!["status", "check", "policies", "schema", "upload", "json", "debug", "timing", "show", "version", "history", "metrics", "help", "exit"])]
+#[case("s", 1, vec!["status", "schema", "show"])]
 #[case("st", 2, vec!["status"])]
 #[case("sta", 3, vec!["status"])]
 #[case("c", 1, vec!["check"])]
@@ -33,8 +33,8 @@ fn test_command_completion(#[case] input: &str, #[case] pos: usize, #[case] expe
 }
 
 #[rstest]
-#[case("check ", 6, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--principal", "--action", "--resource-type", "--resource-id", "--resource-attribute", "--detailed"])]
-#[case("check --", 8, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--principal", "--action", "--resource-type", "--resource-id", "--resource-attribute", "--detailed"])]
+#[case("check ", 6, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--principal", "--action", "--resource-type", "--resource-id", "--resource-attribute", "--context-attribute", "--context-file", "--detailed"])]
+#[case("check --", 8, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--principal", "--action", "--resource-type", "--resource-id", "--resource-attribute", "--context-attribute", "--context-file", "--detailed"])]
 #[case("check --p", 9, vec!["--port", "--principal"])]
 #[case("check --pr", 10, vec!["--principal"])]
 #[case("check --a", 9, vec!["--action"])]
@@ -50,6 +50,9 @@ fn test_command_completion(#[case] input: &str, #[case] pos: usize, #[case] expe
 #[case("check --resource-ty", 19, vec!["--resource-type"])]
 #[case("check --resource-i", 18, vec!["--resource-id"])]
 #[case("check --resource-a", 18, vec!["--resource-attribute"])]
+#[case("check --context", 15, vec!["--context-attribute", "--context-file"])]
+#[case("check --context-a", 17, vec!["--context-attribute"])]
+#[case("check --context-f", 17, vec!["--context-file"])]
 #[case("check --d", 9, vec!["--debug", "--detailed"])]
 fn test_check_flag_completion(
     #[case] input: &str,
@@ -86,25 +89,37 @@ fn test_repeatable_flag_completion(#[case] input: &str, #[case] pos: usize) {
     assert!(completions.contains(&"--resource-attribute".to_string()));
 }
 
+#[test]
+fn test_context_repeatable_flag_completion() {
+    let completions = get_completions("check --context-attribute env=prod --", 37);
+    assert!(completions.contains(&"--context-attribute".to_string()));
+}
+
 #[rstest]
 #[case("policies ", 9, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--user", "--raw"])]
 #[case("policies --", 11, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--user", "--raw"])]
 #[case("policies --r", 12, vec!["--raw"])]
 #[case("policies --u", 12, vec!["--user"])]
-fn test_policies_completion(
-    #[case] input: &str,
-    #[case] pos: usize,
-    #[case] expected: Vec<&str>,
-) {
+fn test_policies_completion(#[case] input: &str, #[case] pos: usize, #[case] expected: Vec<&str>) {
     let completions = get_completions(input, pos);
     assert_eq!(completions, expected);
 }
 
 #[rstest]
-#[case("upload ", 7, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--file", "--raw", "--token"])]
-#[case("upload --", 9, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--file", "--raw", "--token"])]
+#[case("schema ", 7, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--raw"])]
+#[case("schema --", 9, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--raw"])]
+#[case("schema --r", 10, vec!["--raw"])]
+fn test_schema_completion(#[case] input: &str, #[case] pos: usize, #[case] expected: Vec<&str>) {
+    let completions = get_completions(input, pos);
+    assert_eq!(completions, expected);
+}
+
+#[rstest]
+#[case("upload ", 7, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--file", "--raw", "--schema", "--token"])]
+#[case("upload --", 9, vec!["--table-style", "--json", "--debug", "--timing", "--host", "--port", "--file", "--raw", "--schema", "--token"])]
 #[case("upload --f", 10, vec!["--file"])]
 #[case("upload --r", 10, vec!["--raw"])]
+#[case("upload --sc", 11, vec!["--schema"])]
 #[case("upload --t", 10, vec!["--table-style", "--timing", "--token"])]
 fn test_upload_completion(#[case] input: &str, #[case] pos: usize, #[case] expected: Vec<&str>) {
     let completions = get_completions(input, pos);

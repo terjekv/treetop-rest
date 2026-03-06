@@ -1,4 +1,4 @@
-use treetop_rest::cli::models::{AuthCheckResult, AuthorizeResult};
+use treetop_rest::cli::models::{AuthCheckResult, AuthorizeResult, CliDisplay, UserPolicies};
 
 #[test]
 fn test_cli_deserialize_detailed_response() {
@@ -111,4 +111,75 @@ fn test_cli_deserialize_single_policy_object() {
             panic!("Failed to deserialize: {}", e);
         }
     }
+}
+
+#[test]
+fn test_cli_deserialize_user_policies_with_matches() {
+    let json_str = r#"{
+  "user": "alice",
+  "policies": [
+    {"effect": "permit"},
+    {"effect": "permit"}
+  ],
+  "matches": [
+    {
+      "cedar_id": "policy0",
+      "reasons": ["PrincipalEq", "ResourceIs"]
+    },
+    {
+      "cedar_id": "policy1",
+      "reasons": ["PrincipalIn"]
+    }
+  ]
+}"#;
+
+    let result: UserPolicies =
+        serde_json::from_str(json_str).expect("Expected valid user policies");
+    assert_eq!(result.user, "alice");
+    assert_eq!(result.policies.len(), 2);
+    assert_eq!(result.matches.len(), 2);
+    assert_eq!(result.matches[0].cedar_id, "policy0");
+    assert_eq!(result.matches[0].reasons.len(), 2);
+}
+
+#[test]
+fn test_cli_deserialize_user_policies_without_matches() {
+    let json_str = r#"{
+  "user": "alice",
+  "policies": [
+    {"effect": "permit"}
+  ]
+}"#;
+
+    let result: UserPolicies =
+        serde_json::from_str(json_str).expect("Expected user policies without matches");
+    assert_eq!(result.user, "alice");
+    assert_eq!(result.policies.len(), 1);
+    assert!(result.matches.is_empty());
+}
+
+#[test]
+fn test_cli_display_user_policies_includes_reasons() {
+    let json_str = r#"{
+  "user": "alice",
+  "policies": [
+    {"effect": "permit"}
+  ],
+  "matches": [
+    {
+      "cedar_id": "policy0",
+      "reasons": ["PrincipalEq", "ResourceIs"]
+    }
+  ]
+}"#;
+
+    let result: UserPolicies =
+        serde_json::from_str(json_str).expect("Expected valid user policies");
+    let display = result.display();
+
+    assert!(display.contains("User: alice"));
+    assert!(display.contains("Policies: 1"));
+    assert!(display.contains("policy0"));
+    assert!(display.contains("PrincipalEq"));
+    assert!(display.contains("ResourceIs"));
 }

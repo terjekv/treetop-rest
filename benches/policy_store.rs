@@ -16,16 +16,23 @@ fn metadata_policies_dns() {
     let _ = Metadata::<OfPolicies>::new(DSL_DNS.to_string(), None, None).unwrap();
 }
 
-#[library_benchmark]
-fn policy_store_set_dsl_default() {
-    let mut store = PolicyStore::new().unwrap();
+fn setup_store_default() -> PolicyStore {
+    PolicyStore::new().unwrap()
+}
+
+fn setup_store_with_source() -> (PolicyStore, Endpoint) {
+    let store = PolicyStore::new().unwrap();
+    let endpoint = Endpoint::from_str("https://example.com/policies").unwrap();
+    (store, endpoint)
+}
+
+#[library_benchmark(setup = setup_store_default)]
+fn policy_store_set_dsl_default(mut store: PolicyStore) {
     store.set_dsl(DSL_DEFAULT, None, None).unwrap();
 }
 
-#[library_benchmark]
-fn policy_store_set_dsl_with_source() {
-    let mut store = PolicyStore::new().unwrap();
-    let endpoint = Endpoint::from_str("https://example.com/policies").unwrap();
+#[library_benchmark(setup = setup_store_with_source)]
+fn policy_store_set_dsl_with_source((mut store, endpoint): (PolicyStore, Endpoint)) {
     store.set_dsl(DSL_DNS, Some(endpoint), Some(60)).unwrap();
 }
 

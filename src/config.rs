@@ -7,6 +7,27 @@ use crate::errors::ServiceError;
 
 use crate::models::Endpoint;
 
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemaValidationMode {
+    Permissive,
+    Strict,
+}
+
+impl Default for SchemaValidationMode {
+    fn default() -> Self {
+        Self::Permissive
+    }
+}
+
+impl std::fmt::Display for SchemaValidationMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SchemaValidationMode::Permissive => write!(f, "permissive"),
+            SchemaValidationMode::Strict => write!(f, "strict"),
+        }
+    }
+}
+
 /// Application configuration (host and port).
 #[derive(Parser, Debug, Clone)]
 pub struct Config {
@@ -50,6 +71,35 @@ pub struct Config {
     /// Update frequency in seconds for fetching host labels (default is 60 seconds)
     #[clap(long, default_value = None, env = "TREETOP_LABELS_UPDATE_FREQUENCY")]
     pub labels_refresh: Option<u32>,
+
+    /// Optional URL to fetch Cedar schema from
+    #[clap(long, default_value = None, env = "TREETOP_SCHEMA_URL")]
+    pub schema_url: Option<Endpoint>,
+
+    /// Update frequency in seconds for fetching Cedar schema (default is 60 seconds)
+    #[clap(long, default_value = None, env = "TREETOP_SCHEMA_UPDATE_FREQUENCY")]
+    pub schema_refresh: Option<u32>,
+
+    /// Schema validation mode for policy/schema reloads.
+    #[clap(
+        long,
+        env = "TREETOP_SCHEMA_VALIDATION_MODE",
+        value_enum,
+        default_value = "permissive"
+    )]
+    pub schema_validation_mode: SchemaValidationMode,
+
+    /// Maximum JSON size of per-request context payload in bytes.
+    #[clap(long, env = "TREETOP_MAX_CONTEXT_BYTES", default_value = "16384")]
+    pub max_context_bytes: usize,
+
+    /// Maximum nesting depth allowed in per-request context payload.
+    #[clap(long, env = "TREETOP_MAX_CONTEXT_DEPTH", default_value = "8")]
+    pub max_context_depth: usize,
+
+    /// Maximum number of top-level keys allowed in per-request context payload.
+    #[clap(long, env = "TREETOP_MAX_CONTEXT_KEYS", default_value = "64")]
+    pub max_context_keys: usize,
 
     /// Trust proxy IP headers (X-Forwarded-For/Forwarded). If false, use peer address only.
     #[clap(long, default_value = "true", env = "TREETOP_TRUST_IP_HEADERS")]

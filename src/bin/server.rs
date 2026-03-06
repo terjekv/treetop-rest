@@ -5,7 +5,8 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use treetop_rest::build_info::build_info;
 use treetop_rest::config::Config;
-use treetop_rest::fetcher::{LabelFetchAdapter, PolicyFetchAdapter};
+use treetop_rest::fetcher::{LabelFetchAdapter, PolicyFetchAdapter, SchemaFetchAdapter};
+use treetop_rest::handlers::AuthorizeRuntimeConfig;
 use treetop_rest::middeware::{ClientAllowlistMiddleware, TracingMiddleware};
 use treetop_rest::state::PolicyStore;
 
@@ -66,6 +67,10 @@ async fn main() -> std::io::Result<()> {
         warn!(message = "Uploads enabled", token = token);
         store.lock().unwrap().upload_token = Some(token);
     }
+    store
+        .lock()
+        .unwrap()
+        .set_schema_validation_mode(config.schema_validation_mode);
 
     if let Some(url) = config.policy_url.clone() {
         let freq = config.update_frequency.unwrap_or(60) as u64;
@@ -89,6 +94,24 @@ async fn main() -> std::io::Result<()> {
         LabelFetchAdapter::new(store.clone()).spawn(hurl, freq);
     }
 
+    if let Some(surl) = config.schema_url.clone() {
+        let freq = config.schema_refresh.unwrap_or(60) as u64;
+        {
+            let mut s = store.lock().unwrap();
+            s.schema.source = Some(surl.clone());
+            s.schema.refresh_frequency = Some(freq as u32);
+        }
+        SchemaFetchAdapter::new(store.clone()).spawn(surl, freq);
+    }
+
+    let authorize_runtime = AuthorizeRuntimeConfig {
+        // Current treetop-core version in this service does not support request context evaluation yet.
+        context_enabled: false,
+        max_context_bytes: config.max_context_bytes,
+        max_context_depth: config.max_context_depth,
+        max_context_keys: config.max_context_keys,
+    };
+
     let client_allowlist = config.client_allowlist.clone();
     let trust_ip_headers = config.trust_ip_headers;
 
@@ -105,6 +128,7 @@ async fn main() -> std::io::Result<()> {
             ))
             .app_data(actix_web::web::Data::new(store.clone()))
             .app_data(actix_web::web::Data::new(parallel_config))
+            .app_data(actix_web::web::Data::new(authorize_runtime))
             .app_data(actix_web::web::Data::new(metrics_registry.clone()))
             .configure(treetop_rest::handlers::init)
     })
