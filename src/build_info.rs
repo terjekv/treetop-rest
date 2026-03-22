@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use serde::Serialize;
 use std::sync::OnceLock;
 use treetop_core::build_info as core_build_info;

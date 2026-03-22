@@ -1,23 +1,26 @@
 use crate::fetcher::generic::{Fetchable, GenericFetcher};
 use crate::models::Endpoint;
 use crate::state::PolicyStore;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 /// Wraps a PolicyStore to implement Fetchable
 pub struct PolicyFetchAdapter {
-    store: Arc<Mutex<PolicyStore>>,
+    store: Arc<RwLock<PolicyStore>>,
     hash: Option<String>,
 }
 
 impl PolicyFetchAdapter {
-    pub fn new(store: Arc<Mutex<PolicyStore>>) -> Self {
+    pub fn new(store: Arc<RwLock<PolicyStore>>) -> Self {
         Self { store, hash: None }
     }
 }
 
 impl Fetchable for PolicyFetchAdapter {
     fn update_store(&mut self, body: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let mut s = self.store.lock().unwrap();
+        let mut s = self
+            .store
+            .write()
+            .map_err(|e| format!("policy store lock poisoned: {e}"))?;
         s.set_dsl(body, None, None)?;
         Ok(())
     }
@@ -36,9 +39,9 @@ impl PolicyFetchAdapter {
     pub fn spawn(self, url: Endpoint, refresh_secs: u64) {
         let adapter = self;
         {
-            let mut s = adapter.store.lock().unwrap();
-            s.labels.source = Some(url.clone());
-            s.labels.refresh_frequency = Some(refresh_secs as u32);
+            let mut s = adapter.store.write().unwrap();
+            s.policies.source = Some(url.clone());
+            s.policies.refresh_frequency = Some(refresh_secs as u32);
         }
         GenericFetcher::new(adapter, url.to_string(), refresh_secs).spawn();
     }

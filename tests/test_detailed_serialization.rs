@@ -1,5 +1,5 @@
 use actix_web::{App, test, web};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::str::FromStr;
 use treetop_core::{Action, Principal, Request, Resource, User};
 use treetop_rest::handlers;
@@ -18,7 +18,7 @@ permit (
 );
 "#;
     store.set_dsl(dsl, None, None).unwrap();
-    let store = Arc::new(Mutex::new(store));
+    let store = Arc::new(RwLock::new(store));
     
     let parallel = ParallelConfig::new(1, 1, None);
     

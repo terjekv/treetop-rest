@@ -1,7 +1,7 @@
 use actix_web::{App, HttpResponse, http::StatusCode, test, web};
 use std::str::FromStr;
 use treetop_rest::config::ClientAllowlist;
-use treetop_rest::middeware::ClientAllowlistMiddleware;
+use treetop_rest::middleware::ClientAllowlistMiddleware;
 
 async fn ok_handler() -> HttpResponse {
     HttpResponse::Ok().finish()

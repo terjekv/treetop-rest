@@ -155,17 +155,27 @@ pub struct UserPolicies {
     pub policies: Vec<Value>,
 }
 
-impl From<treetop_core::UserPolicies> for UserPolicies {
+impl TryFrom<treetop_core::UserPolicies> for UserPolicies {
+    type Error = crate::errors::ServiceError;
+
     /// Convert core UserPolicies into a serializable UserPolicies
-    fn from(user_policies: treetop_core::UserPolicies) -> Self {
-        UserPolicies {
+    fn try_from(user_policies: treetop_core::UserPolicies) -> Result<Self, Self::Error> {
+        let policies = user_policies
+            .policies()
+            .iter()
+            .map(|policy| {
+                policy.to_json().map_err(|err| {
+                    crate::errors::ServiceError::ListPoliciesError(format!(
+                        "failed to serialize policy to JSON: {err}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(UserPolicies {
             user: user_policies.user().to_string(),
-            policies: user_policies
-                .policies()
-                .iter()
-                .map(|p| p.to_json().unwrap()) // Yuck.
-                .collect(),
-        }
+            policies,
+        })
     }
 }
 
@@ -216,10 +226,9 @@ impl AuthorizeRequest {
     /// Create a new empty builder for constructing an authorize request
     ///
     /// # Example
-    /// ```ignore
-    /// let auth_req = AuthorizeRequest::new()
-    ///     .add_with_id("check-1", request1)
-    ///     .add_with_id("check-2", request2);
+    /// ```
+    /// let auth_req = treetop_rest::models::AuthorizeRequest::new();
+    /// assert_eq!(auth_req.requests.len(), 0);
     /// ```
     pub fn new() -> Self {
         Self {
@@ -230,8 +239,15 @@ impl AuthorizeRequest {
     /// Add a request without a client-provided ID, using the fluent builder pattern
     ///
     /// # Example
-    /// ```ignore
-    /// let auth_req = AuthorizeRequest::new().add_request(request);
+    /// ```
+    /// use treetop_core::{Action, Principal, Request, Resource, User};
+    /// let request = Request {
+    ///     principal: Principal::User(User::new("alice", None, None)),
+    ///     action: Action::new("view", None),
+    ///     resource: Resource::new("Photo", "photo.jpg"),
+    /// };
+    /// let auth_req = treetop_rest::models::AuthorizeRequest::new().add_request(request);
+    /// assert_eq!(auth_req.requests.len(), 1);
     /// ```
     pub fn add_request(mut self, request: Request) -> Self {
         self.requests.push(AuthRequest::new(request));
@@ -243,10 +259,17 @@ impl AuthorizeRequest {
     /// The ID is returned in the response for request correlation.
     ///
     /// # Example
-    /// ```ignore
-    /// let auth_req = AuthorizeRequest::new()
-    ///     .add_with_id("req-1", request1)
-    ///     .add_with_id("req-2", request2);
+    /// ```
+    /// use treetop_core::{Action, Principal, Request, Resource, User};
+    /// let request = Request {
+    ///     principal: Principal::User(User::new("alice", None, None)),
+    ///     action: Action::new("view", None),
+    ///     resource: Resource::new("Photo", "photo.jpg"),
+    /// };
+    /// let auth_req = treetop_rest::models::AuthorizeRequest::new()
+    ///     .add_with_id("req-1", request);
+    /// assert_eq!(auth_req.requests.len(), 1);
+    /// assert_eq!(auth_req.requests[0].id, Some("req-1".to_string()));
     /// ```
     pub fn add_with_id<I>(mut self, id: I, request: Request) -> Self
     where

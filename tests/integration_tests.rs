@@ -1,18 +1,18 @@
 // Integration tests using the test data files
 use rstest::rstest;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use treetop_core::{Action, AttrValue, Decision, Principal, Request, Resource, User};
 use treetop_rest::state::PolicyStore;
 
 const TEST_POLICIES: &str = include_str!("../testdata/default.cedar");
 const TEST_LABELS: &str = include_str!("../testdata/labels.json");
 
-fn create_store_with_test_data() -> Arc<Mutex<PolicyStore>> {
+fn create_store_with_test_data() -> Arc<RwLock<PolicyStore>> {
     let mut store = PolicyStore::new().unwrap();
     store.set_dsl(TEST_POLICIES, None, None).unwrap();
     store.set_labels(TEST_LABELS, None, None).unwrap();
-    Arc::new(Mutex::new(store))
+    Arc::new(RwLock::new(store))
 }
 
 enum ExpectedDecision {
@@ -23,7 +23,7 @@ enum ExpectedDecision {
 #[test]
 fn test_load_test_policies() {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     // Verify policies were loaded
     assert!(guard.policies.entries > 0);
@@ -33,7 +33,7 @@ fn test_load_test_policies() {
 #[test]
 fn test_load_test_labels() {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     // Verify labels were loaded
     assert!(guard.labels.entries > 0);
@@ -79,7 +79,7 @@ fn test_basic_authorization(
     #[case] expected: ExpectedDecision,
 ) {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     let request = Request {
         principal: Principal::User(User::from_str(user).unwrap()),
@@ -107,7 +107,7 @@ fn test_ip_range_authorization(
     #[case] expected: ExpectedDecision,
 ) {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     let resource =
         Resource::new("Host", "myhost.example.com").with_attr("ip", AttrValue::Ip(ip.to_string()));
@@ -129,7 +129,7 @@ fn test_ip_range_authorization(
 #[test]
 fn test_alice_create_host_with_label() {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     // Create a host with a name that matches "in_domain" pattern
     let mut resource = Resource::new("Host", "web-server.example.com");
@@ -177,7 +177,7 @@ fn test_labels_json_structure() {
 #[test]
 fn test_policies_count() {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     // Count permit and forbid statements in the test data
     let permit_count = TEST_POLICIES
@@ -196,20 +196,20 @@ fn test_policies_count() {
 #[test]
 fn test_policy_version_tracking() {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     let version1 = guard.engine.current_version();
     drop(guard);
 
     // Update policies
     {
-        let mut guard = store.lock().unwrap();
+        let mut guard = store.write().unwrap();
         guard
             .set_dsl("permit (principal, action, resource);", None, None)
             .unwrap();
     }
 
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
     let version2 = guard.engine.current_version();
 
     // Versions should be different after update
@@ -219,7 +219,7 @@ fn test_policy_version_tracking() {
 #[test]
 fn test_store_sha256_hash() {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     // SHA256 hash should be 64 hex characters
     assert_eq!(guard.policies.sha256.len(), 64);
@@ -229,7 +229,7 @@ fn test_store_sha256_hash() {
 #[test]
 fn test_store_content_size() {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     assert_eq!(guard.policies.size, TEST_POLICIES.len());
     assert_eq!(guard.labels.size, TEST_LABELS.len());
@@ -238,7 +238,7 @@ fn test_store_content_size() {
 #[test]
 fn test_batch_evaluation() {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     // Create a batch of requests
     let requests = [
@@ -274,7 +274,7 @@ fn test_batch_evaluation() {
 #[test]
 fn test_batch_with_mixed_results() {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     // Create a batch with some valid and some potentially invalid requests
     let requests = [
@@ -314,7 +314,7 @@ fn test_batch_with_mixed_results() {
 #[test]
 fn test_batch_consistency() {
     let store = create_store_with_test_data();
-    let guard = store.lock().unwrap();
+    let guard = store.read().unwrap();
 
     // Capture the policy version
     let version = guard.engine.current_version();
