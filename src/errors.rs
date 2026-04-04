@@ -131,7 +131,19 @@ impl ServiceError {
 
 impl From<PolicyError> for ServiceError {
     fn from(err: PolicyError) -> Self {
-        ServiceError::CompileError(err.to_string())
+        match err {
+            PolicyError::LockError(msg) | PolicyError::PoisonedLockError(msg) => {
+                ServiceError::LockPoison(msg)
+            }
+            PolicyError::ParseError(msg) => ServiceError::CompileError(msg),
+            PolicyError::EvalError(msg)
+            | PolicyError::EntityError(msg)
+            | PolicyError::EntityAttrError(msg) => ServiceError::EvaluationError(msg),
+            PolicyError::RequestValidationError(msg)
+            | PolicyError::QualifiedIdError(msg)
+            | PolicyError::InvalidFormat(msg) => ServiceError::ValidationError(msg),
+            PolicyError::ContextError(msg) => ServiceError::ContextValidationError(msg),
+        }
     }
 }
 

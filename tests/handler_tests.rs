@@ -1,15 +1,55 @@
 use actix_web::{App, test, web};
 use rstest::rstest;
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
+use treetop_rest::config::SchemaValidationMode;
 use treetop_rest::handlers;
 use treetop_rest::models::{
-    AuthorizeBriefResponse, AuthorizeDecisionBrief, AuthorizeDetailedResponse, AuthorizeRequest,
-    BatchResult, DecisionBrief, IndexedResult, StatusResponse,
+    AuthRequest, AuthorizeBriefResponse, AuthorizeDecisionBrief, AuthorizeDetailedResponse,
+    AuthorizeRequest, BatchResult, DecisionBrief, IndexedResult, RequestContextFallbackReason,
+    StatusResponse,
 };
 use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
+
+const CONTEXT_POLICY_DSL: &str = r#"
+permit (
+    principal == User::"alice",
+    action == Action::"view",
+    resource == Photo::"VacationPhoto94.jpg"
+) when {
+    context.env == "prod"
+};
+"#;
+
+const CONTEXT_SCHEMA_JSON: &str = r#"{
+  "": {
+    "entityTypes": {
+      "User": {},
+      "Photo": {}
+    },
+    "actions": {
+      "view": {
+        "appliesTo": {
+          "principalTypes": ["User"],
+          "resourceTypes": ["Photo"],
+          "context": {
+            "type": "Record",
+            "attributes": {
+              "env": {
+                "type": "String",
+                "required": true
+              }
+            },
+            "additionalAttributes": false
+          }
+        }
+      }
+    }
+  }
+}"#;
 
 /// Helper to create a test policy store with default policies
 fn create_test_store() -> Arc<RwLock<PolicyStore>> {
@@ -103,6 +143,37 @@ async fn test_get_status_endpoint() {
     assert!(resp.status().is_success());
     let body: StatusResponse = test::read_body_json(resp).await;
     assert_eq!(body.policy_configuration.policies.entries, 3);
+    assert!(body.request_context.supported);
+    assert!(!body.request_context.schema_backed);
+    assert_eq!(
+        body.request_context.fallback_reason,
+        Some(RequestContextFallbackReason::NoSchema)
+    );
+}
+
+#[actix_web::test]
+async fn test_get_status_endpoint_reports_schema_backed_context_runtime() {
+    let mut store = PolicyStore::new().unwrap();
+    store.set_schema(CONTEXT_SCHEMA_JSON, None, None).unwrap();
+    store.set_dsl(CONTEXT_POLICY_DSL, None, None).unwrap();
+    let store = Arc::new(RwLock::new(store));
+    let parallel = create_test_parallel_config();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
+            .route("/api/v1/status", web::get().to(handlers::get_status)),
+    )
+    .await;
+
+    let req = test::TestRequest::get().uri("/api/v1/status").to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert!(resp.status().is_success());
+    let body: StatusResponse = test::read_body_json(resp).await;
+    assert!(body.request_context.supported);
+    assert!(body.request_context.schema_backed);
+    assert_eq!(body.request_context.fallback_reason, None);
 }
 
 #[actix_web::test]
@@ -237,6 +308,90 @@ async fn test_check_endpoint_deny_out_of_range() {
 
     let body: AuthorizeBriefResponse = test::read_body_json(resp).await;
     assert_single_decision(&body, DecisionBrief::Deny);
+}
+
+#[actix_web::test]
+async fn test_check_endpoint_with_request_context() {
+    let mut store = PolicyStore::new().unwrap();
+    store.set_dsl(CONTEXT_POLICY_DSL, None, None).unwrap();
+    let store = Arc::new(RwLock::new(store));
+    let parallel = create_test_parallel_config();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let request = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+    let mut context = HashMap::new();
+    context.insert("env".to_string(), AttrValue::String("prod".to_string()));
+    let auth_request = AuthorizeRequest {
+        requests: vec![AuthRequest::new(request).with_context(context)],
+    };
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize")
+        .set_json(&auth_request)
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+    assert_single_decision(&body, DecisionBrief::Allow);
+}
+
+#[actix_web::test]
+async fn test_check_endpoint_rejects_context_without_schema_in_strict_mode() {
+    let store = Arc::new(RwLock::new(PolicyStore::new().unwrap()));
+    {
+        let mut guard = store.write().unwrap();
+        guard.set_schema_validation_mode(SchemaValidationMode::Strict);
+    }
+    let parallel = create_test_parallel_config();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let request = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+    let mut context = HashMap::new();
+    context.insert("env".to_string(), AttrValue::String("prod".to_string()));
+    let auth_request = AuthorizeRequest {
+        requests: vec![AuthRequest::new(request).with_context(context)],
+    };
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize")
+        .set_json(&auth_request)
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body: AuthorizeBriefResponse = test::read_body_json(resp).await;
+    let result = body.iter().next().expect("missing result");
+    match result.result() {
+        BatchResult::Failed { message } => {
+            assert!(
+                message.contains("context requires an uploaded schema in strict validation mode")
+            )
+        }
+        BatchResult::Success { .. } => panic!("expected context validation failure"),
+    }
 }
 
 #[actix_web::test]

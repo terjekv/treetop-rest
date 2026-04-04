@@ -887,6 +887,14 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
     settings_line("Context depth:", &rc.max_context_depth.to_string());
     settings_line("Context keys:", &rc.max_context_keys.to_string());
 
+    let ctx_status = &metadata.request_context;
+    println!("\n{}", title("Request Context"));
+    settings_line("Supported:", yes_no(ctx_status.supported));
+    settings_line("Schema-backed:", yes_no(ctx_status.schema_backed));
+    if let Some(reason) = ctx_status.fallback_reason {
+        settings_line("Fallback reason:", &reason.to_string());
+    }
+
     Ok(())
 }
 

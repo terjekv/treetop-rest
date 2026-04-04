@@ -120,6 +120,8 @@ pub struct StatusResponse {
     pub parallel_configuration: ParallelConfig,
     #[serde(default)]
     pub request_limits: RequestLimits,
+    #[serde(default)]
+    pub request_context: RequestContextStatus,
 }
 
 #[derive(Serialize, ToSchema, Deserialize, Clone, Copy)]
@@ -136,6 +138,64 @@ impl Default for RequestLimits {
             max_context_depth: 8,
             max_context_keys: 64,
         }
+    }
+}
+
+#[derive(Serialize, ToSchema, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestContextFallbackReason {
+    NoSchema,
+    SchemaIncompatible,
+}
+
+impl std::fmt::Display for RequestContextFallbackReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RequestContextFallbackReason::NoSchema => write!(f, "no_schema"),
+            RequestContextFallbackReason::SchemaIncompatible => {
+                write!(f, "schema_incompatible")
+            }
+        }
+    }
+}
+
+#[derive(Serialize, ToSchema, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RequestContextStatus {
+    pub supported: bool,
+    pub schema_backed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<RequestContextFallbackReason>,
+}
+
+impl RequestContextStatus {
+    pub fn no_schema() -> Self {
+        Self {
+            supported: true,
+            schema_backed: false,
+            fallback_reason: Some(RequestContextFallbackReason::NoSchema),
+        }
+    }
+
+    pub fn schema_backed() -> Self {
+        Self {
+            supported: true,
+            schema_backed: true,
+            fallback_reason: None,
+        }
+    }
+
+    pub fn schema_incompatible() -> Self {
+        Self {
+            supported: true,
+            schema_backed: false,
+            fallback_reason: Some(RequestContextFallbackReason::SchemaIncompatible),
+        }
+    }
+}
+
+impl Default for RequestContextStatus {
+    fn default() -> Self {
+        Self::no_schema()
     }
 }
 
@@ -186,6 +246,9 @@ pub enum PolicyMatchReason {
     PrincipalAny,
     PrincipalIs,
     PrincipalIsIn,
+    ActionEq,
+    ActionIn,
+    ActionAny,
     ResourceEq,
     ResourceIn,
     ResourceAny,
@@ -201,6 +264,9 @@ impl From<treetop_core::PolicyMatchReason> for PolicyMatchReason {
             treetop_core::PolicyMatchReason::PrincipalAny => PolicyMatchReason::PrincipalAny,
             treetop_core::PolicyMatchReason::PrincipalIs => PolicyMatchReason::PrincipalIs,
             treetop_core::PolicyMatchReason::PrincipalIsIn => PolicyMatchReason::PrincipalIsIn,
+            treetop_core::PolicyMatchReason::ActionEq => PolicyMatchReason::ActionEq,
+            treetop_core::PolicyMatchReason::ActionIn => PolicyMatchReason::ActionIn,
+            treetop_core::PolicyMatchReason::ActionAny => PolicyMatchReason::ActionAny,
             treetop_core::PolicyMatchReason::ResourceEq => PolicyMatchReason::ResourceEq,
             treetop_core::PolicyMatchReason::ResourceIn => PolicyMatchReason::ResourceIn,
             treetop_core::PolicyMatchReason::ResourceAny => PolicyMatchReason::ResourceAny,

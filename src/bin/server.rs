@@ -105,8 +105,6 @@ async fn main() -> std::io::Result<()> {
     }
 
     let authorize_runtime = AuthorizeRuntimeConfig {
-        // Current treetop-core version in this service does not support request context evaluation yet.
-        context_enabled: false,
         max_context_bytes: config.max_context_bytes,
         max_context_depth: config.max_context_depth,
         max_context_keys: config.max_context_keys,

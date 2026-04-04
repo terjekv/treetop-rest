@@ -55,7 +55,6 @@ struct SchemaUpload {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 pub struct AuthorizeRuntimeConfig {
-    pub context_enabled: bool,
     pub max_context_bytes: usize,
     pub max_context_depth: usize,
     pub max_context_keys: usize,
@@ -64,7 +63,6 @@ pub struct AuthorizeRuntimeConfig {
 impl Default for AuthorizeRuntimeConfig {
     fn default() -> Self {
         Self {
-            context_enabled: false,
             max_context_bytes: 16 * 1024,
             max_context_depth: 8,
             max_context_keys: 64,
@@ -268,15 +266,18 @@ fn validate_request_context(
             "context requires an uploaded schema in strict validation mode".to_string(),
         ));
     }
-
-    if !runtime.context_enabled {
-        metrics::record_context_validation_failure("unsupported_by_core");
-        return Err(ServiceError::ContextValidationError(
-            "context is not supported by the current core engine version".to_string(),
-        ));
-    }
-
     Ok(())
+}
+
+fn to_request_context(
+    context: Option<&HashMap<String, treetop_core::AttrValue>>,
+) -> Option<treetop_core::RequestContext> {
+    let context = context?;
+    let mut request_context = treetop_core::RequestContext::new();
+    for (key, value) in context {
+        request_context.insert(key.clone(), value.clone());
+    }
+    Some(request_context)
 }
 
 /// Evaluate a single authorization request and produce an indexed result.
@@ -303,7 +304,12 @@ where
         );
     }
 
-    let result = match engine_snapshot.evaluate(&auth_req.request) {
+    let request_context = to_request_context(auth_req.context.as_ref());
+    let evaluation = match request_context.as_ref() {
+        Some(context) => engine_snapshot.evaluate_with_context(&auth_req.request, context),
+        None => engine_snapshot.evaluate(&auth_req.request),
+    };
+    let result = match evaluation {
         Ok(decision) => BatchResult::Success {
             data: map_fn(decision),
         },
@@ -685,10 +691,12 @@ pub async fn get_status(
             max_context_keys: cfg.max_context_keys,
         })
         .unwrap_or_default();
+    let policy_configuration: PoliciesMetadata = (&*store).into();
     let status = StatusResponse {
-        policy_configuration: store.into(),
+        policy_configuration,
         parallel_configuration: *parallel.get_ref(),
         request_limits,
+        request_context: store.request_context_status,
     };
 
     Ok(web::Json(status))

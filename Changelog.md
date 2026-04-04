@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2026-04-04
+
+### Added
+
+- Request context evaluation support on `POST /api/v1/authorize`.
+- Runtime context status on `GET /api/v1/status` via `request_context.{supported,schema_backed,fallback_reason}`.
+
+### Changed
+
+- Updated `treetop-core` to version `0.0.17`.
+- Updated direct Cedar dependencies to the `4.9` line used by the new core release.
+- Uploaded schemas now participate in live runtime evaluation when compatible with the active policies.
+- In permissive schema mode, incompatible schema uploads are retained as metadata while evaluation falls back to a schema-free engine.
+- CLI `status` output now shows whether request-context evaluation is schema-backed or running in fallback mode.
+
+### Fixed
+
+- Evaluate authorize requests with supplied `context` instead of validating and then ignoring it.
+- Preserve schema-backed runtime behavior when labels are reloaded.
+- Map `treetop-core` request, context, and evaluation errors to the correct REST error categories.
+- Refresh API and README documentation for context support, `/status`, and current release behavior.
+
 ## [0.0.5] - 2026-04-04
 
 ### Added

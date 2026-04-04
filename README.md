@@ -24,10 +24,18 @@ The server supports the following environment variables:
 - `TREETOP_LABELS_URL`: An optional URL for fetching the label file (in JSON format) (default: `None`).
 - `TREETOP_LABELS_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the label file from the
   `TREETOP_LABELS_URL` (default: `60`).
+- `TREETOP_SCHEMA_URL`: An optional URL for fetching a Cedar schema (default: `None`).
+- `TREETOP_SCHEMA_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the schema from the
+  `TREETOP_SCHEMA_URL` (default: `60`).
+- `TREETOP_SCHEMA_VALIDATION_MODE`: Schema mode for policy/schema reloads: `permissive` or `strict`
+  (default: `permissive`).
 - `TREETOP_CLIENT_ALLOWLIST`: Whitelist of client IPs or CIDR blocks. Use `*` to allow all,
   or comma-separated IPv4/IPv6 addresses/CIDRs (default: `127.0.0.1,::1`).
 - `TREETOP_TRUST_IP_HEADERS`: Whether to trust proxy IP headers (`X-Forwarded-For`, `Forwarded`).
   If `false`, only uses peer address (default: `true`).
+- `TREETOP_MAX_CONTEXT_BYTES`: Maximum request context payload size in bytes (default: `16384`).
+- `TREETOP_MAX_CONTEXT_DEPTH`: Maximum request context nesting depth (default: `8`).
+- `TREETOP_MAX_CONTEXT_KEYS`: Maximum number of top-level request context keys (default: `64`).
 - `TREETOP_MAX_REQUEST_SIZE`: Maximum request body size in bytes (default: `10485760` = 10 MB).
 
 ### Client interaction
@@ -61,6 +69,32 @@ $ curl -X POST 'http://localhost:9999/api/v1/authorize?detail=brief' \
   }'
 ```
 
+To check a request with request-scoped context, include a `context` object:
+
+```bash
+$ curl -X POST 'http://localhost:9999/api/v1/authorize?detail=brief' \
+  -H "Content-Type: application/json" \
+  -d '{
+    "requests": [
+      {
+        "context": {
+          "env": { "type": "String", "value": "prod" }
+        },
+        "principal": { "User": { "id": "alice", "namespace": ["DNS"], "groups": [{ "id": "admins", "namespace": ["DNS"] }] } },
+        "action": { "id": "create_host", "namespace": ["DNS"] },
+        "resource": {
+          "kind": "Host",
+          "id": "hostname.example.com",
+          "attrs": {
+            "name": { "type": "String", "value": "hostname.example.com" },
+            "ip": { "type": "Ip", "value": "10.0.0.1" }
+          }
+        }
+      }
+    ]
+  }'
+```
+
 Or you can use the CLI client provided in this repository. To run the CLI client, you can use:
 
 ```bash
@@ -70,11 +104,15 @@ $ cargo run --bin cli -- upload --file testdata/default.cedar --raw --token <you
 Policies SHA256: c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219
 Uploaded at: 2025-06-23T22:59:05.014440Z
 Size: 843 bytes
-$ cargo run --bin cli -- check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
+$ cargo run --bin cli -- check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1 --context-attribute env=prod
   Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
-  Running `target/debug/cli check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1`
+  Running `target/debug/cli check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1 --context-attribute env=prod`
 Allow (default @ c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
 ```
+
+The CLI also accepts `--context-file <path>` with a JSON object. String, boolean, number,
+and array values can be written directly. Object values must use typed Cedar JSON such as
+`{"type":"Ip","value":"10.0.0.1"}`.
 
 The CLI client can also be run in REPL mode:
 
@@ -89,7 +127,7 @@ policy> upload --file testdata/default.cedar --raw --token <your-upload-token>
 Policies SHA256: c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219
 Uploaded at: 2025-06-23T22:25:50.285684Z
 Size: 843 bytes
-policy> check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
+policy> check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1 --context-attribute env=prod
 Allow (default @ c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
 policy> status
 
@@ -119,6 +157,11 @@ Labels
   Size:           573 bytes
   Source:         http://localhost:8080/labels.json
   Refresh:        every 60s
+
+Request Context
+  Supported:      yes
+  Schema-backed:  no
+  Fallback reason:no_schema
 ```
 
 The REPL keeps the last values you used with `check` so you can recall them without retyping.
@@ -161,6 +204,8 @@ flags on subsequent `check` commands; missing fields reuse the last values shown
 - Resource type: `--resource-type <Type>` (namespace optional). Example: `--resource-type Host`.
 - Resource ID: required via `--resource-id <id>`. Example: `--resource-id hostname.example.com`.
 - Resource attributes: repeatable `--resource-attribute key=value`. Example: `--resource-attribute ip=10.0.0.1`
+- Context attributes: repeatable `--context-attribute key=value`. Example: `--context-attribute env=prod`
+- Context file: `--context-file <path>` with a JSON object of request-scoped values
 
 ## Development
 

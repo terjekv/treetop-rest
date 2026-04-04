@@ -56,39 +56,71 @@ Example response:
 ### GET /api/v1/status
 
 - Purpose: server status plus metadata for currently loaded policies, labels, and schema.
-- Response: `PoliciesMetadata` object with fields:
-  - `allow_upload`: whether policy uploads are currently permitted.
-  - `schema_validation_mode`: `permissive` or `strict`.
-  - `policies`: metadata for the active policy DSL (timestamp, sha256, size,
-    optional source URL, optional refresh_frequency seconds, entries count,
-    content).
-  - `labels`: metadata for the active labels file (same shape as policies
-    metadata).
-  - `schema`: metadata for the active Cedar schema JSON.
+- Response shape:
+  - `policy_configuration`: policy, label, and schema metadata, including:
+    - `allow_upload`
+    - `schema_validation_mode`
+    - `policies`
+    - `labels`
+    - `schema`
+  - `parallel_configuration`: current Actix/Rayon worker settings.
   - `request_limits`: currently enforced context limits.
+  - `request_context`: runtime context mode:
+    - `supported`: request context is supported by the bundled core.
+    - `schema_backed`: request/context evaluation is currently using a schema-backed engine.
+    - `fallback_reason`: `no_schema` or `schema_incompatible` when runtime is not schema-backed.
 
 Example response:
 
 ```json
 {
-  "allow_upload": false,
-  "policies": {
-    "loaded_at": "2025-12-19T00:14:38.577289000Z",
-    "hash": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
-    "size": 2049,
-    "source_url": "https://example.com/policies.cedar",
-    "refresh_frequency": 300,
-    "entries": 42,
-    "content": "...DSL content..."
+  "policy_configuration": {
+    "allow_upload": false,
+    "schema_validation_mode": "permissive",
+    "policies": {
+      "timestamp": "2025-12-19T00:14:38.577289000Z",
+      "sha256": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
+      "size": 2049,
+      "source": { "url": "https://example.com/policies.cedar" },
+      "refresh_frequency": 300,
+      "entries": 42,
+      "content": "...DSL content..."
+    },
+    "labels": {
+      "timestamp": "2025-12-19T00:10:00.123456000Z",
+      "sha256": "a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0",
+      "size": 512,
+      "source": { "url": "https://example.com/labels.json" },
+      "refresh_frequency": 600,
+      "entries": 10,
+      "content": "...JSON content..."
+    },
+    "schema": {
+      "timestamp": "2025-12-19T00:12:00.000000000Z",
+      "sha256": "bbf3d4d65ab0c11f8fa73f8cf54eb7bbd7d8bfcc8ca0d26f5cab098507ad6f6d",
+      "size": 411,
+      "source": null,
+      "refresh_frequency": null,
+      "entries": 1,
+      "content": "{...schema json...}"
+    }
   },
-  "labels": {
-    "loaded_at": "2025-12-19T00:10:00.123456000Z",
-    "hash": "a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0",
-    "size": 512,
-    "source_url": "https://example.com/labels.json",
-    "refresh_frequency": 600,
-    "entries": 10,
-    "content": "...JSON content..."
+  "parallel_configuration": {
+    "cpu_count": 8,
+    "workers": 8,
+    "rayon_threads": 8,
+    "par_threshold": 8,
+    "allow_parallel": true
+  },
+  "request_limits": {
+    "max_context_bytes": 16384,
+    "max_context_depth": 8,
+    "max_context_keys": 64
+  },
+  "request_context": {
+    "supported": true,
+    "schema_backed": false,
+    "fallback_reason": "no_schema"
   }
 }
 ```
@@ -155,7 +187,7 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
 - Purpose: list policies that apply to a user.
 - Response: `{ "user": "<user>", "policies": [<policy_json_objects>], "matches": [<match_metadata>] }`.
   - `matches[].cedar_id`: Cedar policy identifier.
-  - `matches[].reasons`: Why each policy matched (for example `PrincipalEq`, `PrincipalIn`, `ResourceIs`).
+  - `matches[].reasons`: Why each policy matched (for example `PrincipalEq`, `ActionEq`, `ResourceIs`).
 
 ### POST /api/v1/authorize (Unified Authorization Endpoint)
 
@@ -166,9 +198,15 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
 - Request body (JSON):
   - `requests`: Array of authorization requests, each containing:
     - `id` (optional): Client-provided identifier for correlating responses
+    - `context` (optional): request-scoped Cedar attributes passed as `context.<field>`
     - `principal`: Principal object
     - `action`: Action identifier
     - `resource`: Resource object with `kind`, `id`, and optional `attrs`
+- Context behavior:
+  - `context` is fully evaluated when supplied.
+  - In `strict` schema mode, sending `context` without an uploaded schema fails that request.
+  - In `permissive` mode, context can still be evaluated when runtime has fallen back to a schema-free engine, but `/api/v1/status.request_context` will report the fallback state.
+  - Context object values must use the same `AttrValue` encoding as resource attributes. Flat strings, booleans, numbers, and arrays are accepted directly by the CLI context file loader.
 
 **Example request:**
 
@@ -179,6 +217,9 @@ curl -X POST http://localhost:9999/api/v1/authorize \
     "requests": [
       {
         "id": "check-1",
+        "context": {
+          "env": { "type": "String", "value": "prod" }
+        },
         "principal": { "User": { "id": "alice", "namespace": ["DNS"], "groups": [{ "id": "admins", "namespace": ["DNS"] }] } },
         "action": { "id": "create_host", "namespace": ["DNS"] },
         "resource": {
@@ -321,3 +362,4 @@ curl -X POST http://localhost:9999/api/v1/authorize \
 3. **Consistency**: All requests in a batch are guaranteed to be evaluated against the same policy version
 4. **Indexing**: Use the `index` field or your results to correlate responses with requests,
 or use the optional `id` field for easier tracking
+5. **Runtime visibility**: Inspect `/api/v1/status.request_context` to see whether evaluation is currently schema-backed or in permissive fallback mode

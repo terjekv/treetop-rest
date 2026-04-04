@@ -19,7 +19,7 @@ use crate::{
     config::SchemaValidationMode,
     errors::ServiceError,
     metrics,
-    models::{Endpoint, UserPolicies},
+    models::{Endpoint, RequestContextStatus, UserPolicies},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -47,10 +47,13 @@ pub trait MetadataParser {
     fn make_hash(content: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
-        hasher.finalize().iter().fold(String::with_capacity(64), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        })
+        hasher
+            .finalize()
+            .iter()
+            .fold(String::with_capacity(64), |mut s, b| {
+                let _ = write!(s, "{b:02x}");
+                s
+            })
     }
 
     /// Process the content after parsing, by default does nothing.
@@ -281,6 +284,7 @@ pub struct PolicyStore {
     pub allow_upload: bool,
     pub upload_token: Option<String>,
     pub schema_validation_mode: SchemaValidationMode,
+    pub request_context_status: RequestContextStatus,
 
     pub policies: Metadata<OfPolicies>,
     pub labels: Metadata<OfLabels>,
@@ -299,6 +303,7 @@ impl Default for PolicyStore {
             allow_upload: false,
             upload_token: None,
             schema_validation_mode: SchemaValidationMode::Permissive,
+            request_context_status: RequestContextStatus::default(),
             policies: Metadata::<OfPolicies>::new(String::new(), None, None).unwrap(),
             labels: Metadata::<OfLabels>::new(String::new(), None, None).unwrap(),
             schema: Metadata::<OfSchema>::new(String::new(), None, None).unwrap(),
@@ -323,6 +328,7 @@ impl PolicyStore {
             allow_upload: false,
             upload_token: None,
             schema_validation_mode: SchemaValidationMode::Permissive,
+            request_context_status: RequestContextStatus::default(),
             policies: Metadata::<OfPolicies>::new(String::new(), None, None)?,
             labels: Metadata::<OfLabels>::new(String::new(), None, None)?,
             schema: Metadata::<OfSchema>::new(String::new(), None, None)?,
@@ -378,23 +384,33 @@ impl PolicyStore {
         Err(ServiceError::SchemaValidationError(detail))
     }
 
-    fn prevalidate_policy_reload(&self, dsl: &str) -> Result<(), ServiceError> {
-        let Some(schema) = self.current_schema()? else {
-            if self.schema_validation_mode == SchemaValidationMode::Strict {
-                return Err(ServiceError::SchemaValidationError(
-                    "strict schema validation requires an uploaded schema before policy reload"
-                        .to_string(),
-                ));
-            }
-            return Ok(());
+    fn ensure_schema_present_for_policy_reload(&self) -> Result<(), ServiceError> {
+        if self.schema_validation_mode == SchemaValidationMode::Strict
+            && self.schema.content.is_empty()
+        {
+            return Err(ServiceError::SchemaValidationError(
+                "strict schema validation requires an uploaded schema before policy reload"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn runtime_schema_for_dsl(
+        &self,
+        dsl: &str,
+        schema: Option<CedarSchema>,
+    ) -> Result<(Option<CedarSchema>, RequestContextStatus), ServiceError> {
+        let Some(schema) = schema else {
+            return Ok((None, RequestContextStatus::no_schema()));
         };
 
         match self.validate_policies_with_schema(dsl, &schema) {
-            Ok(()) => Ok(()),
+            Ok(()) => Ok((Some(schema), RequestContextStatus::schema_backed())),
             Err(e) if self.schema_validation_mode == SchemaValidationMode::Permissive => {
                 warn!(message = "Policy/schema mismatch in permissive mode", error = %e);
                 metrics::record_schema_validation_failure("policy_schema_mismatch");
-                Ok(())
+                Ok((None, RequestContextStatus::schema_incompatible()))
             }
             Err(e) => {
                 metrics::record_schema_validation_failure("policy_schema_mismatch");
@@ -403,32 +419,56 @@ impl PolicyStore {
         }
     }
 
+    fn build_engine_from_parts(
+        dsl: &str,
+        schema: Option<CedarSchema>,
+        labelers: &[Arc<dyn Labeler>],
+    ) -> Result<PolicyEngine, ServiceError> {
+        let mut engine = match schema {
+            Some(schema) => PolicyEngine::new_from_str_with_schema(dsl, schema)?,
+            None => PolicyEngine::new_from_str(dsl)?,
+        };
+
+        if !labelers.is_empty() {
+            let mut builder = LabelRegistryBuilder::new();
+            for labeler in labelers {
+                builder = builder.add_labeler(Arc::clone(labeler));
+            }
+            engine = engine.with_label_registry(builder.build());
+        }
+
+        Ok(engine)
+    }
+
+    fn rebuild_engine_for_dsl_with_parts(
+        &mut self,
+        dsl: &str,
+        schema: Option<CedarSchema>,
+        labelers: &[Arc<dyn Labeler>],
+    ) -> Result<(), ServiceError> {
+        let (runtime_schema, request_context_status) = self.runtime_schema_for_dsl(dsl, schema)?;
+        let engine = Self::build_engine_from_parts(dsl, runtime_schema, labelers)?;
+        self.engine = Arc::new(engine);
+        self.request_context_status = request_context_status;
+        Ok(())
+    }
+
     pub fn set_dsl(
         &mut self,
         dsl: &str,
         source: Option<Endpoint>,
         refresh_frequency: Option<u32>,
     ) -> Result<(), ServiceError> {
-        self.prevalidate_policy_reload(dsl)?;
+        self.ensure_schema_present_for_policy_reload()?;
 
         let old_metadata = self.policies.clone();
         let source = source.or(old_metadata.source);
         let refresh_frequency = refresh_frequency.or(old_metadata.refresh_frequency);
 
         let metadata = Metadata::<OfPolicies>::new(dsl.to_string(), source, refresh_frequency)?;
-
-        let mut engine = PolicyEngine::new_from_str(dsl)?;
-
-        // Apply labels to the new engine if we have any
-        if !self.label_registry_labelers.is_empty() {
-            let mut builder = LabelRegistryBuilder::new();
-            for labeler in &self.label_registry_labelers {
-                builder = builder.add_labeler(Arc::clone(labeler));
-            }
-            engine = engine.with_label_registry(builder.build());
-        }
-
-        self.engine = Arc::new(engine);
+        let schema = self.current_schema()?;
+        let labelers = self.label_registry_labelers.clone();
+        self.rebuild_engine_for_dsl_with_parts(dsl, schema, &labelers)?;
         self.policies = metadata;
         self.clear_list_policies_cache()?;
         Ok(())
@@ -459,15 +499,9 @@ impl PolicyStore {
                 return Err(ServiceError::SchemaValidationError(e.to_string()));
             }
         };
-
-        if self.schema_validation_mode == SchemaValidationMode::Strict
-            && !self.policies.content.is_empty()
-            && let Err(e) =
-                self.validate_policies_with_schema(&self.policies.content, &parsed_schema)
-        {
-            metrics::record_schema_validation_failure("schema_policy_mismatch");
-            return Err(e);
-        }
+        let dsl = self.policies.content.clone();
+        let labelers = self.label_registry_labelers.clone();
+        self.rebuild_engine_for_dsl_with_parts(&dsl, Some(parsed_schema), &labelers)?;
 
         self.schema = metadata;
         metrics::record_schema_reload();
@@ -485,21 +519,12 @@ impl PolicyStore {
         let refresh_frequency = refresh_frequency.or(old_metadata.refresh_frequency);
 
         let metadata = Metadata::<OfLabels>::new(labels.to_string(), source, refresh_frequency)?;
+        let labelers = parse_labels(labels)?;
+        let dsl = self.policies.content.clone();
+        let schema = self.current_schema()?;
+        self.rebuild_engine_for_dsl_with_parts(&dsl, schema, &labelers)?;
 
-        // Parse and store the labelers
-        self.label_registry_labelers = parse_labels(labels)?;
-
-        // Re-apply labels to the engine
-        if !self.label_registry_labelers.is_empty() {
-            let mut builder = LabelRegistryBuilder::new();
-            for labeler in &self.label_registry_labelers {
-                builder = builder.add_labeler(Arc::clone(labeler));
-            }
-            let mut engine = PolicyEngine::new_from_str(&self.policies.content)?;
-            engine = engine.with_label_registry(builder.build());
-            self.engine = Arc::new(engine);
-        }
-
+        self.label_registry_labelers = labelers;
         self.labels = metadata;
         self.clear_list_policies_cache()?;
         Ok(())
@@ -567,12 +592,22 @@ impl PolicyStore {
     }
 
     fn clear_list_policies_cache(&self) -> Result<(), ServiceError> {
-        self.list_policies_raw_cache.lock().map_err(|e| {
-            ServiceError::ListPoliciesError(format!("list policies raw cache lock poisoned: {e}"))
-        })?.clear();
-        self.list_policies_json_cache.lock().map_err(|e| {
-            ServiceError::ListPoliciesError(format!("list policies json cache lock poisoned: {e}"))
-        })?.clear();
+        self.list_policies_raw_cache
+            .lock()
+            .map_err(|e| {
+                ServiceError::ListPoliciesError(format!(
+                    "list policies raw cache lock poisoned: {e}"
+                ))
+            })?
+            .clear();
+        self.list_policies_json_cache
+            .lock()
+            .map_err(|e| {
+                ServiceError::ListPoliciesError(format!(
+                    "list policies json cache lock poisoned: {e}"
+                ))
+            })?
+            .clear();
         Ok(())
     }
 }
@@ -622,6 +657,65 @@ mod tests {
     use crate::models::Endpoint;
     use serde_json::Value;
     use std::str::FromStr;
+
+    const CONTEXT_POLICY_DSL: &str = r#"
+permit (
+    principal == User::"alice",
+    action == Action::"view",
+    resource == Photo::"VacationPhoto94.jpg"
+) when {
+    context.env == "prod"
+};
+"#;
+
+    const CONTEXT_SCHEMA_JSON: &str = r#"{
+  "": {
+    "entityTypes": {
+      "User": {},
+      "Photo": {}
+    },
+    "actions": {
+      "view": {
+        "appliesTo": {
+          "principalTypes": ["User"],
+          "resourceTypes": ["Photo"],
+          "context": {
+            "type": "Record",
+            "attributes": {
+              "env": {
+                "type": "String",
+                "required": true
+              }
+            },
+            "additionalAttributes": false
+          }
+        }
+      }
+    }
+  }
+}"#;
+
+    const INCOMPATIBLE_POLICY_DSL: &str = r#"
+permit (
+    principal == Group::"ops",
+    action == Action::"view",
+    resource == Photo::"VacationPhoto94.jpg"
+);
+"#;
+
+    const LABELS_JSON: &str = r#"[
+  {
+    "kind": "Photo",
+    "field": "name",
+    "output": "nameLabels",
+    "patterns": [
+      {
+        "name": "vacation",
+        "regex": "^Vacation.*"
+      }
+    ]
+  }
+]"#;
 
     #[test]
     fn test_metadata_empty() {
@@ -749,6 +843,10 @@ forbid (
         assert!(!store.allow_upload);
         assert!(store.upload_token.is_none());
         assert_eq!(store.policies.entries, 0);
+        assert_eq!(
+            store.request_context_status,
+            RequestContextStatus::no_schema()
+        );
     }
 
     #[test]
@@ -966,5 +1064,42 @@ permit (
             .unwrap();
 
         assert_eq!(store.list_policies_raw_cache.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_policy_store_schema_backed_runtime_state() {
+        let mut store = PolicyStore::new().unwrap();
+        store.set_schema(CONTEXT_SCHEMA_JSON, None, None).unwrap();
+        store.set_dsl(CONTEXT_POLICY_DSL, None, None).unwrap();
+
+        assert_eq!(
+            store.request_context_status,
+            RequestContextStatus::schema_backed()
+        );
+    }
+
+    #[test]
+    fn test_policy_store_permissive_schema_mismatch_falls_back() {
+        let mut store = PolicyStore::new().unwrap();
+        store.set_dsl(INCOMPATIBLE_POLICY_DSL, None, None).unwrap();
+        store.set_schema(CONTEXT_SCHEMA_JSON, None, None).unwrap();
+
+        assert_eq!(
+            store.request_context_status,
+            RequestContextStatus::schema_incompatible()
+        );
+    }
+
+    #[test]
+    fn test_policy_store_set_labels_preserves_schema_backed_runtime() {
+        let mut store = PolicyStore::new().unwrap();
+        store.set_schema(CONTEXT_SCHEMA_JSON, None, None).unwrap();
+        store.set_dsl(CONTEXT_POLICY_DSL, None, None).unwrap();
+        store.set_labels(LABELS_JSON, None, None).unwrap();
+
+        assert_eq!(
+            store.request_context_status,
+            RequestContextStatus::schema_backed()
+        );
     }
 }
