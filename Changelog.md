@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5] - 2026-04-04
+
+### Added
+
+- Cedar schema management support, including `GET /api/v1/schema` and `POST /api/v1/schema`.
+- CLI support for downloading and uploading schemas, including `upload --schema`.
+- Schema validation and schema-fetch configuration for policy/schema reloads.
+- Match reasons in user policy responses via `matches[].reasons`.
+- Configurable request body size limit via `TREETOP_MAX_REQUEST_SIZE`.
+
+### Changed
+
+- Improved shared policy store concurrency and robustness under poisoned-lock scenarios.
+- Split and renamed benchmark targets with `_callgrind` suffix for better perf workflow discovery.
+- Updated API and configuration documentation to cover schema support and current server behavior.
+
+### Fixed
+
+- Send `X-Upload-Token` correctly on JSON upload paths.
+- Correct Docker healthcheck path to `/api/v1/health`.
+- Ensure generic fetcher updates hashes and metadata correctly to avoid unnecessary reloads.
+- Correct OpenAPI annotations for GET endpoints such as health and version.
+- Refresh README and API examples to use current endpoint paths and upload behavior.
+
 ## [0.0.4] - 2026-02-09
 
 ### Added

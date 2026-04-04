@@ -7,16 +7,11 @@ use crate::errors::ServiceError;
 
 use crate::models::Endpoint;
 
-#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SchemaValidationMode {
+    #[default]
     Permissive,
     Strict,
-}
-
-impl Default for SchemaValidationMode {
-    fn default() -> Self {
-        Self::Permissive
-    }
 }
 
 impl std::fmt::Display for SchemaValidationMode {

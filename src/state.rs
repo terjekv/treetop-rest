@@ -462,13 +462,11 @@ impl PolicyStore {
 
         if self.schema_validation_mode == SchemaValidationMode::Strict
             && !self.policies.content.is_empty()
-        {
-            if let Err(e) =
+            && let Err(e) =
                 self.validate_policies_with_schema(&self.policies.content, &parsed_schema)
-            {
-                metrics::record_schema_validation_failure("schema_policy_mismatch");
-                return Err(e);
-            }
+        {
+            metrics::record_schema_validation_failure("schema_policy_mismatch");
+            return Err(e);
         }
 
         self.schema = metadata;
