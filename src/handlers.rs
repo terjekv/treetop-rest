@@ -135,7 +135,7 @@ pub struct ApiDoc;
 pub struct HealthOK {}
 
 #[utoipa::path(
-        post,
+        get,
         path = "/api/v1/health",
         responses(
             (status = 200, description = "All systems OK", body = HealthOK),
@@ -167,7 +167,7 @@ pub struct SchemaVersionInfo {
 }
 
 #[utoipa::path(
-        post,
+        get,
         path = "/api/v1/version",
         responses(
             (status = 200, description = "Version information", body = VersionInfo),
@@ -177,7 +177,7 @@ pub async fn version(
     store: web::Data<SharedPolicyStore>,
 ) -> Result<web::Json<VersionInfo>, ServiceError> {
     let build_info = build_info();
-    let store = store.lock()?;
+    let store = store.read()?;
     let schema = if store.schema.sha256.is_empty() {
         None
     } else {
@@ -425,7 +425,7 @@ pub async fn authorize(
     query: web::Query<AuthorizeQuery>,
     req: web::Json<AuthorizeRequest>,
 ) -> Result<web::Json<AuthorizeResponseVariant>, ServiceError> {
-    let store = store.lock()?;
+    let store = store.read()?;
     let engine_snapshot = store.engine.clone();
     let version = engine_snapshot.current_version();
     let strict_schema = store.schema_validation_mode == SchemaValidationMode::Strict;
@@ -485,7 +485,7 @@ pub async fn get_policies(
     store: web::Data<SharedPolicyStore>,
 ) -> Result<HttpResponse, ServiceError> {
     let format = query.get("format").map(String::as_str);
-    let store = store.lock()?;
+    let store = store.read()?;
 
     if should_return_raw_format(format) {
         Ok(HttpResponse::Ok()
@@ -528,7 +528,7 @@ pub async fn upload_policies(
     }
 
     // Now acquire lock for authentication and applying changes
-    let mut guard = store.lock()?;
+    let mut guard = store.write()?;
 
     check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
 
@@ -558,7 +558,7 @@ pub async fn get_schema(
     store: web::Data<SharedPolicyStore>,
 ) -> Result<HttpResponse, ServiceError> {
     let format = query.get("format").map(String::as_str);
-    let store = store.lock()?;
+    let store = store.read()?;
 
     if should_return_raw_format(format) {
         Ok(HttpResponse::Ok()
@@ -604,7 +604,7 @@ pub async fn upload_schema(
         return Err(ServiceError::InvalidTextPayload);
     }
 
-    let mut guard = store.lock()?;
+    let mut guard = store.write()?;
     check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
     guard.set_schema(&schema_string, None, None)?;
 
@@ -637,7 +637,7 @@ pub async fn list_policies(
     user: web::Path<String>,
     req: HttpRequest,
 ) -> Result<HttpResponse, ServiceError> {
-    let mut store = store.lock()?;
+    let store = store.read()?;
 
     // User path parameter is just the entity ID
     let entity_id = user.into_inner();
@@ -677,7 +677,7 @@ pub async fn get_status(
     parallel: web::Data<ParallelConfig>,
     runtime_cfg: Option<web::Data<AuthorizeRuntimeConfig>>,
 ) -> Result<web::Json<StatusResponse>, ServiceError> {
-    let store = store.lock()?;
+    let store = store.read()?;
     let request_limits = runtime_cfg
         .map(|cfg| RequestLimits {
             max_context_bytes: cfg.max_context_bytes,

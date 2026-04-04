@@ -3,21 +3,20 @@
 fn test_parse_principal_with_groups() {
     // Simple parsing function mirroring the one in cli.rs
     fn parse_principal_with_groups(user_str: &str) -> (String, Vec<String>) {
-        if let Some(bracket_pos) = user_str.find('[') {
-            if let Some(close_pos) = user_str.find(']') {
-                if close_pos > bracket_pos {
-                    let principal_part = user_str[..bracket_pos].to_string();
-                    let groups_str = &user_str[bracket_pos + 1..close_pos];
+        if let Some(bracket_pos) = user_str.find('[')
+            && let Some(close_pos) = user_str.find(']')
+            && close_pos > bracket_pos
+        {
+            let principal_part = user_str[..bracket_pos].to_string();
+            let groups_str = &user_str[bracket_pos + 1..close_pos];
 
-                    let groups: Vec<String> = groups_str
-                        .split(',')
-                        .map(|g| g.trim().to_string())
-                        .filter(|g| !g.is_empty())
-                        .collect();
+            let groups: Vec<String> = groups_str
+                .split(',')
+                .map(|g| g.trim().to_string())
+                .filter(|g| !g.is_empty())
+                .collect();
 
-                    return (principal_part, groups);
-                }
-            }
+            return (principal_part, groups);
         }
 
         // No brackets, return full principal as-is

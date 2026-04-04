@@ -1,6 +1,6 @@
 use actix_web::{App, test, web};
 use std::str::FromStr;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, RwLock, OnceLock};
 use treetop_core::{Action, Principal, Request, Resource, User};
 use treetop_rest::handlers;
 use treetop_rest::models::AuthorizeRequest;
@@ -18,7 +18,7 @@ fn get_metrics_registry() -> Arc<prometheus::Registry> {
 
 /// Helper to create a test app with metrics support
 fn create_test_app_with_metrics(
-    store: Arc<Mutex<PolicyStore>>,
+    store: Arc<RwLock<PolicyStore>>,
 ) -> App<
     impl actix_web::dev::ServiceFactory<
         actix_web::dev::ServiceRequest,
@@ -39,7 +39,7 @@ fn create_test_app_with_metrics(
     );
 
     App::new()
-        .wrap(treetop_rest::middeware::TracingMiddleware::new())
+        .wrap(treetop_rest::middleware::TracingMiddleware::new())
         .app_data(web::Data::new(store))
         .app_data(web::Data::new(registry))
         .app_data(web::Data::new(parallel))
@@ -47,7 +47,7 @@ fn create_test_app_with_metrics(
 }
 
 /// Helper to create a test policy store with default policies
-fn create_test_store() -> Arc<Mutex<PolicyStore>> {
+fn create_test_store() -> Arc<RwLock<PolicyStore>> {
     // Initialize metrics BEFORE creating the policy store/engine
     // This ensures the metrics sink is set up when the engine is created
     let _ = get_metrics_registry();
@@ -69,7 +69,7 @@ forbid (
 "#;
 
     store.set_dsl(dsl, None, None).unwrap();
-    Arc::new(Mutex::new(store))
+    Arc::new(RwLock::new(store))
 }
 
 #[actix_web::test]
@@ -145,7 +145,7 @@ async fn test_metrics_has_policy_eval_metrics() {
 
     let req = test::TestRequest::post()
         .uri("/api/v1/authorize")
-        .set_json(&AuthorizeRequest::single(check_req))
+        .set_json(AuthorizeRequest::single(check_req))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -159,7 +159,7 @@ async fn test_metrics_has_policy_eval_metrics() {
 
     let req = test::TestRequest::post()
         .uri("/api/v1/authorize")
-        .set_json(&AuthorizeRequest::single(check_req_denied))
+        .set_json(AuthorizeRequest::single(check_req_denied))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -213,7 +213,7 @@ async fn test_metrics_updated_after_evaluation() {
 
     let req = test::TestRequest::post()
         .uri("/api/v1/authorize")
-        .set_json(&AuthorizeRequest::single(check_req))
+        .set_json(AuthorizeRequest::single(check_req))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -269,7 +269,7 @@ async fn test_metrics_tracks_allowed_and_denied() {
 
     let req = test::TestRequest::post()
         .uri("/api/v1/authorize")
-        .set_json(&AuthorizeRequest::single(check_req))
+        .set_json(AuthorizeRequest::single(check_req))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -284,7 +284,7 @@ async fn test_metrics_tracks_allowed_and_denied() {
 
     let req = test::TestRequest::post()
         .uri("/api/v1/authorize")
-        .set_json(&AuthorizeRequest::single(check_req_denied))
+        .set_json(AuthorizeRequest::single(check_req_denied))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -327,7 +327,7 @@ async fn test_metrics_prometheus_format() {
 
     let req = test::TestRequest::post()
         .uri("/api/v1/authorize")
-        .set_json(&AuthorizeRequest::single(check_req))
+        .set_json(AuthorizeRequest::single(check_req))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -415,7 +415,7 @@ async fn test_metrics_has_histogram_buckets() {
 
     let req = test::TestRequest::post()
         .uri("/api/v1/authorize")
-        .set_json(&AuthorizeRequest::single(check_req))
+        .set_json(AuthorizeRequest::single(check_req))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -448,7 +448,7 @@ async fn test_http_metrics_include_client_ip_label() {
     let registry = get_metrics_registry();
     let app = test::init_service(
         App::new()
-            .wrap(treetop_rest::middeware::TracingMiddleware::new_with_trust(
+            .wrap(treetop_rest::middleware::TracingMiddleware::new_with_trust(
                 true,
             ))
             .app_data(web::Data::new(store))

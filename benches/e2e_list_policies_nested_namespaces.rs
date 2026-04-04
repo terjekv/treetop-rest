@@ -5,10 +5,10 @@ use actix_web::dev::ServiceResponse;
 use actix_web::{test, web, App};
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 use std::str::FromStr;
-use std::sync::{Arc, Mutex, Once};
+use std::sync::{Arc, RwLock, Once};
 use treetop_rest::config::ClientAllowlist;
 use treetop_rest::handlers;
-use treetop_rest::middeware::{ClientAllowlistMiddleware, TracingMiddleware};
+use treetop_rest::middleware::{ClientAllowlistMiddleware, TracingMiddleware};
 use treetop_rest::state::PolicyStore;
 
 const DSL: &str = r#"
@@ -32,10 +32,10 @@ fn init_metrics_once() {
     });
 }
 
-fn build_store() -> Arc<Mutex<PolicyStore>> {
+fn build_store() -> Arc<RwLock<PolicyStore>> {
     let mut store = PolicyStore::new().unwrap();
     store.set_dsl(DSL, None, None).unwrap();
-    Arc::new(Mutex::new(store))
+    Arc::new(RwLock::new(store))
 }
 
 type BoxedApp = BoxService<HttpRequest, ServiceResponse<BoxBody>, actix_web::Error>;

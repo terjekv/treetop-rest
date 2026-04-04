@@ -1,7 +1,7 @@
 use actix_web::{App, test, web};
 use rstest::rstest;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
 use treetop_rest::handlers;
 use treetop_rest::models::{
@@ -12,7 +12,7 @@ use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
 
 /// Helper to create a test policy store with default policies
-fn create_test_store() -> Arc<Mutex<PolicyStore>> {
+fn create_test_store() -> Arc<RwLock<PolicyStore>> {
     let mut store = PolicyStore::new().unwrap();
 
     let dsl = r#"
@@ -37,7 +37,7 @@ when { resource.ip.isInRange(ip("10.0.0.0/24")) };
 "#;
 
     store.set_dsl(dsl, None, None).unwrap();
-    Arc::new(Mutex::new(store))
+    Arc::new(RwLock::new(store))
 }
 
 /// Helper to create a test batch parallel config
@@ -288,7 +288,7 @@ async fn test_get_policies_raw() {
 async fn test_get_schema_raw() {
     let store = create_test_store();
     {
-        let mut guard = store.lock().unwrap();
+        let mut guard = store.write().unwrap();
         guard
             .set_schema(r#"{"": {"entityTypes": {}, "actions": {}}}"#, None, None)
             .unwrap();
@@ -349,7 +349,7 @@ async fn test_upload_with_token(
 ) {
     let store = create_test_store();
     {
-        let mut store_guard = store.lock().unwrap();
+        let mut store_guard = store.write().unwrap();
         store_guard.allow_upload = true;
         store_guard.upload_token = Some(expected_token.to_string());
     }
@@ -386,7 +386,7 @@ async fn test_upload_schema_with_token(
 ) {
     let store = create_test_store();
     {
-        let mut store_guard = store.lock().unwrap();
+        let mut store_guard = store.write().unwrap();
         store_guard.allow_upload = true;
         store_guard.upload_token = Some(expected_token.to_string());
     }
@@ -492,7 +492,7 @@ permit (
 "#;
 
     store.set_dsl(dsl, None, None).unwrap();
-    let store = Arc::new(Mutex::new(store));
+    let store = Arc::new(RwLock::new(store));
 
     let app = test::init_service(App::new().app_data(web::Data::new(store)).route(
         "/api/v1/policies/{user}",

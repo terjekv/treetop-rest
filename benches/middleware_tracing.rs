@@ -7,7 +7,7 @@ use actix_web::{Error, HttpResponse};
 use futures::executor::block_on;
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 use std::sync::Once;
-use treetop_rest::middeware::TracingMiddleware;
+use treetop_rest::middleware::TracingMiddleware;
 
 fn init_metrics() {
     static INIT: Once = Once::new();

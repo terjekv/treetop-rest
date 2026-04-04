@@ -3,7 +3,7 @@ use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 use std::net::SocketAddr;
 use std::str::FromStr;
 use treetop_rest::config::ClientAllowlist;
-use treetop_rest::middeware::extract_client_ip_for_bench;
+use treetop_rest::middleware::extract_client_ip_for_bench;
 
 #[library_benchmark]
 fn extract_ip_trusted_header() {

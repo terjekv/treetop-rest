@@ -1,13 +1,13 @@
 use actix_web::{App, HttpServer};
 use clap::Parser;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use treetop_rest::build_info::build_info;
 use treetop_rest::config::Config;
 use treetop_rest::fetcher::{LabelFetchAdapter, PolicyFetchAdapter, SchemaFetchAdapter};
 use treetop_rest::handlers::AuthorizeRuntimeConfig;
-use treetop_rest::middeware::{ClientAllowlistMiddleware, TracingMiddleware};
+use treetop_rest::middleware::{ClientAllowlistMiddleware, TracingMiddleware};
 use treetop_rest::state::PolicyStore;
 
 use utoipa::OpenApi;
@@ -52,7 +52,7 @@ async fn main() -> std::io::Result<()> {
     let metrics_registry =
         treetop_rest::metrics::init_prometheus().expect("Failed to init metrics");
 
-    let store = Arc::new(Mutex::new(PolicyStore::new().unwrap()));
+    let store = Arc::new(RwLock::new(PolicyStore::new().unwrap()));
 
     info!(
         message = "Initializing server",
@@ -62,13 +62,13 @@ async fn main() -> std::io::Result<()> {
     );
 
     if config.allow_upload {
-        store.lock().unwrap().allow_upload = true;
+        store.write().unwrap().allow_upload = true;
         let token = uuid::Uuid::new_v4().to_string();
         warn!(message = "Uploads enabled", token = token);
-        store.lock().unwrap().upload_token = Some(token);
+        store.write().unwrap().upload_token = Some(token);
     }
     store
-        .lock()
+        .write()
         .unwrap()
         .set_schema_validation_mode(config.schema_validation_mode);
 
@@ -77,7 +77,7 @@ async fn main() -> std::io::Result<()> {
         // Create a block to that the lock on the store is released before spawning the adapter
         // to avoid deadlocks. The alternative would be to use drop(s) to release the lock.
         {
-            let mut s = store.lock().unwrap();
+            let mut s = store.write().unwrap();
             s.policies.source = Some(url.clone());
             s.policies.refresh_frequency = Some(freq as u32);
         }
@@ -87,7 +87,7 @@ async fn main() -> std::io::Result<()> {
     if let Some(hurl) = config.labels_url.clone() {
         let freq = config.labels_refresh.unwrap_or(60) as u64;
         {
-            let mut s = store.lock().unwrap();
+            let mut s = store.write().unwrap();
             s.labels.source = Some(hurl.clone());
             s.labels.refresh_frequency = Some(freq as u32);
         }
@@ -97,7 +97,7 @@ async fn main() -> std::io::Result<()> {
     if let Some(surl) = config.schema_url.clone() {
         let freq = config.schema_refresh.unwrap_or(60) as u64;
         {
-            let mut s = store.lock().unwrap();
+            let mut s = store.write().unwrap();
             s.schema.source = Some(surl.clone());
             s.schema.refresh_frequency = Some(freq as u32);
         }
@@ -114,6 +114,7 @@ async fn main() -> std::io::Result<()> {
 
     let client_allowlist = config.client_allowlist.clone();
     let trust_ip_headers = config.trust_ip_headers;
+    let max_request_size = config.max_request_size;
 
     HttpServer::new(move || {
         App::new()
@@ -126,6 +127,8 @@ async fn main() -> std::io::Result<()> {
                 "/api-docs/openapi.json",
                 treetop_rest::handlers::ApiDoc::openapi(),
             ))
+            .app_data(actix_web::web::JsonConfig::default().limit(max_request_size))
+            .app_data(actix_web::web::PayloadConfig::default().limit(max_request_size))
             .app_data(actix_web::web::Data::new(store.clone()))
             .app_data(actix_web::web::Data::new(parallel_config))
             .app_data(actix_web::web::Data::new(authorize_runtime))
@@ -134,6 +137,7 @@ async fn main() -> std::io::Result<()> {
     })
     .bind((config.host.as_str(), config.port))?
     .workers(parallel_config.workers)
+    .shutdown_timeout(30)
     .run()
     .await
 }

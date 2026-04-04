@@ -7,10 +7,10 @@ use lru::LruCache;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fmt::{Display, Formatter, Result as FmtResult, Write as FmtWrite};
+use std::fmt::{Display, Formatter, Result as FmtResult, Write};
 use std::marker::PhantomData;
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tracing::{debug, trace, warn};
 use treetop_core::{LabelRegistryBuilder, Labeler, PolicyEngine, RegexLabeler};
 use utoipa::ToSchema;
@@ -47,7 +47,10 @@ pub trait MetadataParser {
     fn make_hash(content: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hasher.finalize().iter().fold(String::with_capacity(64), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
     }
 
     /// Process the content after parsing, by default does nothing.
@@ -283,8 +286,8 @@ pub struct PolicyStore {
     pub labels: Metadata<OfLabels>,
     pub schema: Metadata<OfSchema>,
     pub label_registry_labelers: Vec<Arc<dyn Labeler>>,
-    list_policies_raw_cache: LruCache<ListPoliciesCacheKey, Arc<String>>,
-    list_policies_json_cache: LruCache<ListPoliciesCacheKey, Arc<UserPolicies>>,
+    list_policies_raw_cache: Mutex<LruCache<ListPoliciesCacheKey, Arc<String>>>,
+    list_policies_json_cache: Mutex<LruCache<ListPoliciesCacheKey, Arc<UserPolicies>>>,
 }
 
 impl Default for PolicyStore {
@@ -300,12 +303,12 @@ impl Default for PolicyStore {
             labels: Metadata::<OfLabels>::new(String::new(), None, None).unwrap(),
             schema: Metadata::<OfSchema>::new(String::new(), None, None).unwrap(),
             label_registry_labelers: Vec::new(),
-            list_policies_raw_cache: LruCache::new(
+            list_policies_raw_cache: Mutex::new(LruCache::new(
                 NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap(),
-            ),
-            list_policies_json_cache: LruCache::new(
+            )),
+            list_policies_json_cache: Mutex::new(LruCache::new(
                 NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap(),
-            ),
+            )),
         }
     }
 }
@@ -324,12 +327,12 @@ impl PolicyStore {
             labels: Metadata::<OfLabels>::new(String::new(), None, None)?,
             schema: Metadata::<OfSchema>::new(String::new(), None, None)?,
             label_registry_labelers: Vec::new(),
-            list_policies_raw_cache: LruCache::new(
+            list_policies_raw_cache: Mutex::new(LruCache::new(
                 NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap(),
-            ),
-            list_policies_json_cache: LruCache::new(
+            )),
+            list_policies_json_cache: Mutex::new(LruCache::new(
                 NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap(),
-            ),
+            )),
         })
     }
 
@@ -427,7 +430,7 @@ impl PolicyStore {
 
         self.engine = Arc::new(engine);
         self.policies = metadata;
-        self.clear_list_policies_cache();
+        self.clear_list_policies_cache()?;
         Ok(())
     }
 
@@ -500,44 +503,57 @@ impl PolicyStore {
         }
 
         self.labels = metadata;
-        self.clear_list_policies_cache();
+        self.clear_list_policies_cache()?;
         Ok(())
     }
 
     pub fn list_policies_raw(
-        &mut self,
+        &self,
         user: String,
         mut groups: Vec<String>,
         mut namespaces: Vec<String>,
     ) -> Result<Arc<String>, ServiceError> {
         normalize_list_filters(&mut groups, &mut namespaces);
         let key = ListPoliciesCacheKey::new(user, groups, namespaces);
-        if let Some(cached) = self.list_policies_raw_cache.get(&key) {
+        let mut cache = self.list_policies_raw_cache.lock().map_err(|e| {
+            ServiceError::ListPoliciesError(format!("list policies raw cache lock poisoned: {e}"))
+        })?;
+        if let Some(cached) = cache.get(&key) {
             return Ok(Arc::clone(cached));
         }
+        drop(cache);
 
         let policies = self.list_policies_for_key(&key)?;
         let content = Arc::new(format_policies_raw(&policies));
-        self.list_policies_raw_cache.put(key, Arc::clone(&content));
+        let mut cache = self.list_policies_raw_cache.lock().map_err(|e| {
+            ServiceError::ListPoliciesError(format!("list policies raw cache lock poisoned: {e}"))
+        })?;
+        cache.put(key, Arc::clone(&content));
         Ok(content)
     }
 
     pub fn list_policies_json(
-        &mut self,
+        &self,
         user: String,
         mut groups: Vec<String>,
         mut namespaces: Vec<String>,
     ) -> Result<Arc<UserPolicies>, ServiceError> {
         normalize_list_filters(&mut groups, &mut namespaces);
         let key = ListPoliciesCacheKey::new(user, groups, namespaces);
-        if let Some(cached) = self.list_policies_json_cache.get(&key) {
+        let mut cache = self.list_policies_json_cache.lock().map_err(|e| {
+            ServiceError::ListPoliciesError(format!("list policies json cache lock poisoned: {e}"))
+        })?;
+        if let Some(cached) = cache.get(&key) {
             return Ok(Arc::clone(cached));
         }
+        drop(cache);
 
         let policies = self.list_policies_for_key(&key)?;
-        let response = Arc::new(UserPolicies::from(policies));
-        self.list_policies_json_cache
-            .put(key, Arc::clone(&response));
+        let response = Arc::new(UserPolicies::try_from(policies)?);
+        let mut cache = self.list_policies_json_cache.lock().map_err(|e| {
+            ServiceError::ListPoliciesError(format!("list policies json cache lock poisoned: {e}"))
+        })?;
+        cache.put(key, Arc::clone(&response));
         Ok(response)
     }
 
@@ -552,13 +568,18 @@ impl PolicyStore {
             .list_policies_for_user(&key.user, &group_refs, &namespace)?)
     }
 
-    fn clear_list_policies_cache(&mut self) {
-        self.list_policies_raw_cache.clear();
-        self.list_policies_json_cache.clear();
+    fn clear_list_policies_cache(&self) -> Result<(), ServiceError> {
+        self.list_policies_raw_cache.lock().map_err(|e| {
+            ServiceError::ListPoliciesError(format!("list policies raw cache lock poisoned: {e}"))
+        })?.clear();
+        self.list_policies_json_cache.lock().map_err(|e| {
+            ServiceError::ListPoliciesError(format!("list policies json cache lock poisoned: {e}"))
+        })?.clear();
+        Ok(())
     }
 }
 
-pub type SharedPolicyStore = Arc<Mutex<PolicyStore>>;
+pub type SharedPolicyStore = Arc<RwLock<PolicyStore>>;
 
 const LIST_POLICIES_CACHE_LIMIT: usize = 128;
 
@@ -870,7 +891,7 @@ permit (
             .engine
             .list_policies_for_user("alice", &[], &[])
             .unwrap();
-        let expected_json = UserPolicies::from(expected);
+        let expected_json = UserPolicies::try_from(expected).unwrap();
         let response = store
             .list_policies_json("alice".to_string(), vec![], vec![])
             .unwrap();
@@ -898,8 +919,8 @@ permit (
             .list_policies_json("alice".to_string(), vec![], vec![])
             .unwrap();
 
-        assert_eq!(store.list_policies_raw_cache.len(), 1);
-        assert_eq!(store.list_policies_json_cache.len(), 1);
+        assert_eq!(store.list_policies_raw_cache.lock().unwrap().len(), 1);
+        assert_eq!(store.list_policies_json_cache.lock().unwrap().len(), 1);
 
         let updated = r#"
 permit (
@@ -910,8 +931,8 @@ permit (
 "#;
         store.set_dsl(updated, None, None).unwrap();
 
-        assert!(store.list_policies_raw_cache.is_empty());
-        assert!(store.list_policies_json_cache.is_empty());
+        assert!(store.list_policies_raw_cache.lock().unwrap().is_empty());
+        assert!(store.list_policies_json_cache.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -946,6 +967,6 @@ permit (
             )
             .unwrap();
 
-        assert_eq!(store.list_policies_raw_cache.len(), 1);
+        assert_eq!(store.list_policies_raw_cache.lock().unwrap().len(), 1);
     }
 }
