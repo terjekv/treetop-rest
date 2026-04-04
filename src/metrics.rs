@@ -68,6 +68,83 @@ pub fn http_metrics() -> Arc<HttpMetrics> {
         .clone()
 }
 
+pub struct ServiceMetrics {
+    schema_reloads_total: IntCounter,
+    schema_validation_failures_total: IntCounterVec,
+    context_validation_failures_total: IntCounterVec,
+}
+
+impl ServiceMetrics {
+    pub fn new(registry: &Registry) -> Result<Self, Box<dyn std::error::Error>> {
+        let schema_reloads_total =
+            IntCounter::new("schema_reloads_total", "Total number of schema reloads")?;
+        let schema_validation_failures_total = IntCounterVec::new(
+            prometheus::Opts::new(
+                "schema_validation_failures_total",
+                "Total schema validation failures",
+            ),
+            &["reason"],
+        )?;
+        let context_validation_failures_total = IntCounterVec::new(
+            prometheus::Opts::new(
+                "context_validation_failures_total",
+                "Total context validation failures",
+            ),
+            &["reason"],
+        )?;
+
+        registry.register(Box::new(schema_reloads_total.clone()))?;
+        registry.register(Box::new(schema_validation_failures_total.clone()))?;
+        registry.register(Box::new(context_validation_failures_total.clone()))?;
+
+        Ok(Self {
+            schema_reloads_total,
+            schema_validation_failures_total,
+            context_validation_failures_total,
+        })
+    }
+
+    pub fn record_schema_reload(&self) {
+        self.schema_reloads_total.inc();
+    }
+
+    pub fn record_schema_validation_failure(&self, reason: &str) {
+        self.schema_validation_failures_total
+            .with_label_values(&[reason])
+            .inc();
+    }
+
+    pub fn record_context_validation_failure(&self, reason: &str) {
+        self.context_validation_failures_total
+            .with_label_values(&[reason])
+            .inc();
+    }
+}
+
+static SERVICE_METRICS: OnceLock<Arc<ServiceMetrics>> = OnceLock::new();
+
+pub fn service_metrics() -> Option<Arc<ServiceMetrics>> {
+    SERVICE_METRICS.get().cloned()
+}
+
+pub fn record_schema_reload() {
+    if let Some(metrics) = service_metrics() {
+        metrics.record_schema_reload();
+    }
+}
+
+pub fn record_schema_validation_failure(reason: &str) {
+    if let Some(metrics) = service_metrics() {
+        metrics.record_schema_validation_failure(reason);
+    }
+}
+
+pub fn record_context_validation_failure(reason: &str) {
+    if let Some(metrics) = service_metrics() {
+        metrics.record_context_validation_failure(reason);
+    }
+}
+
 pub struct PrometheusMetricsSink {
     evals_total: IntCounterVec,
     evals_allowed: IntCounterVec,
@@ -167,6 +244,10 @@ pub fn init_prometheus() -> Result<Arc<Registry>, Box<dyn std::error::Error>> {
     // HTTP metrics
     let http = Arc::new(HttpMetrics::new(&registry)?);
     let _ = HTTP_METRICS.set(http);
+
+    // Service-level metrics
+    let service = Arc::new(ServiceMetrics::new(&registry)?);
+    let _ = SERVICE_METRICS.set(service);
 
     Ok(Arc::new(registry))
 }

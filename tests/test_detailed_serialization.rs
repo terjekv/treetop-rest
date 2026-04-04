@@ -1,6 +1,6 @@
 use actix_web::{App, test, web};
-use std::sync::{Arc, RwLock};
 use std::str::FromStr;
+use std::sync::{Arc, RwLock};
 use treetop_core::{Action, Principal, Request, Resource, User};
 use treetop_rest::handlers;
 use treetop_rest::models::AuthorizeRequest;
@@ -19,9 +19,8 @@ permit (
 "#;
     store.set_dsl(dsl, None, None).unwrap();
     let store = Arc::new(RwLock::new(store));
-    
     let parallel = ParallelConfig::new(1, 1, None);
-    
+
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
@@ -48,10 +47,10 @@ permit (
 
     let body = test::read_body(resp).await;
     let body_str = String::from_utf8(body.to_vec()).unwrap();
-    
+
     println!("=== DETAILED RESPONSE ===");
     println!("{}", body_str);
-    
+
     // Also print formatted JSON
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_str) {
         println!("\n=== FORMATTED ===");

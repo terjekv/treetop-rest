@@ -108,6 +108,43 @@ impl ApiClient {
         self.apply_headers(builder).send().await
     }
 
+    pub async fn get_schema(&self, raw: bool) -> reqwest::Result<Response> {
+        let url = if raw {
+            format!("{}/schema?format=raw", self.base_url)
+        } else {
+            format!("{}/schema", self.base_url)
+        };
+        let builder = self.client.get(url);
+        self.apply_headers(builder).send().await
+    }
+
+    pub async fn post_schema_raw(&self, token: &str, content: String) -> reqwest::Result<Response> {
+        let builder = self
+            .client
+            .post(format!("{}/schema", self.base_url))
+            .header("Content-Type", "text/plain")
+            .header("X-Upload-Token", token)
+            .body(content);
+        self.apply_headers(builder).send().await
+    }
+
+    pub async fn post_schema_json(
+        &self,
+        token: &str,
+        content: String,
+    ) -> reqwest::Result<Response> {
+        #[derive(serde::Serialize)]
+        struct Upload {
+            schema: String,
+        }
+        let builder = self
+            .client
+            .post(format!("{}/schema", self.base_url))
+            .header("X-Upload-Token", token)
+            .json(&Upload { schema: content });
+        self.apply_headers(builder).send().await
+    }
+
     pub async fn get_user_policies(
         &self,
         principal: &str,

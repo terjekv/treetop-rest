@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use treetop_core::{Action, Principal, Request, Resource, User};
 use treetop_rest::handlers::evaluate_batch_requests_for_bench;
-use treetop_rest::models::{AuthorizeDecisionBrief, AuthorizeDecisionDetailed, AuthRequest};
+use treetop_rest::models::{AuthRequest, AuthorizeDecisionBrief, AuthorizeDecisionDetailed};
 use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
 
