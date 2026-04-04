@@ -81,65 +81,109 @@ path = "src/bin/cli.rs"
 debug = true
 
 [[bench]]
-name = "authorize_batch_small"
+name = "authorize_batch_brief_8_callgrind"
 harness = false
 
 [[bench]]
-name = "authorize_batch_brief_128"
+name = "authorize_batch_brief_32_callgrind"
 harness = false
 
 [[bench]]
-name = "authorize_batch_detailed_128"
+name = "authorize_batch_brief_128_callgrind"
 harness = false
 
 [[bench]]
-name = "cli_matrix"
+name = "authorize_batch_detailed_8_callgrind"
 harness = false
 
 [[bench]]
-name = "labels"
+name = "authorize_batch_detailed_32_callgrind"
 harness = false
 
 [[bench]]
-name = "middleware_ip"
+name = "authorize_batch_detailed_128_callgrind"
 harness = false
 
 [[bench]]
-name = "middleware_tracing"
+name = "cli_matrix_simple_callgrind"
 harness = false
 
 [[bench]]
-name = "policy_store"
+name = "cli_matrix_bracketed_callgrind"
 harness = false
 
 [[bench]]
-name = "e2e_authorize_light"
+name = "cli_matrix_with_attrs_callgrind"
 harness = false
 
 [[bench]]
-name = "e2e_authorize_groups"
+name = "labels_callgrind"
 harness = false
 
 [[bench]]
-name = "e2e_authorize_nested_namespaces"
+name = "middleware_ip_trusted_header_callgrind"
 harness = false
 
 [[bench]]
-name = "e2e_authorize_large_dsl"
+name = "middleware_ip_peer_addr_callgrind"
 harness = false
 
 [[bench]]
-name = "e2e_list_policies_light"
+name = "middleware_ip_allowlist_hit_callgrind"
 harness = false
 
 [[bench]]
-name = "e2e_list_policies_groups"
+name = "middleware_ip_allowlist_miss_callgrind"
 harness = false
 
 [[bench]]
-name = "e2e_list_policies_nested_namespaces"
+name = "middleware_tracing_callgrind"
 harness = false
 
 [[bench]]
-name = "e2e_list_policies_large_dsl"
+name = "policy_store_metadata_default_callgrind"
+harness = false
+
+[[bench]]
+name = "policy_store_metadata_dns_callgrind"
+harness = false
+
+[[bench]]
+name = "policy_store_set_dsl_default_callgrind"
+harness = false
+
+[[bench]]
+name = "policy_store_set_dsl_with_source_callgrind"
+harness = false
+
+[[bench]]
+name = "e2e_authorize_light_callgrind"
+harness = false
+
+[[bench]]
+name = "e2e_authorize_groups_callgrind"
+harness = false
+
+[[bench]]
+name = "e2e_authorize_nested_namespaces_callgrind"
+harness = false
+
+[[bench]]
+name = "e2e_authorize_large_dsl_callgrind"
+harness = false
+
+[[bench]]
+name = "e2e_list_policies_light_callgrind"
+harness = false
+
+[[bench]]
+name = "e2e_list_policies_groups_callgrind"
+harness = false
+
+[[bench]]
+name = "e2e_list_policies_nested_namespaces_callgrind"
+harness = false
+
+[[bench]]
+name = "e2e_list_policies_large_dsl_callgrind"
 harness = false
