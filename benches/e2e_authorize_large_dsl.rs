@@ -5,11 +5,11 @@ use actix_web::dev::ServiceResponse;
 use actix_web::{test, web, App};
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 use std::str::FromStr;
-use std::sync::{Arc, Mutex, Once};
+use std::sync::{Arc, RwLock, Once};
 use treetop_core::{Action, Principal, Request, Resource, User};
 use treetop_rest::config::ClientAllowlist;
 use treetop_rest::handlers;
-use treetop_rest::middeware::{ClientAllowlistMiddleware, TracingMiddleware};
+use treetop_rest::middleware::{ClientAllowlistMiddleware, TracingMiddleware};
 use treetop_rest::models::AuthorizeRequest;
 use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
@@ -38,11 +38,11 @@ permit (
     dsl
 }
 
-fn build_store() -> Arc<Mutex<PolicyStore>> {
+fn build_store() -> Arc<RwLock<PolicyStore>> {
     let mut store = PolicyStore::new().unwrap();
     let dsl = build_large_dsl();
     store.set_dsl(&dsl, None, None).unwrap();
-    Arc::new(Mutex::new(store))
+    Arc::new(RwLock::new(store))
 }
 
 fn build_request() -> AuthorizeRequest {

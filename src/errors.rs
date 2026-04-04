@@ -2,7 +2,7 @@ use actix_web::{HttpResponse, ResponseError, http::StatusCode};
 use serde::Serialize;
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},
-    sync::{MutexGuard, PoisonError},
+    sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard},
 };
 use treetop_core::PolicyError;
 use utoipa::ToSchema;
@@ -79,8 +79,14 @@ impl From<PolicyError> for ServiceError {
     }
 }
 
-impl From<PoisonError<MutexGuard<'_, PolicyStore>>> for ServiceError {
-    fn from(e: PoisonError<MutexGuard<'_, PolicyStore>>) -> Self {
+impl From<PoisonError<RwLockReadGuard<'_, PolicyStore>>> for ServiceError {
+    fn from(e: PoisonError<RwLockReadGuard<'_, PolicyStore>>) -> Self {
+        ServiceError::LockPoison(e.to_string())
+    }
+}
+
+impl From<PoisonError<RwLockWriteGuard<'_, PolicyStore>>> for ServiceError {
+    fn from(e: PoisonError<RwLockWriteGuard<'_, PolicyStore>>) -> Self {
         ServiceError::LockPoison(e.to_string())
     }
 }

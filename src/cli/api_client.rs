@@ -56,23 +56,6 @@ impl ApiClient {
         self.apply_headers(builder).send().await
     }
 
-    pub async fn post_check<T: serde::Serialize + ?Sized>(
-        &self,
-        detailed: bool,
-        req: &T,
-    ) -> reqwest::Result<Response> {
-        let path = if detailed {
-            "/check_detailed"
-        } else {
-            "/check"
-        };
-        let builder = self
-            .client
-            .post(format!("{}{}", self.base_url, path))
-            .json(req);
-        self.apply_headers(builder).send().await
-    }
-
     pub async fn post_authorize<T: serde::Serialize + ?Sized>(
         &self,
         req: &T,
@@ -108,7 +91,11 @@ impl ApiClient {
         self.apply_headers(builder).send().await
     }
 
-    pub async fn post_policies_json(&self, content: String) -> reqwest::Result<Response> {
+    pub async fn post_policies_json(
+        &self,
+        token: &str,
+        content: String,
+    ) -> reqwest::Result<Response> {
         #[derive(serde::Serialize)]
         struct Upload {
             policies: String,
@@ -116,6 +103,7 @@ impl ApiClient {
         let builder = self
             .client
             .post(format!("{}/policies", self.base_url))
+            .header("X-Upload-Token", token)
             .json(&Upload { policies: content });
         self.apply_headers(builder).send().await
     }

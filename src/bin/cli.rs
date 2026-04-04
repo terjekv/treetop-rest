@@ -484,7 +484,7 @@ async fn handle_upload(
     let resp = if raw {
         ctx.api.post_policies_raw(&token, content).await?
     } else {
-        ctx.api.post_policies_json(content).await?
+        ctx.api.post_policies_json(&token, content).await?
     };
     handle_response::<PoliciesMetadata>(resp, ctx.show_json, ctx.show_debug).await?;
     Ok(())

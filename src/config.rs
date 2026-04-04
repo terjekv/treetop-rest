@@ -63,6 +63,10 @@ pub struct Config {
     )]
     pub client_allowlist: ClientAllowlist,
 
+    /// Maximum request body size in bytes (default: 10485760 = 10 MB)
+    #[clap(long, default_value = "10485760", env = "TREETOP_MAX_REQUEST_SIZE")]
+    pub max_request_size: usize,
+
     #[clap(long)]
     /// Print version information and exit
     pub version: bool,

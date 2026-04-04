@@ -80,7 +80,7 @@ pub struct ApiDoc;
 pub struct HealthOK {}
 
 #[utoipa::path(
-        post,
+        get,
         path = "/api/v1/health",
         responses(
             (status = 200, description = "All systems OK", body = HealthOK),
@@ -104,7 +104,7 @@ pub struct VersionInfo {
 }
 
 #[utoipa::path(
-        post,
+        get,
         path = "/api/v1/version",
         responses(
             (status = 200, description = "Version information", body = VersionInfo),
@@ -120,7 +120,7 @@ pub async fn version(
             version: build_info.core.clone(),
             cedar: build_info.cedar.to_string(),
         },
-        policies: store.lock()?.engine.current_version(),
+        policies: store.read()?.engine.current_version(),
     }))
 }
 
@@ -244,7 +244,7 @@ pub async fn authorize(
     query: web::Query<AuthorizeQuery>,
     req: web::Json<AuthorizeRequest>,
 ) -> Result<web::Json<AuthorizeResponseVariant>, ServiceError> {
-    let store = store.lock()?;
+    let store = store.read()?;
     let engine_snapshot = store.engine.clone();
     let version = engine_snapshot.current_version();
 
@@ -295,7 +295,7 @@ pub async fn get_policies(
     store: web::Data<SharedPolicyStore>,
 ) -> Result<HttpResponse, ServiceError> {
     let format = query.get("format").map(String::as_str);
-    let store = store.lock()?;
+    let store = store.read()?;
 
     if should_return_raw_format(format) {
         Ok(HttpResponse::Ok()
@@ -338,7 +338,7 @@ pub async fn upload_policies(
     }
 
     // Now acquire lock for authentication and applying changes
-    let mut guard = store.lock()?;
+    let mut guard = store.write()?;
 
     if !guard.allow_upload {
         return Err(ServiceError::UploadNotAllowed);
@@ -386,7 +386,7 @@ pub async fn list_policies(
     user: web::Path<String>,
     req: HttpRequest,
 ) -> Result<HttpResponse, ServiceError> {
-    let mut store = store.lock()?;
+    let store = store.read()?;
 
     // User path parameter is just the entity ID
     let entity_id = user.into_inner();
@@ -425,7 +425,7 @@ pub async fn get_status(
     store: web::Data<SharedPolicyStore>,
     parallel: web::Data<ParallelConfig>,
 ) -> Result<web::Json<StatusResponse>, ServiceError> {
-    let store = store.lock()?;
+    let store = store.read()?;
     let status = StatusResponse {
         policy_configuration: store.into(),
         parallel_configuration: *parallel.get_ref(),

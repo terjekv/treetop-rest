@@ -28,29 +28,36 @@ The server supports the following environment variables:
   or comma-separated IPv4/IPv6 addresses/CIDRs (default: `127.0.0.1,::1`).
 - `TREETOP_TRUST_IP_HEADERS`: Whether to trust proxy IP headers (`X-Forwarded-For`, `Forwarded`).
   If `false`, only uses peer address (default: `true`).
+- `TREETOP_MAX_REQUEST_SIZE`: Maximum request body size in bytes (default: `10485760` = 10 MB).
 
 ### Client interaction
 
 From the command line, you can use `curl` to interact with the API. For example, to upload a policy file, you can use:
 
 ```bash
-curl -X POST http://localhost:9999/policies -H "Content-Type: text/plain" -H "X-Upload-Token: <your-upload-token>" --data-binary @testdata/default.cedar
+curl -X POST http://localhost:9999/api/v1/policies -H "Content-Type: text/plain" -H "X-Upload-Token: <your-upload-token>" --data-binary @testdata/default.cedar
 ```
 
 To check a request, you can use:
 
 ```bash
-$ curl -X POST http://localhost:9999/api/v1/check \
+$ curl -X POST 'http://localhost:9999/api/v1/authorize?detail=brief' \
   -H "Content-Type: application/json" \
   -d '{
-    "principal": { "User": { "id": { "id": "alice", "namespace": [] }, "groups": [] } },
-    "action": { "id": { "id": "create_host", "namespace": [] } },
-    "resource": {
-      "Host": {
-        "name": "hostname.example.com",
-        "ip":   "10.0.0.1"
+    "requests": [
+      {
+        "principal": { "User": { "id": "alice", "namespace": ["DNS"], "groups": [{ "id": "admins", "namespace": ["DNS"] }] } },
+        "action": { "id": "create_host", "namespace": ["DNS"] },
+        "resource": {
+          "kind": "Host",
+          "id": "hostname.example.com",
+          "attrs": {
+            "name": { "type": "String", "value": "hostname.example.com" },
+            "ip": { "type": "Ip", "value": "10.0.0.1" }
+          }
+        }
       }
-    }
+    ]
   }'
 ```
 
