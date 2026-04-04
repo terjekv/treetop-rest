@@ -3,7 +3,7 @@ use lru::LruCache;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fmt::{Display, Formatter, Result as FmtResult, Write as FmtWrite};
+use std::fmt::{Display, Formatter, Result as FmtResult, Write};
 use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, RwLock};
@@ -36,7 +36,10 @@ pub trait MetadataParser {
     fn make_hash(content: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hasher.finalize().iter().fold(String::with_capacity(64), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
     }
 
     /// Process the content after parsing, by default does nothing.

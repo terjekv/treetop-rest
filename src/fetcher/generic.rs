@@ -1,5 +1,6 @@
 use reqwest::{Client, header};
 use sha2::{Digest, Sha256};
+use std::fmt::Write;
 use std::{error::Error, time::Duration};
 use tracing::{debug, error, info};
 
@@ -76,7 +77,10 @@ impl<T: Fetchable + Send + 'static> GenericFetcher<T> {
         let new_hash = {
             let mut hasher = Sha256::new();
             hasher.update(body.as_bytes());
-            format!("{:x}", hasher.finalize())
+            hasher.finalize().iter().fold(String::with_capacity(64), |mut s, b| {
+                let _ = write!(s, "{b:02x}");
+                s
+            })
         };
 
         if let Some(old_hash) = self.inner.current_hash()
