@@ -9,8 +9,9 @@ policy management and evaluation.
 - All requests and responses use JSON unless noted.
 - Policy upload requests accept either `application/json` with a `policies` string
   field or `text/plain` containing Cedar policy DSL.
-- Schema upload requests accept either `application/json` with a `schema` string
-  field or `text/plain` containing Cedar schema JSON.
+- Schema upload requests accept `application/json` containing either a `schema`
+  string field or a raw Cedar schema document, or `text/plain` containing Cedar
+  schema JSON.
 
 ## Authentication
 
@@ -18,6 +19,12 @@ policy management and evaluation.
 - Uploads to `/api/v1/policies` and `/api/v1/schema` require `TREETOP_ALLOW_UPLOAD=true`
   to be set on server start and the header `X-Upload-Token: <token>` matching the
   server-generated upload token. This token is printed in the server logs on startup.
+
+## Errors
+
+Fallible endpoints return a JSON object with an `error` message and stable `code`.
+Parse and schema errors may also include `details` containing `line` and `column`
+numbers when the underlying parser reports them.
 
 ## Endpoints
 
@@ -40,6 +47,18 @@ policy management and evaluation.
   not make the service unready.
 - This operational endpoint bypasses the client IP allowlist so an orchestrator can
   probe it from outside the API allowlist.
+
+### GET /openapi.json
+
+- Purpose: machine-readable OpenAPI specification generated from the server route
+  definitions.
+- Response: OpenAPI JSON document for the Treetop REST API.
+- Interactive documentation: Swagger UI is available at `/swagger-ui/` and loads
+  this canonical document.
+- Compatibility: `/api-docs/openapi.json` serves the same document for clients of
+  earlier releases.
+- Static copy: [`docs/openapi.json`](openapi.json). Regenerate it with
+  `cargo run --example openapi > docs/openapi.json`.
 
 ### GET /api/v1/health
 
@@ -202,6 +221,8 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
 - Purpose: upload or replace the Cedar schema (if allowed).
 - Headers: `X-Upload-Token` when upload token is configured and `Content-Type`
   as described above.
+- Request body: a JSON object with a `schema` string, a raw Cedar schema JSON
+  document, or the Cedar schema JSON as `text/plain`.
 - Response: `PoliciesMetadata` with updated schema metadata.
 
 ### GET /api/v1/policies/{user}

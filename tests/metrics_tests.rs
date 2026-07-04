@@ -1,6 +1,6 @@
-use actix_web::{App, test, web};
+use actix_web::{App, http::StatusCode, test, web};
 use std::str::FromStr;
-use std::sync::{Arc, RwLock, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use treetop_core::{Action, Principal, Request, Resource, User};
 use treetop_rest::handlers;
 use treetop_rest::models::AuthorizeRequest;
@@ -395,6 +395,30 @@ async fn test_http_metrics_after_health_request() {
         body_str.contains("http_request_duration_seconds"),
         "HTTP request duration histogram should be present"
     );
+}
+
+#[actix_web::test]
+async fn test_openapi_endpoint_uses_fixed_metrics_path() {
+    let store = create_test_store();
+    let app = test::init_service(create_test_app_with_metrics(store)).await;
+
+    let req = test::TestRequest::get()
+        .uri(handlers::OPENAPI_JSON_PATH)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let req = test::TestRequest::get().uri("/metrics").to_request();
+    let resp = test::call_service(&app, req).await;
+    let body = test::read_body(resp).await;
+    let body = std::str::from_utf8(&body).unwrap();
+
+    assert!(body.lines().any(|line| {
+        line.starts_with("http_requests_total")
+            && line.contains("method=\"GET\"")
+            && line.contains("path=\"/openapi.json\"")
+            && line.contains("status_code=\"200\"")
+    }));
 }
 
 #[actix_web::test]

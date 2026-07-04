@@ -3,7 +3,9 @@
 This is a REST server providing a REST API for [Treetop](https://github.com/terjekv/treetop-core),
 a policy management framework. A CLI interface to the REST API is also provided.
 
-See [docs/api.md](docs/api.md) for the HTTP API reference.
+See [docs/api.md](docs/api.md) for the HTTP API reference. A running server exposes
+the generated OpenAPI document at `/openapi.json` and Swagger UI at `/swagger-ui/`.
+The generated specification is also checked in at [docs/openapi.json](docs/openapi.json).
 
 ## Server startup
 

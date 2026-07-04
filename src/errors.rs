@@ -10,8 +10,7 @@ use utoipa::ToSchema;
 
 use crate::state::PolicyStore;
 
-#[derive(Debug, ToSchema)]
-#[allow(dead_code)]
+#[derive(Debug)]
 pub enum ServiceError {
     LockPoison(String),
     InvalidIp,
@@ -28,16 +27,16 @@ pub enum ServiceError {
     ValidationError(String),
 }
 
-#[derive(Serialize)]
-struct JsonError {
+#[derive(Serialize, ToSchema)]
+pub(crate) struct ErrorResponse {
     error: String,
     code: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    details: Option<JsonErrorDetails>,
+    details: Option<ErrorDetails>,
 }
 
-#[derive(Serialize)]
-struct JsonErrorDetails {
+#[derive(Serialize, ToSchema)]
+struct ErrorDetails {
     line: Option<usize>,
     column: Option<usize>,
 }
@@ -86,7 +85,7 @@ impl ResponseError for ServiceError {
     }
 
     fn error_response(&self) -> HttpResponse {
-        let err = JsonError {
+        let err = ErrorResponse {
             error: self.to_string(),
             code: self.code().to_string(),
             details: self.details(),
@@ -114,7 +113,7 @@ impl ServiceError {
         }
     }
 
-    fn details(&self) -> Option<JsonErrorDetails> {
+    fn details(&self) -> Option<ErrorDetails> {
         let msg = match self {
             ServiceError::CompileError(msg) | ServiceError::SchemaValidationError(msg) => msg,
             _ => return None,
@@ -125,7 +124,7 @@ impl ServiceError {
         let caps = re.captures(msg)?;
         let line = caps.get(1).and_then(|m| m.as_str().parse::<usize>().ok());
         let column = caps.get(2).and_then(|m| m.as_str().parse::<usize>().ok());
-        Some(JsonErrorDetails { line, column })
+        Some(ErrorDetails { line, column })
     }
 }
 

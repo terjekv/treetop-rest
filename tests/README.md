@@ -36,6 +36,11 @@ Unit tests are colocated with the source code using Rust's built-in `#[cfg(test)
   - Invalid input handling (malformed DSL, invalid JSON, bad regex patterns)
   - Metadata preservation across updates
 
+#### Server Tests (`src/bin/server.rs`)
+
+- **Swagger UI configuration**: The production server factory loads the canonical
+  `/openapi.json` document
+
 ### Integration Tests (in `tests/`)
 
 Integration tests are in separate files in the `tests/` directory.
@@ -45,6 +50,7 @@ Integration tests are in separate files in the `tests/` directory.
 Tests for HTTP API endpoints using Actix-web test utilities:
 
 - **Health endpoint** - Service health check
+- **OpenAPI endpoints** - Canonical and compatibility documents
 - **Status endpoint** - Service status and metadata
 - **Check endpoint** - Authorization evaluation
   - Allow decisions
@@ -107,6 +113,11 @@ Tests for Prometheus metrics collection and reporting:
 - **Histogram validation**: Bucket, sum, and count fields for latency histograms
 - **Prometheus format**: HELP and TYPE comments for proper format compliance
 
+#### OpenAPI Documentation Tests (`tests/openapi_docs_tests.rs`)
+
+- **Generated document parity**: The checked-in OpenAPI JSON must match Utoipa output
+- **Regeneration guidance**: Failures identify the command used to refresh the document
+
 ## Running Tests
 
 ### Fuzz Tests
@@ -141,6 +152,7 @@ cargo test --test integration_tests
 cargo test --test cli_parsing_tests
 cargo test --test client_allowlist_tests
 cargo test --test metrics_tests
+cargo test --test openapi_docs_tests
 ```
 
 ### Run Specific Test by Name

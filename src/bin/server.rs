@@ -6,12 +6,15 @@ use tracing_subscriber::EnvFilter;
 use treetop_rest::build_info::build_info;
 use treetop_rest::config::Config;
 use treetop_rest::fetcher::{LabelFetchAdapter, PolicyFetchAdapter, SchemaFetchAdapter};
-use treetop_rest::handlers::AuthorizeRuntimeConfig;
+use treetop_rest::handlers::{AuthorizeRuntimeConfig, OPENAPI_JSON_PATH};
 use treetop_rest::middleware::{ClientAllowlistMiddleware, TracingMiddleware};
 use treetop_rest::state::PolicyStore;
 
-use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
+use utoipa_swagger_ui::{Config as SwaggerUiConfig, SwaggerUi};
+
+fn swagger_ui() -> SwaggerUi {
+    SwaggerUi::new("/swagger-ui/{_:.*}").config(SwaggerUiConfig::new([OPENAPI_JSON_PATH]))
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -105,10 +108,7 @@ async fn main() -> std::io::Result<()> {
                 trust_ip_headers,
             ))
             .wrap(TracingMiddleware::new_with_trust(trust_ip_headers))
-            .service(SwaggerUi::new("/swagger-ui/{_:.*}").url(
-                "/api-docs/openapi.json",
-                treetop_rest::handlers::ApiDoc::openapi(),
-            ))
+            .service(swagger_ui())
             .app_data(actix_web::web::JsonConfig::default().limit(max_request_size))
             .app_data(actix_web::web::PayloadConfig::default().limit(max_request_size))
             .app_data(actix_web::web::Data::new(store.clone()))
@@ -122,4 +122,30 @@ async fn main() -> std::io::Result<()> {
     .shutdown_timeout(30)
     .run()
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{App, http::StatusCode, test};
+
+    #[actix_web::test]
+    async fn swagger_ui_loads_canonical_openapi_document() {
+        let app = test::init_service(
+            App::new()
+                .service(swagger_ui())
+                .configure(treetop_rest::handlers::init),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/swagger-ui/swagger-initializer.js")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = test::read_body(resp).await;
+        let body = std::str::from_utf8(&body).unwrap();
+        assert!(body.contains(r#""url": "/openapi.json""#));
+    }
 }
