@@ -38,6 +38,10 @@ jobs:
           key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
       - name: Build
         run: cargo build --verbose
+      - name: Verify OpenAPI docs
+        run: |
+          cargo run --example openapi > docs/openapi.json
+          git diff --exit-code docs/openapi.json
       - name: Run tests
         run: cargo test --verbose
       - name: Run clippy
@@ -149,4 +153,3 @@ jobs:
             release-artifacts/treetop-server-aarch64-linux-musl.tar.gz
             release-artifacts/treetop-cli-x86_64-linux-musl.tar.gz
             release-artifacts/treetop-cli-aarch64-linux-musl.tar.gz
-

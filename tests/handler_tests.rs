@@ -126,6 +126,20 @@ async fn test_health_endpoint() {
 }
 
 #[actix_web::test]
+async fn test_openapi_json_endpoint() {
+    let app = test::init_service(App::new().configure(handlers::init)).await;
+
+    let req = test::TestRequest::get().uri("/openapi.json").to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert!(resp.status().is_success());
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["openapi"], "3.1.0");
+    assert!(body["paths"]["/api/v1/authorize"].is_object());
+    assert!(body["paths"]["/openapi.json"].is_object());
+}
+
+#[actix_web::test]
 async fn test_get_status_endpoint() {
     let store = create_test_store();
     let parallel = create_test_parallel_config();

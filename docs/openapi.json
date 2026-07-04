@@ -1,0 +1,1569 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "treetop-rest",
+    "description": "REST server and CLI for the Treetop policy management framework",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    },
+    "version": "0.0.7"
+  },
+  "paths": {
+    "/api/v1/authorize": {
+      "post": {
+        "tags": [],
+        "operationId": "authorize",
+        "parameters": [
+          {
+            "name": "detail",
+            "in": "query",
+            "description": "Response detail level: 'brief' (default) or 'full'",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Authorize performed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizeResponseVariant"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "tags": [],
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "All systems OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOK"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/policies": {
+      "get": {
+        "tags": [],
+        "operationId": "get_policies",
+        "responses": {
+          "200": {
+            "description": "Policies retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoliciesDownload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [],
+        "operationId": "upload_policies",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Upload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Policies uploaded successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoliciesMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/policies/{user}": {
+      "get": {
+        "tags": [],
+        "operationId": "list_policies",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "path",
+            "description": "User principal identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groups",
+            "in": "query",
+            "description": "List of group names",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "namespaces",
+            "in": "query",
+            "description": "List of namespaces",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Response format: 'json' (default) or 'raw'/'text' for plain text",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Policies for user retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPolicies"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schema": {
+      "get": {
+        "tags": [],
+        "operationId": "get_schema",
+        "responses": {
+          "200": {
+            "description": "Schema retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaDownload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [],
+        "operationId": "upload_schema",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchemaUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Schema uploaded successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoliciesMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "tags": [],
+        "operationId": "get_status",
+        "responses": {
+          "200": {
+            "description": "Service status retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/version": {
+      "get": {
+        "tags": [],
+        "operationId": "version",
+        "responses": {
+          "200": {
+            "description": "Version information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [],
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "description": "Prometheus metrics"
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": [],
+        "operationId": "openapi_json",
+        "responses": {
+          "200": {
+            "description": "OpenAPI specification for the Treetop REST API"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Action": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/QualifiedId"
+          }
+        ],
+        "description": "An action, possibly with a namespace (e.g. Infra::Action::\"delete_vm\")."
+      },
+      "AttrValue": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "String"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Bool"
+                ]
+              },
+              "value": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Long"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int64"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Ip"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Set"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AttrValue"
+                }
+              }
+            }
+          }
+        ],
+        "description": "Attribute values that can be attached to Cedar entities."
+      },
+      "AuthRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Request",
+            "description": "The actual authorization request"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "context": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Optional request-scoped context values.",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/AttrValue"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
+              },
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Optional client-provided identifier for this request"
+              }
+            }
+          }
+        ],
+        "description": "Single authorization request with optional client-provided ID"
+      },
+      "AuthorizeRequest": {
+        "type": "object",
+        "required": [
+          "requests"
+        ],
+        "properties": {
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuthRequest"
+            },
+            "description": "List of authorization requests to evaluate"
+          }
+        }
+      },
+      "AuthorizeResponse": {
+        "type": "object",
+        "description": "Container for authorization response results with metadata\n\nGeneric over the decision type to support both brief and detailed responses.\nAll fields are private; use accessor methods to retrieve data.",
+        "required": [
+          "results",
+          "version",
+          "successful",
+          "failed"
+        ],
+        "properties": {
+          "failed": {
+            "type": "integer",
+            "description": "Number of failed evaluations",
+            "minimum": 0
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IndexedResult_AuthorizeDecisionDetailed"
+            },
+            "description": "Results for each request with optional client IDs"
+          },
+          "successful": {
+            "type": "integer",
+            "description": "Number of successful evaluations",
+            "minimum": 0
+          },
+          "version": {
+            "$ref": "#/components/schemas/PolicyVersion",
+            "description": "Policy version used for all evaluations"
+          }
+        }
+      },
+      "AuthorizeResponseVariant": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AuthorizeResponse",
+            "description": "Brief response with minimal decision information"
+          },
+          {
+            "$ref": "#/components/schemas/AuthorizeResponse",
+            "description": "Detailed response with full decision reasoning"
+          }
+        ],
+        "description": "Response from the authorize endpoint - either brief or detailed based on query parameter\n\nUses tagged serde enum to deserialize into the correct variant."
+      },
+      "BatchResult_AuthorizeDecisionBrief": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "result",
+              "status"
+            ],
+            "properties": {
+              "result": {
+                "type": "object",
+                "description": "Brief authorization decision response with minimal information",
+                "required": [
+                  "decision",
+                  "version",
+                  "policy_id"
+                ],
+                "properties": {
+                  "decision": {
+                    "$ref": "#/components/schemas/DecisionBrief"
+                  },
+                  "policy_id": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "$ref": "#/components/schemas/PolicyVersion"
+                  }
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "error",
+              "status"
+            ],
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Result of a single batch evaluation - either success or failure"
+      },
+      "BatchResult_AuthorizeDecisionDetailed": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "result",
+              "status"
+            ],
+            "properties": {
+              "result": {
+                "type": "object",
+                "description": "Detailed authorization decision including the matching policy",
+                "required": [
+                  "policy",
+                  "decision",
+                  "version"
+                ],
+                "properties": {
+                  "decision": {
+                    "$ref": "#/components/schemas/DecisionBrief"
+                  },
+                  "policy": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/PermitPolicy"
+                    }
+                  },
+                  "version": {
+                    "$ref": "#/components/schemas/PolicyVersion"
+                  }
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "error",
+              "status"
+            ],
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Result of a single batch evaluation - either success or failure"
+      },
+      "Core": {
+        "type": "object",
+        "required": [
+          "version",
+          "cedar"
+        ],
+        "properties": {
+          "cedar": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "DecisionBrief": {
+        "type": "string",
+        "description": "Brief authorization decision without policy details",
+        "enum": [
+          "Allow",
+          "Deny"
+        ]
+      },
+      "Endpoint": {
+        "type": "object",
+        "description": "Network endpoint URL for policy or label service communication",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "example": "https://example.com/api"
+          }
+        }
+      },
+      "Group": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/QualifiedId"
+          }
+        ],
+        "description": "A group identifier (e.g. Group::\"devs\")."
+      },
+      "Groups": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Group"
+        },
+        "description": "A collection of Group entries."
+      },
+      "HealthOK": {
+        "type": "object"
+      },
+      "IndexedResult_AuthorizeDecisionBrief": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BatchResult_AuthorizeDecisionBrief",
+            "description": "Result of the evaluation (success or error)"
+          },
+          {
+            "type": "object",
+            "required": [
+              "index"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Client-provided identifier for this request (if provided)"
+              },
+              "index": {
+                "type": "integer",
+                "description": "Index of the request in the original batch",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "A single result from a batch operation with its original index and optional client ID"
+      },
+      "IndexedResult_AuthorizeDecisionDetailed": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BatchResult_AuthorizeDecisionDetailed",
+            "description": "Result of the evaluation (success or error)"
+          },
+          {
+            "type": "object",
+            "required": [
+              "index"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Client-provided identifier for this request (if provided)"
+              },
+              "index": {
+                "type": "integer",
+                "description": "Index of the request in the original batch",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "A single result from a batch operation with its original index and optional client ID"
+      },
+      "Metadata_OfLabels": {
+        "type": "object",
+        "required": [
+          "timestamp",
+          "sha256",
+          "size",
+          "entries",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "refresh_frequency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Endpoint"
+              }
+            ]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Metadata_OfPolicies": {
+        "type": "object",
+        "required": [
+          "timestamp",
+          "sha256",
+          "size",
+          "entries",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "refresh_frequency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Endpoint"
+              }
+            ]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Metadata_OfSchema": {
+        "type": "object",
+        "required": [
+          "timestamp",
+          "sha256",
+          "size",
+          "entries",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "refresh_frequency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Endpoint"
+              }
+            ]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ParallelConfig": {
+        "type": "object",
+        "required": [
+          "workers",
+          "cpu_count",
+          "rayon_threads",
+          "par_threshold",
+          "allow_parallel"
+        ],
+        "properties": {
+          "allow_parallel": {
+            "type": "boolean"
+          },
+          "cpu_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "par_threshold": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rayon_threads": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "workers": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "PermitPolicy": {
+        "type": "object",
+        "description": "A permit policy that permitted a specific action on a resource.",
+        "required": [
+          "literal",
+          "json",
+          "cedar_id"
+        ],
+        "properties": {
+          "annotation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cedar_id": {
+            "type": "string"
+          },
+          "json": {},
+          "literal": {
+            "type": "string"
+          }
+        }
+      },
+      "PoliciesDownload": {
+        "type": "object",
+        "description": "Policy data for download",
+        "required": [
+          "policies"
+        ],
+        "properties": {
+          "policies": {
+            "$ref": "#/components/schemas/Metadata_OfPolicies"
+          }
+        }
+      },
+      "PoliciesMetadata": {
+        "type": "object",
+        "description": "Metadata about the policies and labels in the policy store",
+        "required": [
+          "allow_upload",
+          "schema_validation_mode",
+          "policies",
+          "labels",
+          "schema"
+        ],
+        "properties": {
+          "allow_upload": {
+            "type": "boolean"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/Metadata_OfLabels"
+          },
+          "policies": {
+            "$ref": "#/components/schemas/Metadata_OfPolicies"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/Metadata_OfSchema"
+          },
+          "schema_validation_mode": {
+            "type": "string"
+          }
+        }
+      },
+      "PolicyMatch": {
+        "type": "object",
+        "description": "Match metadata for one listed policy.",
+        "required": [
+          "cedar_id",
+          "reasons"
+        ],
+        "properties": {
+          "cedar_id": {
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PolicyMatchReason"
+            }
+          }
+        }
+      },
+      "PolicyMatchReason": {
+        "type": "string",
+        "description": "Why a policy was selected by list policies APIs.",
+        "enum": [
+          "PrincipalEq",
+          "PrincipalIn",
+          "PrincipalAny",
+          "PrincipalIs",
+          "PrincipalIsIn",
+          "ActionEq",
+          "ActionIn",
+          "ActionAny",
+          "ResourceEq",
+          "ResourceIn",
+          "ResourceAny",
+          "ResourceIs",
+          "ResourceIsIn"
+        ]
+      },
+      "PolicyVersion": {
+        "type": "object",
+        "description": "Version metadata for the policy set used during an evaluation.",
+        "required": [
+          "hash",
+          "loaded_at"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string",
+            "description": "Hash of the policy source (e.g. SHA-256 of the policy text)."
+          },
+          "loaded_at": {
+            "type": "string",
+            "description": "When this policy set was loaded into the engine."
+          }
+        }
+      },
+      "Principal": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "User"
+            ],
+            "properties": {
+              "User": {
+                "$ref": "#/components/schemas/User"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "Group"
+            ],
+            "properties": {
+              "Group": {
+                "$ref": "#/components/schemas/Group"
+              }
+            }
+          }
+        ],
+        "description": "A principal for a policy query."
+      },
+      "QualifiedId": {
+        "type": "object",
+        "description": "A fully‐qualified identifier, with zero runtime cost over `(Vec<String>, String)`.",
+        "required": [
+          "id",
+          "namespace"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Request": {
+        "type": "object",
+        "description": "The API-level request, with strongly-typed principal, action, groups, resource, and context.",
+        "required": [
+          "principal",
+          "action",
+          "resource"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/Action"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/Principal"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/Resource"
+          }
+        }
+      },
+      "RequestContextFallbackReason": {
+        "type": "string",
+        "enum": [
+          "no_schema",
+          "schema_incompatible"
+        ]
+      },
+      "RequestContextStatus": {
+        "type": "object",
+        "required": [
+          "supported",
+          "schema_backed"
+        ],
+        "properties": {
+          "fallback_reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RequestContextFallbackReason"
+              }
+            ]
+          },
+          "schema_backed": {
+            "type": "boolean"
+          },
+          "supported": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RequestLimits": {
+        "type": "object",
+        "required": [
+          "max_context_bytes",
+          "max_context_depth",
+          "max_context_keys"
+        ],
+        "properties": {
+          "max_context_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_context_depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_context_keys": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "Resource": {
+        "type": "object",
+        "description": "A resource entity in the Cedar policy model.",
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "attrs": {
+            "type": "object",
+            "description": "Arbitrary attributes to attach to the resource entity",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AttrValue"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string",
+            "description": "Entity id (quotes are added when rendering the Cedar literal)"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Entity type, possibly namespaced: e.g. \"Host\", \"Gateway\", or \"Database::Table\""
+          }
+        }
+      },
+      "SchemaDownload": {
+        "type": "object",
+        "description": "Schema data for download",
+        "required": [
+          "schema"
+        ],
+        "properties": {
+          "schema": {
+            "$ref": "#/components/schemas/Metadata_OfSchema"
+          }
+        }
+      },
+      "SchemaUpload": {
+        "type": "object",
+        "required": [
+          "schema"
+        ],
+        "properties": {
+          "schema": {
+            "type": "string"
+          }
+        }
+      },
+      "SchemaVersionInfo": {
+        "type": "object",
+        "required": [
+          "hash",
+          "loaded_at"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "loaded_at": {
+            "type": "string"
+          }
+        }
+      },
+      "ServiceError": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "LockPoison"
+            ],
+            "properties": {
+              "LockPoison": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "string",
+            "enum": [
+              "InvalidIp"
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "InvalidJsonPayload"
+            ],
+            "properties": {
+              "InvalidJsonPayload": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "string",
+            "enum": [
+              "InvalidTextPayload"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "UploadNotAllowed"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "InvalidUploadToken"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "UploadTokenNotSet"
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "CompileError"
+            ],
+            "properties": {
+              "CompileError": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "SchemaValidationError"
+            ],
+            "properties": {
+              "SchemaValidationError": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "ContextValidationError"
+            ],
+            "properties": {
+              "ContextValidationError": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "EvaluationError"
+            ],
+            "properties": {
+              "EvaluationError": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "ListPoliciesError"
+            ],
+            "properties": {
+              "ListPoliciesError": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "ValidationError"
+            ],
+            "properties": {
+              "ValidationError": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "StatusResponse": {
+        "type": "object",
+        "required": [
+          "policy_configuration",
+          "parallel_configuration"
+        ],
+        "properties": {
+          "parallel_configuration": {
+            "$ref": "#/components/schemas/ParallelConfig"
+          },
+          "policy_configuration": {
+            "$ref": "#/components/schemas/PoliciesMetadata"
+          },
+          "request_context": {
+            "$ref": "#/components/schemas/RequestContextStatus"
+          },
+          "request_limits": {
+            "$ref": "#/components/schemas/RequestLimits"
+          }
+        }
+      },
+      "Upload": {
+        "type": "object",
+        "required": [
+          "policies"
+        ],
+        "properties": {
+          "policies": {
+            "type": "string"
+          }
+        }
+      },
+      "User": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/QualifiedId"
+          },
+          {
+            "type": "object",
+            "required": [
+              "groups"
+            ],
+            "properties": {
+              "groups": {
+                "$ref": "#/components/schemas/Groups"
+              }
+            }
+          }
+        ],
+        "description": "A user principal, possibly with a namespace (e.g. Application::User::\"alice\")."
+      },
+      "UserPolicies": {
+        "type": "object",
+        "description": "Policies associated with a specific user",
+        "required": [
+          "user",
+          "policies",
+          "matches"
+        ],
+        "properties": {
+          "matches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PolicyMatch"
+            }
+          },
+          "policies": {
+            "type": "array",
+            "items": {}
+          },
+          "user": {
+            "type": "string"
+          }
+        }
+      },
+      "VersionInfo": {
+        "type": "object",
+        "required": [
+          "version",
+          "core",
+          "policies"
+        ],
+        "properties": {
+          "core": {
+            "$ref": "#/components/schemas/Core"
+          },
+          "policies": {
+            "$ref": "#/components/schemas/PolicyVersion"
+          },
+          "schema": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SchemaVersionInfo"
+              }
+            ]
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Treetop REST API",
+      "description": "API for Treetop policy management and evaluation"
+    }
+  ]
+}
