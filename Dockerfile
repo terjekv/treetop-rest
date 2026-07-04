@@ -1,5 +1,5 @@
 # Builder stage
-FROM rust:1.92-alpine AS builder
+FROM rust:1.96-alpine AS builder
 WORKDIR /usr/src/treetop-rest
 
 # Accept build args for git info
