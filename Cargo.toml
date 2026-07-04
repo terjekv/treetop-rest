@@ -5,6 +5,7 @@ edition = "2024"
 description = "REST server and CLI for the Treetop policy management framework"
 license = "MIT"
 repository = "https://github.com/terjekv/treetop-rest"
+publish = false
 build = "build.rs"
 autobenches = false
 
