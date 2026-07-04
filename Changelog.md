@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated direct dependencies to current compatible releases, including `lru` 0.18, `tabled` 0.21, and the `vergen` 10 build metadata toolchain.
+- Updated `treetop-core` to version `0.0.18`.
 - Refreshed the full Cargo lockfile to the latest Rust 1.96-compatible dependency graph.
 
 ### Fixed
