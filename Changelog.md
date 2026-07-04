@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2026-07-04
+
+### Changed
+
+- Updated direct dependencies to current compatible releases, including `lru` 0.18, `tabled` 0.21, and the `vergen` 10 build metadata toolchain.
+- Refreshed the full Cargo lockfile to the latest Rust 1.96-compatible dependency graph.
+
+### Fixed
+
+- Migrated the build script to the `vergen` 10 API so release build metadata continues to include Cargo, Rust, build, and Git information.
+
 ## [0.0.6] - 2026-04-04
 
 ### Added

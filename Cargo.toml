@@ -1,6 +1,6 @@
 [package]
 name = "treetop-rest"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2024"
 build = "build.rs"
 autobenches = false
@@ -17,13 +17,13 @@ futures = "0.3"
 futures-util = "0.3"
 ipnet = "2.12"
 itoa = "1.0"
-lru = "0.16"
+lru = "0.18"
 rayon = "1.11"
 regex = "1.12"
 reqwest = { version = "0.13", features = ["json"] }
 rustyline = "18.0"
 serde = "1"
-tabled = "0.20"
+tabled = "0.21"
 serde_json = "1"
 toml = "1.1"
 sha2 = "0.11"
@@ -54,14 +54,15 @@ tempfile = "3.27"
 iai-callgrind = "0.16"
 
 [build-dependencies]
-vergen = { version = "9", features = [
+vergen = { version = "10", features = [
     "emit_and_set",
     "build",
     "cargo",
+    "cargo_metadata",
     "rustc",
     "si",
 ] }
-vergen-gitcl = { version = "9", features = [
+vergen-gitcl = { version = "10", features = [
     "emit_and_set",
     "build",
     "cargo",
