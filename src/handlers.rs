@@ -96,7 +96,8 @@ fn check_upload_auth(
 
 /// Configure routes for the service.
 pub fn init(cfg: &mut web::ServiceConfig) {
-    cfg.route("/api/v1/status", web::get().to(get_status))
+    cfg.route("/openapi.json", web::get().to(openapi_json))
+        .route("/api/v1/status", web::get().to(get_status))
         .route("/api/v1/health", web::get().to(health))
         .route("/api/v1/version", web::get().to(version))
         // New unified endpoint
@@ -125,9 +126,21 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         health,
         version,
         metrics,
+        openapi_json,
     ),
 )]
 pub struct ApiDoc;
+
+#[utoipa::path(
+        get,
+        path = "/openapi.json",
+        responses(
+            (status = 200, description = "OpenAPI specification for the Treetop REST API"),
+        ),
+    )]
+pub async fn openapi_json() -> HttpResponse {
+    HttpResponse::Ok().json(ApiDoc::openapi())
+}
 
 #[derive(Serialize, ToSchema)]
 pub struct HealthOK {}

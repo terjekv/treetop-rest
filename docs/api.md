@@ -21,6 +21,13 @@ policy management and evaluation.
 
 ## Endpoints
 
+### GET /openapi.json
+
+- Purpose: machine-readable OpenAPI specification generated from the server route definitions.
+- Response: OpenAPI JSON document for the Treetop REST API.
+- Static copy: [`docs/openapi.json`](openapi.json). Regenerate it with
+  `cargo run --example openapi > docs/openapi.json`.
+
 ### GET /api/v1/health
 
 - Purpose: liveness probe.
