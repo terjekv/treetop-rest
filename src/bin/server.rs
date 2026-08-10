@@ -74,33 +74,16 @@ async fn main() -> std::io::Result<()> {
 
     if let Some(url) = config.policy_url.clone() {
         let freq = config.update_frequency.unwrap_or(60) as u64;
-        // Create a block to that the lock on the store is released before spawning the adapter
-        // to avoid deadlocks. The alternative would be to use drop(s) to release the lock.
-        {
-            let mut s = store.write().unwrap();
-            s.policies.source = Some(url.clone());
-            s.policies.refresh_frequency = Some(freq as u32);
-        }
         PolicyFetchAdapter::new(store.clone()).spawn(url, freq);
     }
 
     if let Some(hurl) = config.labels_url.clone() {
         let freq = config.labels_refresh.unwrap_or(60) as u64;
-        {
-            let mut s = store.write().unwrap();
-            s.labels.source = Some(hurl.clone());
-            s.labels.refresh_frequency = Some(freq as u32);
-        }
         LabelFetchAdapter::new(store.clone()).spawn(hurl, freq);
     }
 
     if let Some(surl) = config.schema_url.clone() {
         let freq = config.schema_refresh.unwrap_or(60) as u64;
-        {
-            let mut s = store.write().unwrap();
-            s.schema.source = Some(surl.clone());
-            s.schema.refresh_frequency = Some(freq as u32);
-        }
         SchemaFetchAdapter::new(store.clone()).spawn(surl, freq);
     }
 

@@ -290,8 +290,23 @@ pub struct PolicyStore {
     pub labels: Metadata<OfLabels>,
     pub schema: Metadata<OfSchema>,
     pub label_registry_labelers: Vec<Arc<dyn Labeler>>,
+    remote_loads: RemoteLoadStatus,
     list_policies_raw_cache: Mutex<LruCache<ListPoliciesCacheKey, Arc<String>>>,
     list_policies_json_cache: Mutex<LruCache<ListPoliciesCacheKey, Arc<UserPolicies>>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum RemoteSourceKind {
+    Policies,
+    Labels,
+    Schema,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct RemoteLoadStatus {
+    policies: bool,
+    labels: bool,
+    schema: bool,
 }
 
 impl Default for PolicyStore {
@@ -308,6 +323,7 @@ impl Default for PolicyStore {
             labels: Metadata::<OfLabels>::new(String::new(), None, None).unwrap(),
             schema: Metadata::<OfSchema>::new(String::new(), None, None).unwrap(),
             label_registry_labelers: Vec::new(),
+            remote_loads: RemoteLoadStatus::default(),
             list_policies_raw_cache: Mutex::new(LruCache::new(
                 NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap(),
             )),
@@ -333,6 +349,7 @@ impl PolicyStore {
             labels: Metadata::<OfLabels>::new(String::new(), None, None)?,
             schema: Metadata::<OfSchema>::new(String::new(), None, None)?,
             label_registry_labelers: Vec::new(),
+            remote_loads: RemoteLoadStatus::default(),
             list_policies_raw_cache: Mutex::new(LruCache::new(
                 NonZeroUsize::new(LIST_POLICIES_CACHE_LIMIT).unwrap(),
             )),
@@ -346,14 +363,49 @@ impl PolicyStore {
         self.schema_validation_mode = mode;
     }
 
-    /// Whether every configured remote source has supplied at least one valid value.
+    /// Configure a remote source and require a fresh confirmed load for readiness.
+    pub(crate) fn configure_remote_source(
+        &mut self,
+        kind: RemoteSourceKind,
+        source: Endpoint,
+        refresh_frequency: u32,
+    ) {
+        match kind {
+            RemoteSourceKind::Policies => {
+                self.policies.source = Some(source);
+                self.policies.refresh_frequency = Some(refresh_frequency);
+                self.remote_loads.policies = false;
+            }
+            RemoteSourceKind::Labels => {
+                self.labels.source = Some(source);
+                self.labels.refresh_frequency = Some(refresh_frequency);
+                self.remote_loads.labels = false;
+            }
+            RemoteSourceKind::Schema => {
+                self.schema.source = Some(source);
+                self.schema.refresh_frequency = Some(refresh_frequency);
+                self.remote_loads.schema = false;
+            }
+        }
+    }
+
+    /// Record a remote response that was successful, validated, and applied.
+    pub(crate) fn mark_remote_source_loaded(&mut self, kind: RemoteSourceKind) {
+        match kind {
+            RemoteSourceKind::Policies => self.remote_loads.policies = true,
+            RemoteSourceKind::Labels => self.remote_loads.labels = true,
+            RemoteSourceKind::Schema => self.remote_loads.schema = true,
+        }
+    }
+
+    /// Whether every configured remote source has completed a confirmed valid load.
     ///
     /// A source remains ready after its first successful load because the store keeps
     /// serving the last-known-good value when a later refresh fails.
-    pub fn configured_sources_loaded(&self) -> bool {
-        (self.policies.source.is_none() || !self.policies.sha256.is_empty())
-            && (self.labels.source.is_none() || !self.labels.sha256.is_empty())
-            && (self.schema.source.is_none() || !self.schema.sha256.is_empty())
+    pub(crate) fn configured_sources_loaded(&self) -> bool {
+        (self.policies.source.is_none() || self.remote_loads.policies)
+            && (self.labels.source.is_none() || self.remote_loads.labels)
+            && (self.schema.source.is_none() || self.remote_loads.schema)
     }
 
     fn current_schema(&self) -> Result<Option<CedarSchema>, ServiceError> {
@@ -857,6 +909,33 @@ forbid (
             store.request_context_status,
             RequestContextStatus::no_schema()
         );
+    }
+
+    #[test]
+    fn test_remote_readiness_requires_confirmed_load_for_each_source() {
+        let mut store = PolicyStore::new().unwrap();
+        let endpoint = Endpoint::from_str("https://example.com/config").unwrap();
+        assert!(store.configured_sources_loaded());
+
+        store.configure_remote_source(RemoteSourceKind::Policies, endpoint.clone(), 60);
+        store.set_dsl("", None, None).unwrap();
+        assert!(!store.policies.sha256.is_empty());
+        assert!(!store.configured_sources_loaded());
+        store.mark_remote_source_loaded(RemoteSourceKind::Policies);
+        assert!(store.configured_sources_loaded());
+
+        store.configure_remote_source(RemoteSourceKind::Labels, endpoint.clone(), 60);
+        assert!(!store.configured_sources_loaded());
+        store.mark_remote_source_loaded(RemoteSourceKind::Labels);
+        assert!(store.configured_sources_loaded());
+
+        store.configure_remote_source(RemoteSourceKind::Schema, endpoint.clone(), 60);
+        assert!(!store.configured_sources_loaded());
+        store.mark_remote_source_loaded(RemoteSourceKind::Schema);
+        assert!(store.configured_sources_loaded());
+
+        store.configure_remote_source(RemoteSourceKind::Policies, endpoint, 120);
+        assert!(!store.configured_sources_loaded());
     }
 
     #[test]

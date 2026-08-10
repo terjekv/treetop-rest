@@ -171,7 +171,7 @@ async fn test_readyz_endpoint_is_ready_without_remote_sources() {
 }
 
 #[actix_web::test]
-async fn test_readyz_waits_for_initial_remote_load() {
+async fn test_readyz_does_not_treat_local_update_as_remote_load() {
     let mut policy_store = PolicyStore::new().unwrap();
     policy_store.policies.source = Some("https://example.com/policies.cedar".parse().unwrap());
     let store = Arc::new(RwLock::new(policy_store));
@@ -194,7 +194,7 @@ async fn test_readyz_waits_for_initial_remote_load() {
 
     let req = test::TestRequest::get().uri("/readyz").to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
 #[actix_web::test]

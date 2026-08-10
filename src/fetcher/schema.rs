@@ -1,6 +1,6 @@
 use crate::fetcher::generic::{Fetchable, GenericFetcher};
 use crate::models::Endpoint;
-use crate::state::PolicyStore;
+use crate::state::{PolicyStore, RemoteSourceKind};
 use std::sync::{Arc, RwLock};
 
 /// Adapter that replaces the global schema definition.
@@ -16,12 +16,13 @@ impl SchemaFetchAdapter {
 }
 
 impl Fetchable for SchemaFetchAdapter {
-    fn update_store(&mut self, body: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn apply_successful_response(&mut self, body: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut s = self
             .store
             .write()
             .map_err(|e| format!("schema store lock poisoned: {e}"))?;
         s.set_schema(body, None, None)?;
+        s.mark_remote_source_loaded(RemoteSourceKind::Schema);
         Ok(())
     }
 
@@ -40,8 +41,7 @@ impl SchemaFetchAdapter {
         let adapter = self;
         {
             let mut s = adapter.store.write().unwrap();
-            s.schema.source = Some(url.clone());
-            s.schema.refresh_frequency = Some(refresh_secs as u32);
+            s.configure_remote_source(RemoteSourceKind::Schema, url.clone(), refresh_secs as u32);
         }
         GenericFetcher::new(adapter, url.to_string(), refresh_secs).spawn();
     }
