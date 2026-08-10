@@ -5,17 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Migrated performance benchmarks from `iai-callgrind` to Gungraun 0.19.4 and upgraded the reusable benchmark
+  workflow from v1 to v3.
+- Updated the Cargo dependency graph to current Rust 1.97-compatible releases, including Actix Web 4.14.1 and Cedar
+  Policy 4.12.0.
+- Upgraded GitHub Actions dependencies, pinned the release and cross-compilation tools, and added Dependabot coverage
+  for GitHub Actions and container images.
+- Updated the build and runtime containers to Rust 1.97, Alpine 3.24, and miniserve 0.35.0.
+
 ## [0.0.7] - 2026-07-04
 
 ### Changed
 
-- Updated direct dependencies to current compatible releases, including `lru` 0.18, `tabled` 0.21, and the `vergen` 10 build metadata toolchain.
+- Updated direct dependencies to current compatible releases, including `lru` 0.18, `tabled` 0.21, and the
+  `vergen` 10 build metadata toolchain.
 - Updated `treetop-core` to version `0.0.18`.
 - Refreshed the full Cargo lockfile to the latest Rust 1.96-compatible dependency graph.
 
 ### Fixed
 
-- Migrated the build script to the `vergen` 10 API so release build metadata continues to include Cargo, Rust, build, and Git information.
+- Migrated the build script to the `vergen` 10 API so release build metadata continues to include Cargo, Rust, build,
+  and Git information.
 
 ## [0.0.6] - 2026-04-04
 
@@ -29,7 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `treetop-core` to version `0.0.17`.
 - Updated direct Cedar dependencies to the `4.9` line used by the new core release.
 - Uploaded schemas now participate in live runtime evaluation when compatible with the active policies.
-- In permissive schema mode, incompatible schema uploads are retained as metadata while evaluation falls back to a schema-free engine.
+- In permissive schema mode, incompatible schema uploads are retained as metadata while evaluation falls back to a
+  schema-free engine.
 - CLI `status` output now shows whether request-context evaluation is schema-backed or running in fallback mode.
 
 ### Fixed

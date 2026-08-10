@@ -1,6 +1,6 @@
 services:
   cedar-server:
-    image: svenstaro/miniserve
+    image: svenstaro/miniserve:0.35.0
     ports:
       - "8080:8080"
     volumes:

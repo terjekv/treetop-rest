@@ -1,4 +1,4 @@
-use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use gungraun::{library_benchmark, library_benchmark_group, main};
 use treetop_rest::cli::matrix::expand_matrix;
 
 #[library_benchmark]

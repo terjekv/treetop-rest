@@ -5,7 +5,7 @@ use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::test::TestRequest;
 use actix_web::{Error, HttpResponse};
 use futures::executor::block_on;
-use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use gungraun::{library_benchmark, library_benchmark_group, main};
 use std::sync::Once;
 use treetop_rest::middleware::TracingMiddleware;
 

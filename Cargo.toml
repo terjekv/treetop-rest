@@ -10,31 +10,31 @@ build = "build.rs"
 autobenches = false
 
 [dependencies]
-actix-service = "2.0"
-actix-web = "4.13"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.6", features = ["derive", "env"] }
-colored = "3"
-dirs = "6"
-env_logger = "0.11"
-futures = "0.3"
-futures-util = "0.3"
-ipnet = "2.12"
-itoa = "1.0"
-lru = "0.18"
-rayon = "1.11"
-regex = "1.12"
-reqwest = { version = "0.13", features = ["json"] }
-rustyline = "18.0"
-serde = "1"
-tabled = "0.21"
-serde_json = "1"
-toml = "1.1"
-sha2 = "0.11"
-tokio = { version = "1.51", features = ["full"] }
-tracing = "0.1"
-tracing-actix-web = "0.7"
-tracing-subscriber = { version = "0.3", features = [
+actix-service = "2.0.3"
+actix-web = "4.14.1"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.6", features = ["derive", "env"] }
+colored = "3.1.1"
+dirs = "6.0.0"
+env_logger = "0.11.11"
+futures = "0.3.33"
+futures-util = "0.3.33"
+ipnet = "2.12.1"
+itoa = "1.0.18"
+lru = "0.18.2"
+rayon = "1.12.0"
+regex = "1.13.1"
+reqwest = { version = "0.13.4", features = ["json"] }
+rustyline = "18.0.1"
+serde = "1.0.229"
+tabled = "0.21.0"
+serde_json = "1.0.151"
+toml = "1.1.4"
+sha2 = "0.11.0"
+tokio = { version = "1.53.1", features = ["full"] }
+tracing = "0.1.44"
+tracing-actix-web = "0.7.22"
+tracing-subscriber = { version = "0.3.23", features = [
     "chrono",
     "env-filter",
     "json",
@@ -42,23 +42,23 @@ tracing-subscriber = { version = "0.3", features = [
     "serde_json",
 ] }
 treetop-core = { version = "0.0.18", features = ["observability"] }
-prometheus = "0.14"
-url = { version = "2.5", features = ["serde"] }
-utoipa = { version = "5.4", features = ["actix_extras", "chrono", "yaml"] }
-utoipa-swagger-ui = { version = "9.0", features = ["actix-web", "vendored"] }
-uuid = { version = "1", features = ["v4"] }
-anyhow = "1"
-cedar-policy = "4.9"
+prometheus = "0.14.0"
+url = { version = "2.5.8", features = ["serde"] }
+utoipa = { version = "5.5.0", features = ["actix_extras", "chrono", "yaml"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["actix-web", "vendored"] }
+uuid = { version = "1.24.0", features = ["v4"] }
+anyhow = "1.0.104"
+cedar-policy = "4.12.0"
 
 [dev-dependencies]
-actix-rt = "2.11"
-actix-http = "3"
-rstest = "0.26"
-tempfile = "3.27"
-iai-callgrind = "0.16"
+actix-rt = "2.11.0"
+actix-http = "3.13.3"
+rstest = "0.26.1"
+tempfile = "3.27.0"
+gungraun = "0.19.4"
 
 [build-dependencies]
-vergen = { version = "10", features = [
+vergen = { version = "10.0.2", features = [
     "emit_and_set",
     "build",
     "cargo",
@@ -66,7 +66,7 @@ vergen = { version = "10", features = [
     "rustc",
     "si",
 ] }
-vergen-gitcl = { version = "10", features = [
+vergen-gitcl = { version = "10.0.2", features = [
     "emit_and_set",
     "build",
     "cargo",

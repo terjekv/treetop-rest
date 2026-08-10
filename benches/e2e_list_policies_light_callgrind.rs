@@ -1,11 +1,11 @@
 use actix_http::Request as HttpRequest;
-use actix_service::boxed::{service as box_service, BoxService};
+use actix_service::boxed::{BoxService, service as box_service};
 use actix_web::body::BoxBody;
 use actix_web::dev::ServiceResponse;
-use actix_web::{test, web, App};
-use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use actix_web::{App, test, web};
+use gungraun::{library_benchmark, library_benchmark_group, main};
 use std::str::FromStr;
-use std::sync::{Arc, RwLock, Once};
+use std::sync::{Arc, Once, RwLock};
 use treetop_rest::config::ClientAllowlist;
 use treetop_rest::handlers;
 use treetop_rest::middleware::{ClientAllowlistMiddleware, TracingMiddleware};
@@ -51,7 +51,10 @@ fn setup_list_light() -> BenchCtx {
             .wrap(ClientAllowlistMiddleware::new_with_trust(allowlist, true))
             .wrap(TracingMiddleware::new_with_trust(true))
             .app_data(web::Data::new(store))
-            .route("/api/v1/policies/{user}", web::get().to(handlers::list_policies)),
+            .route(
+                "/api/v1/policies/{user}",
+                web::get().to(handlers::list_policies),
+            ),
     ));
     let app = box_service(app);
 

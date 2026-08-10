@@ -1,5 +1,5 @@
 use actix_web::test::TestRequest;
-use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use gungraun::{library_benchmark, library_benchmark_group, main};
 use treetop_rest::middleware::extract_client_ip_for_bench;
 
 #[library_benchmark]

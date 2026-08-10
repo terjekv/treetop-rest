@@ -1,4 +1,4 @@
-use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use gungraun::{library_benchmark, library_benchmark_group, main};
 use treetop_rest::state::{PolicyStore, parse_labels};
 
 const LABELS_JSON: &str = include_str!("../testdata/labels.json");

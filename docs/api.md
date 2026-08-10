@@ -226,8 +226,10 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
 - Context behavior:
   - `context` is fully evaluated when supplied.
   - In `strict` schema mode, sending `context` without an uploaded schema fails that request.
-  - In `permissive` mode, context can still be evaluated when runtime has fallen back to a schema-free engine, but `/api/v1/status.request_context` will report the fallback state.
-  - Context object values must use the same `AttrValue` encoding as resource attributes. Flat strings, booleans, numbers, and arrays are accepted directly by the CLI context file loader.
+  - In `permissive` mode, context can still be evaluated when runtime has fallen back to a schema-free engine, but
+    `/api/v1/status.request_context` will report the fallback state.
+  - Context object values must use the same `AttrValue` encoding as resource attributes. Flat strings, booleans,
+    numbers, and arrays are accepted directly by the CLI context file loader.
 
 **Example request:**
 
@@ -383,4 +385,5 @@ curl -X POST http://localhost:9999/api/v1/authorize \
 3. **Consistency**: All requests in a batch are guaranteed to be evaluated against the same policy version
 4. **Indexing**: Use the `index` field or your results to correlate responses with requests,
 or use the optional `id` field for easier tracking
-5. **Runtime visibility**: Inspect `/api/v1/status.request_context` to see whether evaluation is currently schema-backed or in permissive fallback mode
+5. **Runtime visibility**: Inspect `/api/v1/status.request_context` to see whether evaluation is currently schema-backed
+   or in permissive fallback mode
