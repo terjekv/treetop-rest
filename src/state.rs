@@ -346,6 +346,16 @@ impl PolicyStore {
         self.schema_validation_mode = mode;
     }
 
+    /// Whether every configured remote source has supplied at least one valid value.
+    ///
+    /// A source remains ready after its first successful load because the store keeps
+    /// serving the last-known-good value when a later refresh fails.
+    pub fn configured_sources_loaded(&self) -> bool {
+        (self.policies.source.is_none() || !self.policies.sha256.is_empty())
+            && (self.labels.source.is_none() || !self.labels.sha256.is_empty())
+            && (self.schema.source.is_none() || !self.schema.sha256.is_empty())
+    }
+
     fn current_schema(&self) -> Result<Option<CedarSchema>, ServiceError> {
         if self.schema.content.is_empty() {
             return Ok(None);
