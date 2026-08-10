@@ -1,4 +1,4 @@
-use actix_web::{App, test, web};
+use actix_web::{App, http::StatusCode, http::header, test, web};
 use rstest::rstest;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -123,6 +123,95 @@ async fn test_health_endpoint() {
     let req = test::TestRequest::get().uri("/api/v1/health").to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
+}
+
+#[actix_web::test]
+async fn test_livez_endpoint_is_dependency_free() {
+    let store = Arc::new(RwLock::new(PolicyStore::new().unwrap()));
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store.clone()))
+            .route("/livez", web::get().to(handlers::livez)),
+    )
+    .await;
+
+    let _write_guard = store.write().unwrap();
+    let req = test::TestRequest::get().uri("/livez").to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
+    assert_eq!(
+        test::read_body(resp).await,
+        web::Bytes::from_static(b"ok\n")
+    );
+}
+
+#[actix_web::test]
+async fn test_readyz_endpoint_is_ready_without_remote_sources() {
+    let store = Arc::new(RwLock::new(PolicyStore::new().unwrap()));
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/readyz", web::get().to(handlers::readyz)),
+    )
+    .await;
+
+    let req = test::TestRequest::get().uri("/readyz").to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        test::read_body(resp).await,
+        web::Bytes::from_static(b"ok\n")
+    );
+}
+
+#[actix_web::test]
+async fn test_readyz_does_not_treat_local_update_as_remote_load() {
+    let mut policy_store = PolicyStore::new().unwrap();
+    policy_store.policies.source = Some("https://example.com/policies.cedar".parse().unwrap());
+    let store = Arc::new(RwLock::new(policy_store));
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store.clone()))
+            .route("/readyz", web::get().to(handlers::readyz)),
+    )
+    .await;
+
+    let req = test::TestRequest::get().uri("/readyz").to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        test::read_body(resp).await,
+        web::Bytes::from_static(b"not ready\n")
+    );
+
+    store.write().unwrap().set_dsl("", None, None).unwrap();
+
+    let req = test::TestRequest::get().uri("/readyz").to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[actix_web::test]
+async fn test_readyz_fails_fast_while_store_is_busy() {
+    let store = Arc::new(RwLock::new(PolicyStore::new().unwrap()));
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store.clone()))
+            .route("/readyz", web::get().to(handlers::readyz)),
+    )
+    .await;
+
+    let _write_guard = store.write().unwrap();
+    let req = test::TestRequest::get().uri("/readyz").to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
 #[actix_web::test]

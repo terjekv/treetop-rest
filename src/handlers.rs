@@ -1,4 +1,4 @@
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, http::header, web};
 use prometheus::Registry;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -96,7 +96,9 @@ fn check_upload_auth(
 
 /// Configure routes for the service.
 pub fn init(cfg: &mut web::ServiceConfig) {
-    cfg.route("/api/v1/status", web::get().to(get_status))
+    cfg.route("/livez", web::get().to(livez))
+        .route("/readyz", web::get().to(readyz))
+        .route("/api/v1/status", web::get().to(get_status))
         .route("/api/v1/health", web::get().to(health))
         .route("/api/v1/version", web::get().to(version))
         // New unified endpoint
@@ -122,6 +124,8 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         upload_schema,
         list_policies,
         get_status,
+        livez,
+        readyz,
         health,
         version,
         metrics,
@@ -132,11 +136,52 @@ pub struct ApiDoc;
 #[derive(Serialize, ToSchema)]
 pub struct HealthOK {}
 
+fn probe_response(ready: bool) -> HttpResponse {
+    let mut response = if ready {
+        HttpResponse::Ok()
+    } else {
+        HttpResponse::ServiceUnavailable()
+    };
+
+    response
+        .insert_header((header::CACHE_CONTROL, "no-store"))
+        .content_type("text/plain; charset=utf-8")
+        .body(if ready { "ok\n" } else { "not ready\n" })
+}
+
+#[utoipa::path(
+        get,
+        path = "/livez",
+        responses(
+            (status = 200, description = "Process is live", body = String, content_type = "text/plain"),
+        ),
+    )]
+pub async fn livez() -> HttpResponse {
+    probe_response(true)
+}
+
+#[utoipa::path(
+        get,
+        path = "/readyz",
+        responses(
+            (status = 200, description = "Service is ready to accept traffic", body = String, content_type = "text/plain"),
+            (status = 503, description = "Service is not ready to accept traffic", body = String, content_type = "text/plain"),
+        ),
+    )]
+pub async fn readyz(store: web::Data<SharedPolicyStore>) -> HttpResponse {
+    let ready = store
+        .try_read()
+        .map(|store| store.configured_sources_loaded())
+        .unwrap_or(false);
+
+    probe_response(ready)
+}
+
 #[utoipa::path(
         get,
         path = "/api/v1/health",
         responses(
-            (status = 200, description = "All systems OK", body = HealthOK),
+            (status = 200, description = "Process is live (legacy endpoint)", body = HealthOK),
         ),
     )]
 pub async fn health() -> Result<web::Json<HealthOK>, ServiceError> {

@@ -21,9 +21,30 @@ policy management and evaluation.
 
 ## Endpoints
 
+### GET /livez
+
+- Purpose: Kubernetes-style liveness probe. A successful response means the HTTP
+  worker is alive; the probe deliberately does not depend on remote configuration.
+- Response: `ok` as plain text with HTTP 200.
+- This operational endpoint bypasses the client IP allowlist so an orchestrator can
+  probe it from outside the API allowlist.
+
+### GET /readyz
+
+- Purpose: Kubernetes-style readiness probe. A successful response means the policy
+  store is available and every configured remote policy, labels, and schema source
+  has completed at least one valid load.
+- Response: `ok` as plain text with HTTP 200 when ready, or `not ready` with HTTP 503.
+- The check does not make network requests. After an initial successful load, a later
+  remote fetch failure continues serving the last-known-good configuration and does
+  not make the service unready.
+- This operational endpoint bypasses the client IP allowlist so an orchestrator can
+  probe it from outside the API allowlist.
+
 ### GET /api/v1/health
 
-- Purpose: liveness probe.
+- Purpose: legacy liveness probe retained for compatibility. New deployments should
+  use `/livez` and `/readyz`.
 - Response: `{}` with HTTP 200.
 
 ### GET /api/v1/version

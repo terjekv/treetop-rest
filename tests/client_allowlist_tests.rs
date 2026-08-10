@@ -52,6 +52,30 @@ async fn rejects_non_whitelisted_ipv4() {
 }
 
 #[actix_web::test]
+async fn operational_probes_bypass_client_allowlist() {
+    let app = test::init_service(
+        App::new()
+            .wrap(ClientAllowlistMiddleware::new_with_trust(
+                ClientAllowlist::from_str("10.0.0.0/24").unwrap(),
+                true,
+            ))
+            .route("/livez", web::get().to(ok_handler))
+            .route("/readyz", web::get().to(ok_handler)),
+    )
+    .await;
+
+    for path in ["/livez", "/readyz"] {
+        let req = test::TestRequest::get()
+            .uri(path)
+            .insert_header(("x-forwarded-for", "192.168.1.10"))
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+}
+
+#[actix_web::test]
 async fn allows_ipv6_in_range() {
     let app = test::init_service(
         App::new()

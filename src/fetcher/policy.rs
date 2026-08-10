@@ -1,6 +1,6 @@
 use crate::fetcher::generic::{Fetchable, GenericFetcher};
 use crate::models::Endpoint;
-use crate::state::PolicyStore;
+use crate::state::{PolicyStore, RemoteSourceKind};
 use std::sync::{Arc, RwLock};
 
 /// Wraps a PolicyStore to implement Fetchable
@@ -16,12 +16,13 @@ impl PolicyFetchAdapter {
 }
 
 impl Fetchable for PolicyFetchAdapter {
-    fn update_store(&mut self, body: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn apply_successful_response(&mut self, body: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut s = self
             .store
             .write()
             .map_err(|e| format!("policy store lock poisoned: {e}"))?;
         s.set_dsl(body, None, None)?;
+        s.mark_remote_source_loaded(RemoteSourceKind::Policies);
         Ok(())
     }
 
@@ -40,8 +41,7 @@ impl PolicyFetchAdapter {
         let adapter = self;
         {
             let mut s = adapter.store.write().unwrap();
-            s.policies.source = Some(url.clone());
-            s.policies.refresh_frequency = Some(refresh_secs as u32);
+            s.configure_remote_source(RemoteSourceKind::Policies, url.clone(), refresh_secs as u32);
         }
         GenericFetcher::new(adapter, url.to_string(), refresh_secs).spawn();
     }

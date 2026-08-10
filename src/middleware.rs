@@ -85,10 +85,15 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let allowlist = self.allowlist.clone();
         let trust = self.trust_ip_headers;
+        let is_probe = matches!(req.path(), "/livez" | "/readyz");
         let client_ip = extract_client_ip(&req, trust);
         let fut = self.service.call(req);
 
         Box::pin(async move {
+            if is_probe {
+                return fut.await;
+            }
+
             match client_ip {
                 Some(ip) if allowlist.allows(ip) => fut.await,
                 Some(ip) => {
