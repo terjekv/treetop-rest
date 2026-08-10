@@ -1,7 +1,7 @@
-use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use actix_web::test::TestRequest;
+use gungraun::{library_benchmark, library_benchmark_group, main};
 use std::net::SocketAddr;
 use treetop_rest::middleware::extract_client_ip_for_bench;
-use actix_web::test::TestRequest;
 
 #[library_benchmark]
 fn extract_ip_peer_addr_only() {

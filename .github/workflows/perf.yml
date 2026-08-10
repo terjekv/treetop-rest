@@ -9,10 +9,11 @@ permissions:
   pull-requests: write
 
 jobs:
-  iai-callgrind:
-    name: iai-callgrind PR Bench
-    uses: terjekv/github-action-iai-callgrind/.github/workflows/iai-callgrind-pr-bench.yml@v1
+  rust-pr-bench:
+    name: Gungraun PR Bench
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v3
     with:
+      backend: gungraun
       auto_discover: true
       feature_sets_json: >-
         [

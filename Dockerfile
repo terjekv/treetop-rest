@@ -1,5 +1,5 @@
 # Builder stage
-FROM rust:1.96-alpine AS builder
+FROM rust:1.97-alpine AS builder
 WORKDIR /usr/src/treetop-rest
 
 # Accept build args for git info
@@ -28,7 +28,7 @@ COPY testdata ./testdata
 RUN cargo build --release --bin treetop-server
 
 # Runtime stage
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN apk add --no-cache \
     ca-certificates \
