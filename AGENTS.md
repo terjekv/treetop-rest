@@ -139,8 +139,9 @@
 - Sign every commit. Keep repository signing configuration enabled and do not bypass it with `--no-gpg-sign`.
 - Write pull request descriptions that explain the behavior, rationale, compatibility impact, and validation performed.
 - Before merging, resolve actionable review threads and verify required checks on the final head commit.
-- Squash-merge ordinary pull requests. Use the substantive pull request description as the squash commit body,
-  preserving rationale and behavior notes while removing verification-only sections and checklists.
+- Squash-merge ordinary pull requests. Use the detailed pull request description as the squash commit body. Preserve
+  the substantive summary, rationale, behavior notes, and issue references, but remove verification-only sections
+  such as test commands, checklists, and `## Verification` before merging.
 
 ## Change Discipline
 
