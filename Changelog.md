@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `treetop-core` to version `0.0.19`.
 - Migrated performance benchmarks from `iai-callgrind` to Gungraun 0.19.4 and upgraded the reusable benchmark
   workflow from v1 to v3.
 - Updated the Cargo dependency graph to current Rust 1.97-compatible releases, including Actix Web 4.14.1 and Cedar
