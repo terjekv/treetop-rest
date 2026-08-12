@@ -3,15 +3,22 @@ use prometheus::Registry;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tracing::debug;
 use treetop_core::PolicyVersion;
 use url::form_urlencoded;
-use utoipa::{OpenApi, ToSchema};
+use utoipa::{
+    Modify, OpenApi, PartialSchema, ToSchema,
+    openapi::{
+        RefOr,
+        schema::{AnyOfBuilder, ObjectBuilder, Schema},
+        security::{ApiKey, ApiKeyValue, SecurityScheme},
+    },
+};
 
 use crate::build_info::build_info;
 use crate::config::SchemaValidationMode;
-use crate::errors::ServiceError;
+use crate::errors::{ErrorResponse, ServiceError};
 use crate::metrics;
 use crate::models::{
     AuthRequest, AuthorizeBriefResponse, AuthorizeDecisionBrief, AuthorizeDecisionDetailed,
@@ -21,6 +28,11 @@ use crate::models::{
 };
 use crate::parallel::ParallelConfig;
 use crate::state::SharedPolicyStore;
+
+/// Canonical HTTP path for the generated OpenAPI document.
+pub const OPENAPI_JSON_PATH: &str = "/openapi.json";
+const LEGACY_OPENAPI_JSON_PATH: &str = "/api-docs/openapi.json";
+const UPLOAD_TOKEN_SECURITY_SCHEME: &str = "upload_token";
 
 fn parse_query_params(req: &HttpRequest) -> (Vec<String>, Vec<String>, Option<String>) {
     let mut groups = Vec::new();
@@ -48,10 +60,33 @@ struct Upload {
     policies: String,
 }
 
-#[derive(Deserialize, ToSchema)]
-struct SchemaUpload {
-    schema: String,
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SchemaUpload {
+    Wrapped { schema: String },
+    Raw(serde_json::Value),
 }
+
+impl PartialSchema for SchemaUpload {
+    fn schema() -> RefOr<Schema> {
+        AnyOfBuilder::new()
+            .item(
+                ObjectBuilder::new()
+                    .property("schema", String::schema())
+                    .required("schema")
+                    .description(Some(
+                        "Wrapper containing a Cedar schema encoded as a JSON string",
+                    )),
+            )
+            .item(ObjectBuilder::new().description(Some("Raw Cedar schema JSON document")))
+            .description(Some(
+                "A Cedar schema supplied as either a JSON wrapper or a raw JSON document",
+            ))
+            .into()
+    }
+}
+
+impl ToSchema for SchemaUpload {}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 pub struct AuthorizeRuntimeConfig {
@@ -100,6 +135,8 @@ fn check_upload_auth(
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.route("/livez", web::get().to(livez))
         .route("/readyz", web::get().to(readyz))
+        .route(OPENAPI_JSON_PATH, web::get().to(openapi_json))
+        .route(LEGACY_OPENAPI_JSON_PATH, web::get().to(openapi_json))
         .route("/api/v1/status", web::get().to(get_status))
         .route("/api/v1/health", web::get().to(health))
         .route("/api/v1/version", web::get().to(version))
@@ -131,9 +168,47 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         health,
         version,
         metrics,
+        openapi_json,
     ),
+    modifiers(&UploadTokenSecurity),
 )]
 pub struct ApiDoc;
+
+struct UploadTokenSecurity;
+
+impl Modify for UploadTokenSecurity {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        openapi
+            .components
+            .get_or_insert_default()
+            .add_security_scheme(
+                UPLOAD_TOKEN_SECURITY_SCHEME,
+                SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
+                    "X-Upload-Token",
+                    "Token printed at startup when uploads are enabled",
+                ))),
+            );
+    }
+}
+
+static OPENAPI_DOCUMENT: LazyLock<utoipa::openapi::OpenApi> = LazyLock::new(ApiDoc::openapi);
+
+/// Return the generated document shared by the HTTP endpoint and static export.
+pub fn openapi_document() -> &'static utoipa::openapi::OpenApi {
+    &OPENAPI_DOCUMENT
+}
+
+#[utoipa::path(
+        get,
+        tag = "Treetop REST API",
+        path = "/openapi.json",
+        responses(
+            (status = 200, description = "OpenAPI specification for the Treetop REST API", content_type = "application/json"),
+        ),
+    )]
+pub async fn openapi_json() -> HttpResponse {
+    HttpResponse::Ok().json(openapi_document())
+}
 
 #[derive(Serialize, ToSchema)]
 pub struct HealthOK {}
@@ -153,6 +228,7 @@ fn probe_response(ready: bool) -> HttpResponse {
 
 #[utoipa::path(
         get,
+        tag = "Treetop REST API",
         path = "/livez",
         responses(
             (status = 200, description = "Process is live", body = String, content_type = "text/plain"),
@@ -164,6 +240,7 @@ pub async fn livez() -> HttpResponse {
 
 #[utoipa::path(
         get,
+        tag = "Treetop REST API",
         path = "/readyz",
         responses(
             (status = 200, description = "Service is ready to accept traffic", body = String, content_type = "text/plain"),
@@ -181,6 +258,7 @@ pub async fn readyz(store: web::Data<SharedPolicyStore>) -> HttpResponse {
 
 #[utoipa::path(
         get,
+        tag = "Treetop REST API",
         path = "/api/v1/health",
         responses(
             (status = 200, description = "Process is live (legacy endpoint)", body = HealthOK),
@@ -213,6 +291,7 @@ pub struct SchemaVersionInfo {
 
 #[utoipa::path(
         get,
+        tag = "Treetop REST API",
         path = "/api/v1/version",
         responses(
             (status = 200, description = "Version information", body = VersionInfo),
@@ -461,6 +540,7 @@ pub struct AuthorizeQuery {
 
 #[utoipa::path(
         post,
+        tag = "Treetop REST API",
         path = "/api/v1/authorize",
         request_body(
             content = AuthorizeRequest,
@@ -471,8 +551,8 @@ pub struct AuthorizeQuery {
         ),
         responses(
             (status = 200, description = "Authorize performed successfully", body = AuthorizeResponseVariant),
-            (status = 400, description = "Bad request", body = ServiceError),
-            (status = 500, description = "Internal server error", body = ServiceError)
+            (status = 400, description = "Bad request", body = ErrorResponse),
+            (status = 500, description = "Internal server error", body = ErrorResponse)
         ),
     )]
 pub async fn authorize(
@@ -538,11 +618,18 @@ pub async fn authorize(
 
 #[utoipa::path(
         get,
+        tag = "Treetop REST API",
         path = "/api/v1/policies",
+        params(
+            ("format" = Option<String>, Query, description = "Response format: 'json' (default) or 'raw'/'text' for plain text"),
+        ),
         responses(
-            (status = 200, description = "Policies retrieved successfully", body = PoliciesDownload),
-            (status = 400, description = "Bad request", body = ServiceError),
-            (status = 500, description = "Internal server error", body = ServiceError)
+            (status = 200, description = "Policies retrieved successfully", content(
+                (PoliciesDownload = "application/json"),
+                (String = "text/plain")
+            )),
+            (status = 400, description = "Bad request", body = ErrorResponse),
+            (status = 500, description = "Internal server error", body = ErrorResponse)
         ),
     )]
 pub async fn get_policies(
@@ -565,12 +652,21 @@ pub async fn get_policies(
 
 #[utoipa::path(
         post,
+        tag = "Treetop REST API",
         path = "/api/v1/policies",
-        request_body = Upload,
+        request_body(
+            description = "Cedar policies as a JSON wrapper or plain Cedar text",
+            content(
+                (Upload = "application/json"),
+                (String = "text/plain")
+            )
+        ),
+        security(("upload_token" = [])),
         responses(
             (status = 200, description = "Policies uploaded successfully", body = PoliciesMetadata),
-            (status = 400, description = "Bad request", body = ServiceError),
-            (status = 500, description = "Internal server error", body = ServiceError)
+            (status = 400, description = "Bad request", body = ErrorResponse),
+            (status = 403, description = "Uploads are disabled or the upload token is invalid", body = ErrorResponse),
+            (status = 500, description = "Internal server error", body = ErrorResponse)
         ),
     )]
 pub async fn upload_policies(
@@ -613,11 +709,18 @@ pub async fn upload_policies(
 
 #[utoipa::path(
         get,
+        tag = "Treetop REST API",
         path = "/api/v1/schema",
+        params(
+            ("format" = Option<String>, Query, description = "Response format: 'json' (default) or 'raw'/'text' for plain text"),
+        ),
         responses(
-            (status = 200, description = "Schema retrieved successfully", body = SchemaDownload),
-            (status = 400, description = "Bad request", body = ServiceError),
-            (status = 500, description = "Internal server error", body = ServiceError)
+            (status = 200, description = "Schema retrieved successfully", content(
+                (SchemaDownload = "application/json"),
+                (String = "text/plain")
+            )),
+            (status = 400, description = "Bad request", body = ErrorResponse),
+            (status = 500, description = "Internal server error", body = ErrorResponse)
         ),
     )]
 pub async fn get_schema(
@@ -640,12 +743,21 @@ pub async fn get_schema(
 
 #[utoipa::path(
         post,
+        tag = "Treetop REST API",
         path = "/api/v1/schema",
-        request_body = SchemaUpload,
+        request_body(
+            description = "Cedar schema as a JSON wrapper, raw JSON document, or plain text",
+            content(
+                (SchemaUpload = "application/json"),
+                (String = "text/plain")
+            )
+        ),
+        security(("upload_token" = [])),
         responses(
             (status = 200, description = "Schema uploaded successfully", body = PoliciesMetadata),
-            (status = 400, description = "Bad request", body = ServiceError),
-            (status = 500, description = "Internal server error", body = ServiceError)
+            (status = 400, description = "Bad request", body = ErrorResponse),
+            (status = 403, description = "Uploads are disabled or the upload token is invalid", body = ErrorResponse),
+            (status = 500, description = "Internal server error", body = ErrorResponse)
         ),
     )]
 pub async fn upload_schema(
@@ -661,13 +773,10 @@ pub async fn upload_schema(
 
     let content_type = req.content_type();
     let schema_string = if content_type.starts_with("application/json") {
-        match serde_json::from_slice::<SchemaUpload>(&body) {
-            Ok(upload) => upload.schema,
-            Err(_) => {
-                let value: serde_json::Value = serde_json::from_slice(&body)?;
-                serde_json::to_string(&value)
-                    .map_err(|e| ServiceError::InvalidJsonPayload(e.to_string()))?
-            }
+        match serde_json::from_slice::<SchemaUpload>(&body)? {
+            SchemaUpload::Wrapped { schema } => schema,
+            SchemaUpload::Raw(value) => serde_json::to_string(&value)
+                .map_err(|e| ServiceError::InvalidJsonPayload(e.to_string()))?,
         }
     } else {
         String::from_utf8(body.to_vec()).map_err(|_| ServiceError::InvalidTextPayload)?
@@ -693,6 +802,7 @@ pub async fn upload_schema(
 
 #[utoipa::path(
         get,
+        tag = "Treetop REST API",
         path = "/api/v1/policies/{user}",
         params(
             ("user" = String, Path, description = "User principal identifier"),
@@ -701,9 +811,12 @@ pub async fn upload_schema(
             ("format" = Option<String>, Query, description = "Response format: 'json' (default) or 'raw'/'text' for plain text"),
         ),
         responses(
-            (status = 200, description = "Policies for user retrieved successfully", body = UserPolicies),
-            (status = 400, description = "Bad request", body = ServiceError),
-            (status = 500, description = "Internal server error", body = ServiceError)
+            (status = 200, description = "Policies for user retrieved successfully", content(
+                (UserPolicies = "application/json"),
+                (String = "text/plain")
+            )),
+            (status = 400, description = "Bad request", body = ErrorResponse),
+            (status = 500, description = "Internal server error", body = ErrorResponse)
         ),
     )]
 pub async fn list_policies(
@@ -739,11 +852,12 @@ pub async fn list_policies(
 
 #[utoipa::path(
     get,
+    tag = "Treetop REST API",
     path = "/api/v1/status",
     responses(
         (status = 200, description = "Service status retrieved successfully", body = StatusResponse),
-        (status = 400, description = "Bad request", body = ServiceError),
-        (status = 500, description = "Internal server error", body = ServiceError)
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     ),
 )]
 pub async fn get_status(
@@ -772,9 +886,10 @@ pub async fn get_status(
 
 #[utoipa::path(
     get,
+    tag = "Treetop REST API",
     path = "/metrics",
     responses(
-        (status = 200, description = "Prometheus metrics"),
+        (status = 200, description = "Prometheus metrics", body = String, content_type = "text/plain; version=0.0.4"),
     ),
 )]
 pub async fn metrics(registry: web::Data<Arc<Registry>>) -> Result<HttpResponse, ServiceError> {

@@ -215,6 +215,51 @@ async fn test_readyz_fails_fast_while_store_is_busy() {
 }
 
 #[actix_web::test]
+async fn test_openapi_json_endpoint() {
+    let app = test::init_service(App::new().configure(handlers::init)).await;
+
+    let req = test::TestRequest::get()
+        .uri(handlers::OPENAPI_JSON_PATH)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/json"
+    );
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["openapi"], "3.1.0");
+    for path in ["/api/v1/authorize", "/livez", "/openapi.json", "/readyz"] {
+        assert!(body["paths"][path].is_object(), "missing path {path}");
+    }
+
+    let generated = serde_json::to_value(handlers::openapi_document()).unwrap();
+    assert_eq!(body, generated);
+}
+
+#[actix_web::test]
+async fn test_legacy_openapi_endpoint_matches_canonical_document() {
+    let app = test::init_service(App::new().configure(handlers::init)).await;
+
+    let canonical_req = test::TestRequest::get()
+        .uri(handlers::OPENAPI_JSON_PATH)
+        .to_request();
+    let canonical_resp = test::call_service(&app, canonical_req).await;
+    assert_eq!(canonical_resp.status(), StatusCode::OK);
+    let canonical_body = test::read_body(canonical_resp).await;
+
+    let legacy_req = test::TestRequest::get()
+        .uri("/api-docs/openapi.json")
+        .to_request();
+    let legacy_resp = test::call_service(&app, legacy_req).await;
+    assert_eq!(legacy_resp.status(), StatusCode::OK);
+    let legacy_body = test::read_body(legacy_resp).await;
+
+    assert_eq!(legacy_body, canonical_body);
+}
+
+#[actix_web::test]
 async fn test_get_status_endpoint() {
     let store = create_test_store();
     let parallel = create_test_parallel_config();
@@ -725,6 +770,36 @@ async fn test_upload_schema_with_token(
 
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().is_success(), should_succeed);
+}
+
+#[rstest]
+#[case(r#"{"": {"entityTypes": {}, "actions": {}}}"#)]
+#[case(r#"{"schema":"{\"\": {\"entityTypes\": {}, \"actions\": {}}}"}"#)]
+#[actix_web::test]
+async fn test_upload_schema_accepts_documented_json_forms(#[case] schema: &str) {
+    let store = create_test_store();
+    {
+        let mut store_guard = store.write().unwrap();
+        store_guard.allow_upload = true;
+        store_guard.upload_token = Some("test-token".to_string());
+    }
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route("/api/v1/schema", web::post().to(handlers::upload_schema)),
+    )
+    .await;
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/schema")
+        .set_payload(schema.to_owned())
+        .insert_header(("content-type", "application/json"))
+        .insert_header(("X-Upload-Token", "test-token"))
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[actix_web::test]

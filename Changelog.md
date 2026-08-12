@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added a canonical generated OpenAPI document at `/openapi.json`, a checked-in
+  `docs/openapi.json` copy with stale-document checks, and documented regeneration.
+
+### Changed
+
+- Configured Swagger UI to load `/openapi.json` while preserving
+  `/api-docs/openapi.json` as a compatibility alias.
+- Documented operation tags, upload-token security, supported JSON and plain-text
+  representations, and the actual structured error response in the generated spec.
+
+### Fixed
+
+- Made the generated schema-upload alternatives valid for standard OpenAPI
+  validators while preserving the public Rust `handlers::ApiDoc` entry point.
+
 ## [0.0.9] - 2026-08-12
 
 ### Fixed
