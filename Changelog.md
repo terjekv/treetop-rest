@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added continuous fuzz testing for authorization request handling and atomic policy, schema, and label reloads.
+
 ### Changed
 
 - Updated `treetop-core` to version `0.0.19`.
@@ -17,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgraded GitHub Actions dependencies, pinned the release and cross-compilation tools, and added Dependabot coverage
   for GitHub Actions and container images.
 - Updated the build and runtime containers to Rust 1.97, Alpine 3.24, and miniserve 0.35.0.
+
+### Security
+
+- Added a configurable authorization batch limit to bound evaluation work per request.
+- Authenticate policy and schema uploads before parsing their bodies, while retaining a second authorization check
+  before applying an update.
 
 ## [0.0.7] - 2026-07-04
 

@@ -1,0 +1,20 @@
+{
+  "requests": [
+    {
+      "id": "context",
+      "context": {
+        "environment": { "type": "String", "value": "production" },
+        "groups": {
+          "type": "Set",
+          "value": [
+            { "type": "String", "value": "admin" },
+            { "type": "String", "value": "operator" }
+          ]
+        }
+      },
+      "principal": { "User": { "id": "alice" } },
+      "action": { "id": "view" },
+      "resource": { "kind": "Photo", "id": "vacation.jpg" }
+    }
+  ]
+}

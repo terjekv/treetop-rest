@@ -96,6 +96,10 @@ pub struct Config {
     #[clap(long, env = "TREETOP_MAX_CONTEXT_KEYS", default_value = "64")]
     pub max_context_keys: usize,
 
+    /// Maximum number of authorization checks accepted in one batch.
+    #[clap(long, env = "TREETOP_MAX_BATCH_SIZE", default_value = "1024")]
+    pub max_batch_size: usize,
+
     /// Trust proxy IP headers (X-Forwarded-For/Forwarded). If false, use peer address only.
     #[clap(long, default_value = "true", env = "TREETOP_TRUST_IP_HEADERS")]
     pub trust_ip_headers: bool,

@@ -36,6 +36,7 @@ The server supports the following environment variables:
 - `TREETOP_MAX_CONTEXT_BYTES`: Maximum request context payload size in bytes (default: `16384`).
 - `TREETOP_MAX_CONTEXT_DEPTH`: Maximum request context nesting depth (default: `8`).
 - `TREETOP_MAX_CONTEXT_KEYS`: Maximum number of top-level request context keys (default: `64`).
+- `TREETOP_MAX_BATCH_SIZE`: Maximum number of authorization checks accepted in one request (default: `1024`).
 - `TREETOP_MAX_REQUEST_SIZE`: Maximum request body size in bytes (default: `10485760` = 10 MB).
 
 ### Client interaction

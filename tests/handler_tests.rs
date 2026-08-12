@@ -231,6 +231,7 @@ async fn test_get_status_endpoint() {
 
     assert!(resp.status().is_success());
     let body: StatusResponse = test::read_body_json(resp).await;
+    assert_eq!(body.request_limits.max_batch_size, Some(1024));
     assert_eq!(body.policy_configuration.policies.entries, 3);
     assert!(body.request_context.supported);
     assert!(!body.request_context.schema_backed);
@@ -295,6 +296,42 @@ async fn test_check_endpoint_allow() {
 
     let body: AuthorizeBriefResponse = test::read_body_json(resp).await;
     assert_single_decision(&body, DecisionBrief::Allow);
+}
+
+#[actix_web::test]
+async fn test_authorize_rejects_batch_over_configured_limit() {
+    let store = create_test_store();
+    let parallel = create_test_parallel_config();
+    let runtime = handlers::AuthorizeRuntimeConfig {
+        max_batch_size: 1,
+        ..handlers::AuthorizeRuntimeConfig::default()
+    };
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .app_data(web::Data::new(parallel))
+            .app_data(web::Data::new(runtime))
+            .route("/api/v1/authorize", web::post().to(handlers::authorize)),
+    )
+    .await;
+
+    let request = Request {
+        principal: Principal::User(User::from_str("alice").unwrap()),
+        action: Action::from_str("view").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+    let auth_request = AuthorizeRequest::from_requests([request.clone(), request]);
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize")
+        .set_json(&auth_request)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["code"], "validation_error");
+    assert!(body["error"].as_str().unwrap().contains("2 > 1"));
 }
 
 #[actix_web::test]
@@ -578,6 +615,41 @@ async fn test_upload_policies_not_allowed() {
     let resp = test::call_service(&app, req).await;
     // Should fail because upload is not allowed
     assert!(!resp.status().is_success());
+}
+
+#[actix_web::test]
+async fn test_upload_authentication_precedes_body_parsing() {
+    let store = create_test_store();
+    {
+        let mut store_guard = store.write().unwrap();
+        store_guard.allow_upload = true;
+        store_guard.upload_token = Some("expected-token".to_string());
+    }
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .route(
+                "/api/v1/policies",
+                web::post().to(handlers::upload_policies),
+            )
+            .route("/api/v1/schema", web::post().to(handlers::upload_schema)),
+    )
+    .await;
+
+    for uri in ["/api/v1/policies", "/api/v1/schema"] {
+        let req = test::TestRequest::post()
+            .uri(uri)
+            .set_payload("{not-json")
+            .insert_header(("content-type", "application/json"))
+            .insert_header(("X-Upload-Token", "wrong-token"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "invalid_upload_token");
+    }
 }
 
 #[rstest]
