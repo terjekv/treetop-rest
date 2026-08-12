@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.10] - 2026-08-12
+
 ### Added
 
 - Added a canonical generated OpenAPI document at `/openapi.json`, a checked-in
@@ -18,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/api-docs/openapi.json` as a compatibility alias.
 - Documented operation tags, upload-token security, supported JSON and plain-text
   representations, and the actual structured error response in the generated spec.
+- Marked v0.0.10 as the final bridge release that includes the bundled
+  `treetop-cli`. Future CLI releases are available from the standalone
+  [treetop-cli repository](https://github.com/terjekv/treetop-cli).
 
 ### Fixed
 

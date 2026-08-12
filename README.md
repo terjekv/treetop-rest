@@ -3,6 +3,11 @@
 This is a REST server providing a REST API for [Treetop](https://github.com/terjekv/treetop-core),
 a policy management framework. A CLI interface to the REST API is also provided.
 
+Version 0.0.10 is the final bridge release that includes the bundled
+`treetop-cli` binary. Future CLI releases are available from the standalone
+[treetop-cli repository](https://github.com/terjekv/treetop-cli); later
+`treetop-rest` releases contain only the server.
+
 See [docs/api.md](docs/api.md) for the HTTP API reference. A running server exposes
 the generated OpenAPI document at `/openapi.json` and Swagger UI at `/swagger-ui/`.
 The generated specification is also checked in at [docs/openapi.json](docs/openapi.json).
@@ -98,7 +103,8 @@ $ curl -X POST 'http://localhost:9999/api/v1/authorize?detail=brief' \
   }'
 ```
 
-Or you can use the CLI client provided in this repository. To run the CLI client, you can use:
+The v0.0.10 bridge release also includes the legacy CLI client from this
+repository. To run that version of the CLI client, you can use:
 
 ```bash
 $ cargo run --bin cli -- upload --file testdata/default.cedar --raw --token <your-upload-token>
