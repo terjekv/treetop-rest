@@ -109,6 +109,12 @@ Tests for Prometheus metrics collection and reporting:
 
 ## Running Tests
 
+### Fuzz Tests
+
+Security-sensitive input parsing and state transitions have coverage-guided targets under `fuzz/`. See
+[`fuzz/README.md`](../fuzz/README.md) for setup and execution instructions. Pull requests run short smoke campaigns,
+and the scheduled fuzz workflow runs longer campaigns.
+
 ### Run All Tests
 
 ```bash

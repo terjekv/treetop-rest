@@ -134,6 +134,7 @@ Example response:
     "allow_parallel": true
   },
   "request_limits": {
+    "max_batch_size": 1024,
     "max_context_bytes": 16384,
     "max_context_depth": 8,
     "max_context_keys": 64
@@ -217,7 +218,8 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
   - `detail`: Response detail level. `brief` (default) returns only decision and version; `full` (or `detailed`)
   includes matching policy information.
 - Request body (JSON):
-  - `requests`: Array of authorization requests, each containing:
+  - `requests`: Array of authorization requests. The server rejects arrays larger than its configured
+    `TREETOP_MAX_BATCH_SIZE` before evaluation. Each entry contains:
     - `id` (optional): Client-provided identifier for correlating responses
     - `context` (optional): request-scoped Cedar attributes passed as `context.<field>`
     - `principal`: Principal object
@@ -380,7 +382,7 @@ curl -X POST http://localhost:9999/api/v1/authorize \
 
 ### Best Practices
 
-1. **Batch Size**: For optimal performance, batch request counts per call depending on your use case and server capacity
+1. **Batch Size**: Keep each batch within the server's configured maximum and tune batch size for the available capacity
 2. **Error Handling**: Check both the HTTP status code and individual result statuses
 3. **Consistency**: All requests in a batch are guaranteed to be evaluated against the same policy version
 4. **Indexing**: Use the `index` field or your results to correlate responses with requests,

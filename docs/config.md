@@ -41,8 +41,10 @@ The server uses **command-line flags** and **environment variables**. There is *
 | `--max-context-bytes` | `TREETOP_MAX_CONTEXT_BYTES` | `16384` | Maximum `/api/v1/authorize` request context payload size in bytes. |
 | `--max-context-depth` | `TREETOP_MAX_CONTEXT_DEPTH` | `8` | Maximum nesting depth for `/api/v1/authorize` request context values. |
 | `--max-context-keys` | `TREETOP_MAX_CONTEXT_KEYS` | `64` | Maximum number of top-level `/api/v1/authorize` request context keys. |
+| `--max-batch-size` | `TREETOP_MAX_BATCH_SIZE` | `1024` | Maximum authorization checks accepted in one request. |
 | `--trust-ip-headers` | `TREETOP_TRUST_IP_HEADERS` | `true` | Trust proxy headers (`X-Forwarded-For`, `Forwarded`). |
 | `--client-allowlist` | `TREETOP_CLIENT_ALLOWLIST` | `127.0.0.1,::1` | Allowed client IPs/CIDRs. Use `*` to allow all. |
+| `--max-request-size` | `TREETOP_MAX_REQUEST_SIZE` | `10485760` | Maximum request body size in bytes. |
 | `--version` | _(none)_ | `false` | Print version information and exit. |
 
 #### Notes
@@ -51,6 +53,8 @@ The server uses **command-line flags** and **environment variables**. There is *
 value is set.
 - If `--schema-url` is provided, the server polls every 60 seconds unless `--schema-refresh` is set.
 - The context limit settings apply to the optional `context` object accepted by `POST /api/v1/authorize`.
+- The batch size limit applies to the `requests` array accepted by `POST /api/v1/authorize`; larger batches receive
+  `400 Bad Request` before policy evaluation begins.
 - The client allowlist accepts comma-separated IPv4/IPv6 addresses or CIDRs. Use `*` to allow all.
 
 ## Client configuration (treetop-cli / REPL)

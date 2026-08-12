@@ -126,6 +126,8 @@ pub struct StatusResponse {
 
 #[derive(Serialize, ToSchema, Deserialize, Clone, Copy)]
 pub struct RequestLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_batch_size: Option<usize>,
     pub max_context_bytes: usize,
     pub max_context_depth: usize,
     pub max_context_keys: usize,
@@ -134,6 +136,7 @@ pub struct RequestLimits {
 impl Default for RequestLimits {
     fn default() -> Self {
         Self {
+            max_batch_size: None,
             max_context_bytes: 16 * 1024,
             max_context_depth: 8,
             max_context_keys: 64,
@@ -389,7 +392,7 @@ impl From<Request> for AuthRequest {
 
 #[derive(Deserialize, Serialize, ToSchema)]
 pub struct AuthorizeRequest {
-    /// List of authorization requests to evaluate
+    /// List of authorization requests to evaluate, subject to the server's configured batch limit.
     pub requests: Vec<AuthRequest>,
 }
 
@@ -683,6 +686,23 @@ pub type BatchCheckDetailedResponse = AuthorizeResponse<AuthorizeDecisionDetaile
 mod tests {
     use super::*;
     use std::str::FromStr;
+
+    #[test]
+    fn test_request_limits_deserialize_legacy_shape() {
+        let limits: RequestLimits = serde_json::from_str(
+            r#"{
+                "max_context_bytes": 8192,
+                "max_context_depth": 4,
+                "max_context_keys": 32
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(limits.max_batch_size, None);
+        assert_eq!(limits.max_context_bytes, 8192);
+        assert_eq!(limits.max_context_depth, 4);
+        assert_eq!(limits.max_context_keys, 32);
+    }
 
     #[test]
     fn test_endpoint_new() {

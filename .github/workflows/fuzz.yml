@@ -1,0 +1,58 @@
+name: Fuzz
+
+on:
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_FUZZ_VERSION: "0.13.2"
+  FUZZ_TIME: ${{ github.event_name == 'pull_request' && '60' || '900' }}
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - authorize_json
+          - state_updates
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Cache cargo-fuzz
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.tool_cache }}/cargo-fuzz
+          key: cargo-fuzz-${{ env.CARGO_FUZZ_VERSION }}
+      - name: Install cargo-fuzz
+        run: |
+          echo "${{ runner.tool_cache }}/cargo-fuzz/bin" >> "$GITHUB_PATH"
+          cargo install \
+            --root "${{ runner.tool_cache }}/cargo-fuzz" \
+            --version "$CARGO_FUZZ_VERSION" \
+            cargo-fuzz \
+            --locked
+      - name: Build fuzz target
+        run: cargo +nightly fuzz build "${{ matrix.target }}"
+      - name: Run fuzz target
+        run: >-
+          cargo +nightly fuzz run "${{ matrix.target }}" --
+          -max_len=65536
+          -max_total_time="$FUZZ_TIME"
+          -timeout=10
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: fuzz-${{ matrix.target }}-${{ github.sha }}
+          path: fuzz/artifacts
+          if-no-files-found: ignore

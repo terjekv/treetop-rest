@@ -1,0 +1,10 @@
+{
+  "requests": [
+    {
+      "id": "basic",
+      "principal": { "User": { "id": "alice" } },
+      "action": { "id": "view" },
+      "resource": { "kind": "Photo", "id": "vacation.jpg" }
+    }
+  ]
+}

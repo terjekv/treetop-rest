@@ -55,6 +55,7 @@ struct SchemaUpload {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 pub struct AuthorizeRuntimeConfig {
+    pub max_batch_size: usize,
     pub max_context_bytes: usize,
     pub max_context_depth: usize,
     pub max_context_keys: usize,
@@ -63,6 +64,7 @@ pub struct AuthorizeRuntimeConfig {
 impl Default for AuthorizeRuntimeConfig {
     fn default() -> Self {
         Self {
+            max_batch_size: 1024,
             max_context_bytes: 16 * 1024,
             max_context_depth: 8,
             max_context_keys: 64,
@@ -460,6 +462,10 @@ pub struct AuthorizeQuery {
 #[utoipa::path(
         post,
         path = "/api/v1/authorize",
+        request_body(
+            content = AuthorizeRequest,
+            description = "Authorization checks, limited by the configured maximum batch size"
+        ),
         params(
             ("detail" = Option<String>, Query, description = "Response detail level: 'brief' (default) or 'full'"),
         ),
@@ -476,6 +482,15 @@ pub async fn authorize(
     query: web::Query<AuthorizeQuery>,
     req: web::Json<AuthorizeRequest>,
 ) -> Result<web::Json<AuthorizeResponseVariant>, ServiceError> {
+    let runtime_cfg = runtime_cfg.map(|cfg| *cfg.get_ref()).unwrap_or_default();
+    if req.requests.len() > runtime_cfg.max_batch_size {
+        return Err(ServiceError::ValidationError(format!(
+            "authorization batch has too many requests: {} > {}",
+            req.requests.len(),
+            runtime_cfg.max_batch_size
+        )));
+    }
+
     let store = store.read()?;
     let engine_snapshot = store.engine.clone();
     let version = engine_snapshot.current_version();
@@ -484,7 +499,6 @@ pub async fn authorize(
 
     // Release the lock before parallel processing
     drop(store);
-    let runtime_cfg = runtime_cfg.map(|cfg| *cfg.get_ref()).unwrap_or_default();
 
     let detail_level = DetailLevel::from_query(query.detail.as_deref());
 
@@ -564,7 +578,12 @@ pub async fn upload_policies(
     body: web::Bytes,
     store: web::Data<SharedPolicyStore>,
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
-    // Parse and validate the body BEFORE acquiring the lock (this can be expensive)
+    // Reject unauthorized requests before parsing or copying the buffered request body.
+    {
+        let guard = store.read()?;
+        check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
+    }
+
     let content_type = req.content_type();
     let dsl_string = if content_type.starts_with("application/json") {
         let upload: Upload = serde_json::from_slice(&body)?;
@@ -573,17 +592,14 @@ pub async fn upload_policies(
         String::from_utf8(body.to_vec()).map_err(|_| ServiceError::InvalidTextPayload)?
     };
 
-    // Validate the DSL before acquiring lock (computationally expensive)
     if dsl_string.is_empty() {
         return Err(ServiceError::InvalidTextPayload);
     }
 
-    // Now acquire lock for authentication and applying changes
     let mut guard = store.write()?;
-
+    // Recheck under the write lock so configuration cannot change between parsing and applying.
     check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
 
-    // Apply the validated DSL (this is fast, mostly just Arc assignments)
     guard.set_dsl(&dsl_string, None, None)?;
 
     Ok(web::Json(PoliciesMetadata {
@@ -637,6 +653,12 @@ pub async fn upload_schema(
     body: web::Bytes,
     store: web::Data<SharedPolicyStore>,
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
+    // Reject unauthorized requests before parsing or copying the buffered request body.
+    {
+        let guard = store.read()?;
+        check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
+    }
+
     let content_type = req.content_type();
     let schema_string = if content_type.starts_with("application/json") {
         match serde_json::from_slice::<SchemaUpload>(&body) {
@@ -656,6 +678,7 @@ pub async fn upload_schema(
     }
 
     let mut guard = store.write()?;
+    // Recheck under the write lock so configuration cannot change between parsing and applying.
     check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
     guard.set_schema(&schema_string, None, None)?;
 
@@ -729,13 +752,13 @@ pub async fn get_status(
     runtime_cfg: Option<web::Data<AuthorizeRuntimeConfig>>,
 ) -> Result<web::Json<StatusResponse>, ServiceError> {
     let store = store.read()?;
-    let request_limits = runtime_cfg
-        .map(|cfg| RequestLimits {
-            max_context_bytes: cfg.max_context_bytes,
-            max_context_depth: cfg.max_context_depth,
-            max_context_keys: cfg.max_context_keys,
-        })
-        .unwrap_or_default();
+    let runtime_cfg = runtime_cfg.map(|cfg| *cfg.get_ref()).unwrap_or_default();
+    let request_limits = RequestLimits {
+        max_batch_size: Some(runtime_cfg.max_batch_size),
+        max_context_bytes: runtime_cfg.max_context_bytes,
+        max_context_depth: runtime_cfg.max_context_depth,
+        max_context_keys: runtime_cfg.max_context_keys,
+    };
     let policy_configuration: PoliciesMetadata = (&*store).into();
     let status = StatusResponse {
         policy_configuration,

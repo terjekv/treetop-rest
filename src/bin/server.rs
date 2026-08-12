@@ -88,6 +88,7 @@ async fn main() -> std::io::Result<()> {
     }
 
     let authorize_runtime = AuthorizeRuntimeConfig {
+        max_batch_size: config.max_batch_size,
         max_context_bytes: config.max_context_bytes,
         max_context_depth: config.max_context_depth,
         max_context_keys: config.max_context_keys,

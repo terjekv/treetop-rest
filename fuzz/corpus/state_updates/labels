@@ -1,0 +1,1 @@
+l[{"kind":"Host","field":"name","output":"labels","patterns":[{"name":"example","regex":"example\\.com$"}]}]

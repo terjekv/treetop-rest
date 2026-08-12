@@ -883,6 +883,7 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
 
     let rc = &metadata.request_limits;
     println!("\n{}", title("Request Limits"));
+    settings_line("Batch size:", &format_batch_limit(rc.max_batch_size));
     settings_line("Context bytes:", &rc.max_context_bytes.to_string());
     settings_line("Context depth:", &rc.max_context_depth.to_string());
     settings_line("Context keys:", &rc.max_context_keys.to_string());
@@ -896,6 +897,13 @@ async fn show_status_and_version(ctx: &ExecContext) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn format_batch_limit(max_batch_size: Option<usize>) -> String {
+    max_batch_size.map_or_else(
+        || "Unlimited (legacy server)".to_string(),
+        |limit| limit.to_string(),
+    )
 }
 
 /// Generic response handler that takes a closure for display logic
@@ -986,4 +994,15 @@ where
     T: serde::de::DeserializeOwned + CliDisplay,
 {
     handle_response_impl(resp, show_json, show_debug, |data: T| data.display()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_batch_limit;
+
+    #[test]
+    fn format_batch_limit_preserves_legacy_unlimited_status() {
+        assert_eq!(format_batch_limit(None), "Unlimited (legacy server)");
+        assert_eq!(format_batch_limit(Some(2048)), "2048");
+    }
 }
