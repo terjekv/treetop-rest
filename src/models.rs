@@ -772,7 +772,7 @@ mod tests {
         assert_eq!(response.successes(), 1);
         assert_eq!(response.failures(), 1);
         assert_eq!(response.total(), 2);
-        assert!(response.version().hash == "test-hash");
+        assert_eq!(response.version().hash.as_ref(), "test-hash");
     }
 
     #[test]

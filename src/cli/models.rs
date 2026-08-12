@@ -179,7 +179,7 @@ impl CliDisplay for AuthorizeDecisionDetailed {
                     let policies_str = self
                         .policy
                         .iter()
-                        .map(|p| p.id().clone())
+                        .map(|p| p.id())
                         .collect::<Vec<_>>()
                         .join("\n");
                     format!(
@@ -379,8 +379,10 @@ impl AuthorizeResult {
             .results
             .first()
             .and_then(|r| match &r.result {
-                Some(AuthCheckResult::Detailed(detailed)) => Some(detailed.version.hash.clone()),
-                Some(AuthCheckResult::Brief(brief)) => Some(brief.version.hash.clone()),
+                Some(AuthCheckResult::Detailed(detailed)) => {
+                    Some(detailed.version.hash.to_string())
+                }
+                Some(AuthCheckResult::Brief(brief)) => Some(brief.version.hash.to_string()),
                 None => None,
             })
             .unwrap_or_else(|| "-".to_string());
@@ -462,8 +464,8 @@ impl AuthorizeResult {
             Some(AuthCheckResult::Detailed(detailed)) => detailed
                 .policy
                 .first()
-                .map(|p| p.literal.clone())
-                .unwrap_or_else(|| "".to_string()),
+                .map(|p| p.literal.to_string())
+                .unwrap_or_default(),
             Some(AuthCheckResult::Brief(brief)) => brief.policy_id.clone(),
             None => "?".to_string(),
         }
