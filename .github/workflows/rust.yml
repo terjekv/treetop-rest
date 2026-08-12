@@ -134,14 +134,16 @@ jobs:
 
       - name: Build native binaries
         run: |
-          cross build --release --target x86_64-unknown-linux-musl
-          cross build --release --target aarch64-unknown-linux-musl
+          for TGT in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            CARGO_TARGET_DIR="target/cross-$TGT" cross build --release --target "$TGT"
+          done
 
       - name: Package artifacts
         run: |
           mkdir release-artifacts
           for TGT in x86_64 aarch64; do
-            BIN_X=target/${TGT}-unknown-linux-musl/release
+            TRIPLE=${TGT}-unknown-linux-musl
+            BIN_X=target/cross-${TRIPLE}/${TRIPLE}/release
             tar czf "release-artifacts/treetop-server-${TGT}-linux-musl.tar.gz" -C "$BIN_X" treetop-server
             tar czf "release-artifacts/treetop-cli-${TGT}-linux-musl.tar.gz" -C "$BIN_X" treetop-cli
           done
