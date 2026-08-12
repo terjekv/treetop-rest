@@ -3,12 +3,14 @@ use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use treetop_core::{Action, Principal, Request, Resource, User};
 use treetop_rest::handlers;
-use treetop_rest::models::AuthorizeRequest;
+use treetop_rest::models::{
+    AuthorizeRequest, AuthorizeResponseVariant, BatchResult, DecisionBrief,
+};
 use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
 
 #[actix_web::test]
-async fn test_detailed_response_serialization() {
+async fn detailed_response_serialization_uses_the_server_model() {
     let mut store = PolicyStore::new().unwrap();
     let dsl = r#"
 permit (
@@ -46,14 +48,20 @@ permit (
     assert!(resp.status().is_success());
 
     let body = test::read_body(resp).await;
-    let body_str = String::from_utf8(body.to_vec()).unwrap();
+    let response: AuthorizeResponseVariant = serde_json::from_slice(&body).unwrap();
+    let AuthorizeResponseVariant::Detailed(response) = response else {
+        panic!("full detail request returned a brief response");
+    };
 
-    println!("=== DETAILED RESPONSE ===");
-    println!("{}", body_str);
-
-    // Also print formatted JSON
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_str) {
-        println!("\n=== FORMATTED ===");
-        println!("{}", serde_json::to_string_pretty(&json).unwrap());
+    assert_eq!(response.successes(), 1);
+    assert_eq!(response.failures(), 0);
+    let result = response.find_by_id("check-1").unwrap();
+    assert_eq!(result.index(), 0);
+    match result.result() {
+        BatchResult::Success { data } => {
+            assert!(matches!(data.decision, DecisionBrief::Allow));
+            assert_eq!(data.policy.len(), 1);
+        }
+        BatchResult::Failed { message } => panic!("authorization failed: {message}"),
     }
 }

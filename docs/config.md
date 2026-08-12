@@ -1,17 +1,14 @@
 # Configuration
 
-This document describes configuration for **server** (treetop-server) and **client** (treetop-cli / REPL).
+This document describes configuration for `treetop-server`.
 
 ## Overview
 
-There are **two distinct configuration surfaces**:
+The server uses command-line flags and environment variables. It does not use a configuration file.
+The standalone [treetop-cli](https://github.com/terjekv/treetop-cli) has its own configuration
+documentation and release lifecycle.
 
-- **Server configuration**: runtime settings for the REST API server.
-- **Client configuration**: user preferences for the CLI/REPL output.
-
-They are independent and use different sources.
-
-## Server configuration (treetop-server)
+## Server configuration
 
 The server uses **command-line flags** and **environment variables**. There is **no server config file**.
 
@@ -57,64 +54,8 @@ value is set.
   `400 Bad Request` before policy evaluation begins.
 - The client allowlist accepts comma-separated IPv4/IPv6 addresses or CIDRs. Use `*` to allow all.
 
-## Client configuration (treetop-cli / REPL)
-
-The CLI supports a **config file** for user preferences and defaults. It is separate from server configuration.
-
-### Client option precedence
-
-1. Command-line flags
-2. Environment variables
-3. Config file
-4. Built-in defaults
-
-### Config file location
-
-The CLI config file uses the platform-standard config directory:
-
-- **macOS**: `~/Library/Application Support/treetop-cli/config.toml`
-- **Linux**: `~/.config/treetop-cli/config.toml`
-- **Windows**: `%APPDATA%/treetop-cli/config.toml`
-
-### Config file format (TOML)
-
-The CLI config file supports **all top-level CLI switches** as keys:
-
-| Key | Type | Default | Description |
-| --- | --- | --- | --- |
-| `host` | string | `"127.0.0.1"` | Server host to connect to. |
-| `port` | number | `9999` | Server port to connect to. |
-| `json` | boolean | `false` | Print JSON responses. |
-| `debug` | boolean | `false` | Print JSON requests and responses (superset of `json`). |
-| `timing` | boolean | `false` | Print command execution timing. |
-| `table_style` | string | `"rounded"` | Default table style. One of `rounded`, `ascii`, `unicode`, `markdown`. |
-
-Example:
-
-```toml
-# ~/.config/treetop-cli/config.toml
-host = "127.0.0.1"
-port = 9999
-json = false
-debug = false
-timing = false
-table_style = "unicode"
-```
-
-### Related environment variables
-
-These CLI options can also be set via environment variables:
-
-- `TREETOP_CLI_SERVER_ADDRESS`
-- `TREETOP_CLI_SERVER_PORT`
-- `TREETOP_CLI_JSON`
-- `TREETOP_CLI_DEBUG`
-- `TREETOP_CLI_TIMING`
-- `TREETOP_CLI_TABLE_STYLE`
-
 ## Summary
 
-- **Server config**: flags + env vars only.
-- **Client config**: TOML file + flags + env vars.
-
-Keep them separate to avoid confusion, especially when automating deployments vs. personal CLI preferences.
+Server configuration comes from flags, then environment variables, then built-in defaults. For CLI
+configuration—including `--server-url`, config/history paths, and legacy host/port migration—see the
+[standalone CLI configuration guide](https://github.com/terjekv/treetop-cli/blob/main/docs/config.md).

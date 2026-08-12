@@ -251,8 +251,8 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
   - In `strict` schema mode, sending `context` without an uploaded schema fails that request.
   - In `permissive` mode, context can still be evaluated when runtime has fallen back to a schema-free engine, but
     `/api/v1/status.request_context` will report the fallback state.
-  - Context object values must use the same `AttrValue` encoding as resource attributes. Flat strings, booleans,
-    numbers, and arrays are accepted directly by the CLI context file loader.
+  - Context object values use the same `AttrValue` encoding as resource attributes. Flat strings, booleans,
+    numbers, and arrays are accepted directly by the API model.
 
 **Example request:**
 

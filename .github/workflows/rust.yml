@@ -131,7 +131,7 @@ jobs:
             docker push "$REG:latest"
           done
 
-      # C) Cross-compile server & cli for Linux x86_64 + ARM (musl)
+      # C) Cross-compile the server for Linux x86_64 + ARM (musl)
       - name: Install cross-compilation tool
         run: |
           cargo install cross --version 0.2.5 --locked
@@ -149,7 +149,6 @@ jobs:
             TRIPLE=${TGT}-unknown-linux-musl
             BIN_X=target/cross-${TRIPLE}/${TRIPLE}/release
             tar czf "release-artifacts/treetop-server-${TGT}-linux-musl.tar.gz" -C "$BIN_X" treetop-server
-            tar czf "release-artifacts/treetop-cli-${TGT}-linux-musl.tar.gz" -C "$BIN_X" treetop-cli
           done
 
       # D) Create GH Release & upload binaries
@@ -161,5 +160,3 @@ jobs:
           artifacts: |
             release-artifacts/treetop-server-x86_64-linux-musl.tar.gz
             release-artifacts/treetop-server-aarch64-linux-musl.tar.gz
-            release-artifacts/treetop-cli-x86_64-linux-musl.tar.gz
-            release-artifacts/treetop-cli-aarch64-linux-musl.tar.gz
