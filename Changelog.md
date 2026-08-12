@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-08-12
+
 ### Added
 
 - Added continuous fuzz testing for authorization request handling and atomic policy, schema, and label reloads.
+- Added `/livez` and `/readyz` operational probes, including readiness tracking for the initial successful load of
+  every configured remote policy, label, and schema source.
 
 ### Changed
 
@@ -21,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgraded GitHub Actions dependencies, pinned the release and cross-compilation tools, and added Dependabot coverage
   for GitHub Actions and container images.
 - Updated the build and runtime containers to Rust 1.97, Alpine 3.24, and miniserve 0.35.0.
+- Disabled crates.io publishing for the server package; supported release artifacts remain container images and
+  prebuilt binaries.
 
 ### Security
 
