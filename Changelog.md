@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.11] - 2026-08-13
+
+### Removed
+
+- **Breaking packaging change:** Removed the bundled `treetop-cli` binary, public `treetop_rest::cli`
+  module, CLI-only dependencies, matrix benchmarks, tests, and documentation. Users of the v0.0.10
+  bridge binary should install
+  [treetop-cli v0.0.1](https://github.com/terjekv/treetop-cli/releases/tag/v0.0.1), which preserves
+  the CLI/REPL configuration and history locations and uses `treetop-client` 0.0.2.
+
+### Changed
+
+- Describe the package and generated OpenAPI document as a server-only release.
+- Package only the x86_64 and ARM64 Linux musl server binaries in GitHub releases. Container images
+  and runtime behavior are unchanged.
+
 ## [0.0.10] - 2026-08-12
 
 ### Added

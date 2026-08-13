@@ -1,12 +1,12 @@
 # A REST server for Treetop
 
 This is a REST server providing a REST API for [Treetop](https://github.com/terjekv/treetop-core),
-a policy management framework. A CLI interface to the REST API is also provided.
+a policy management framework.
 
-Version 0.0.10 is the final bridge release that includes the bundled
-`treetop-cli` binary. Future CLI releases are available from the standalone
-[treetop-cli repository](https://github.com/terjekv/treetop-cli); later
-`treetop-rest` releases contain only the server.
+Version 0.0.11 and later contain only the server. The bundled `treetop-cli` binary was removed after
+the v0.0.10 bridge release. Install the supported standalone CLI from the
+[treetop-cli repository](https://github.com/terjekv/treetop-cli); its configuration, matrix syntax,
+and release binaries are documented there.
 
 See [docs/api.md](docs/api.md) for the HTTP API reference. A running server exposes
 the generated OpenAPI document at `/openapi.json` and Swagger UI at `/swagger-ui/`.
@@ -103,118 +103,9 @@ $ curl -X POST 'http://localhost:9999/api/v1/authorize?detail=brief' \
   }'
 ```
 
-The v0.0.10 bridge release also includes the legacy CLI client from this
-repository. To run that version of the CLI client, you can use:
-
-```bash
-$ cargo run --bin cli -- upload --file testdata/default.cedar --raw --token <your-upload-token>
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
-     Running `target/debug/cli upload --file testdata/default.cedar --raw`
-Policies SHA256: c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219
-Uploaded at: 2025-06-23T22:59:05.014440Z
-Size: 843 bytes
-$ cargo run --bin cli -- check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1 --context-attribute env=prod
-  Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
-  Running `target/debug/cli check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1 --context-attribute env=prod`
-Allow (default @ c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
-```
-
-The CLI also accepts `--context-file <path>` with a JSON object. String, boolean, number,
-and array values can be written directly. Object values must use typed Cedar JSON such as
-`{"type":"Ip","value":"10.0.0.1"}`.
-
-The CLI client can also be run in REPL mode:
-
-```bash
-cargo run --bin cli -- repl
-```
-
-Then you can enter commands with tab expansion and history support. For example:
-
-```bash
-policy> upload --file testdata/default.cedar --raw --token <your-upload-token>
-Policies SHA256: c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219
-Uploaded at: 2025-06-23T22:25:50.285684Z
-Size: 843 bytes
-policy> check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1 --context-attribute env=prod
-Allow (default @ c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
-policy> status
-
-treetop-cli
-  Version:        0.0.1
-  Built:          2025-12-16T22:04:42.072904000Z
-  Git:            1e6d78a
-
-Server
-  Version:        0.0.0+g1e6d78a
-  Core:           0.0.12
-  Cedar:          4.8.2
-
-Policies
-  Hash:           c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219
-  Updated:        2025-12-16 22:04:47.321459 UTC
-  Entries:        9
-  Size:           2951 bytes
-  Source:         http://localhost:8080/dns.cedar
-  Refresh:        every 60s
-  Allow upload:   yes
-
-Labels
-  Hash:           763bcf2b17126b1546bf3ced29fab4ea661d9f5cd504689eddfef05babcc1eb3
-  Updated:        2025-12-16 22:04:47.321034 UTC
-  Entries:        1
-  Size:           573 bytes
-  Source:         http://localhost:8080/labels.json
-  Refresh:        every 60s
-
-Request Context
-  Supported:      yes
-  Schema-backed:  no
-  Fallback reason:no_schema
-```
-
-The REPL keeps the last values you used with `check` so you can recall them without retyping.
-After any `check`, run `show` to see them:
-
-```bash
-policy> check --principal DNS::User::alice[admins] --action DNS::Action::create_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
-Allow (default @ c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
-policy> check --principal DNS::User::alice --action DNS::Action::delete_host --resource-type Host --resource-id hostname.example.com --resource-attribute name=hostname.example.com --resource-attribute ip=10.0.0.1
-Deny (c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219)
-policy> show
-
-Current Settings:
-  Server:         127.0.0.1:9090
-  JSON output:    off
-  Debug mode:     off
-  Timing:         off
-
-Last Used Values:
-  Principal:      DNS::User::alice[admins]
-  Action:         DNS::Action::delete_host
-  Resource Type:  Host
-  Resource ID:    hostname.example.com
-  Attributes:
-                  name=hostname.example.com
-                  ip=10.0.0.1
-
-Files:
-  History:        /Users/alice/Library/Application Support/treetop-cli/history
-  Config:         /Users/alice/Library/Application Support/treetop-cli/config.toml
-```
-
-In the REPL, you can omit `--principal`, `--action`, `--resource-type`, `--resource-id`, and any `--resource-attribute`
-flags on subsequent `check` commands; missing fields reuse the last values shown by `show`.
-
-### Check command syntax
-
-- Principals: `Namespace::User::name[group1,group2]` (omit brackets if no groups). Example: `DNS::User::alice[admins]`.
-- Actions: `Namespace::Action::verb`. Example: `DNS::Action::create_host`.
-- Resource type: `--resource-type <Type>` (namespace optional). Example: `--resource-type Host`.
-- Resource ID: required via `--resource-id <id>`. Example: `--resource-id hostname.example.com`.
-- Resource attributes: repeatable `--resource-attribute key=value`. Example: `--resource-attribute ip=10.0.0.1`
-- Context attributes: repeatable `--context-attribute key=value`. Example: `--context-attribute env=prod`
-- Context file: `--context-file <path>` with a JSON object of request-scoped values
+For typed command-line access, interactive REPL support, configuration migration details, and
+matrix queries, use [treetop-cli](https://github.com/terjekv/treetop-cli). Version 0.0.1 depends
+exactly on `treetop-client` 0.0.2 and is the migration target for the CLI bundled in REST v0.0.10.
 
 ## Development
 

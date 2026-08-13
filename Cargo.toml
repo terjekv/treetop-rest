@@ -1,8 +1,8 @@
 [package]
 name = "treetop-rest"
-version = "0.0.10"
+version = "0.0.11"
 edition = "2024"
-description = "REST server and CLI for the Treetop policy management framework"
+description = "REST server for the Treetop policy management framework"
 license = "MIT"
 repository = "https://github.com/terjekv/treetop-rest"
 publish = false
@@ -14,8 +14,6 @@ actix-service = "2.0.3"
 actix-web = "4.14.1"
 chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4.6.6", features = ["derive", "env"] }
-colored = "3.1.1"
-dirs = "6.0.0"
 env_logger = "0.11.11"
 futures = "0.3.33"
 futures-util = "0.3.33"
@@ -25,11 +23,8 @@ lru = "0.18.2"
 rayon = "1.12.0"
 regex = "1.13.1"
 reqwest = { version = "0.13.4", features = ["json"] }
-rustyline = "18.0.1"
 serde = "1.0.229"
-tabled = "0.21.0"
 serde_json = "1.0.151"
-toml = "1.1.4"
 sha2 = "0.11.0"
 tokio = { version = "1.53.1", features = ["full"] }
 tracing = "0.1.44"
@@ -47,7 +42,6 @@ url = { version = "2.5.8", features = ["serde"] }
 utoipa = { version = "5.5.0", features = ["actix_extras", "chrono", "yaml"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["actix-web", "vendored"] }
 uuid = { version = "1.24.0", features = ["v4"] }
-anyhow = "1.0.104"
 cedar-policy = "4.12.0"
 
 [dev-dependencies]
@@ -78,10 +72,6 @@ vergen-gitcl = { version = "10.0.2", features = [
 name = "treetop-server"
 path = "src/bin/server.rs"
 
-[[bin]]
-name = "treetop-cli"
-path = "src/bin/cli.rs"
-
 [profile.release]
 debug = true
 
@@ -107,18 +97,6 @@ harness = false
 
 [[bench]]
 name = "authorize_batch_detailed_128_callgrind"
-harness = false
-
-[[bench]]
-name = "cli_matrix_simple_callgrind"
-harness = false
-
-[[bench]]
-name = "cli_matrix_bracketed_callgrind"
-harness = false
-
-[[bench]]
-name = "cli_matrix_with_attrs_callgrind"
 harness = false
 
 [[bench]]

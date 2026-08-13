@@ -1,8 +1,7 @@
 # Test Suite for Treetop REST
 
-This project includes a comprehensive test suite covering unit tests, integration tests,
-and CLI parsing tests. The tests are designed to run without Docker, making them fast and
-easy to execute during development.
+This project includes a comprehensive test suite covering server unit and integration tests. The
+tests are designed to run without Docker, making them fast and easy to execute during development.
 
 **The test suite uses `rstest` for parameterized testing**, which allows us to write more
 concise tests that cover multiple scenarios with different inputs. This approach significantly
@@ -85,13 +84,6 @@ End-to-end tests using the actual test data files (`testdata/`):
 - SHA256 hash validation
 - Content size tracking
 
-#### CLI Parsing Tests (`tests/cli_parsing_tests.rs`)
-
-Tests for command-line argument parsing logic using **parameterized tests**:
-
-- **Command completion**: 19 cases covering command and flag completion
-- **Command parsing**: 8 cases for parsing various CLI command structures
-
 #### Client Allowlist Tests (`tests/client_allowlist_tests.rs`)
 
 Tests for IP/CIDR whitelist and proxy header trust configuration:
@@ -117,6 +109,11 @@ Tests for Prometheus metrics collection and reporting:
 
 - **Generated document parity**: The checked-in OpenAPI JSON must match Utoipa output
 - **Regeneration guidance**: Failures identify the command used to refresh the document
+
+#### Detailed Response Tests (`tests/detailed_response_tests.rs`)
+
+- **Typed response contract**: Full authorization responses deserialize through the server-owned
+  detailed response model and retain client-provided request identifiers.
 
 ## Running Tests
 
@@ -149,10 +146,10 @@ cargo test --tests
 ```bash
 cargo test --test handler_tests
 cargo test --test integration_tests
-cargo test --test cli_parsing_tests
 cargo test --test client_allowlist_tests
 cargo test --test metrics_tests
 cargo test --test openapi_docs_tests
+cargo test --test detailed_response_tests
 ```
 
 ### Run Specific Test by Name
