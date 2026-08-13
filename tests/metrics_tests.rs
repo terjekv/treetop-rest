@@ -1,4 +1,5 @@
-use actix_web::{App, http::StatusCode, test, web};
+use actix_web::{App, http::StatusCode, http::header, test, web};
+use prometheus_client::registry::Registry;
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock, RwLock};
 use treetop_core::{Action, Principal, Request, Resource, User};
@@ -8,9 +9,9 @@ use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
 
 // Shared metrics registry for all tests
-static METRICS_REGISTRY: OnceLock<Arc<prometheus::Registry>> = OnceLock::new();
+static METRICS_REGISTRY: OnceLock<Arc<Registry>> = OnceLock::new();
 
-fn get_metrics_registry() -> Arc<prometheus::Registry> {
+fn get_metrics_registry() -> Arc<Registry> {
     METRICS_REGISTRY
         .get_or_init(|| treetop_rest::metrics::init_prometheus().expect("Failed to init metrics"))
         .clone()
@@ -93,7 +94,68 @@ async fn test_metrics_content_type() {
 
     assert!(resp.status().is_success());
     let content_type = resp.headers().get("content-type").unwrap();
-    assert!(content_type.to_str().unwrap().starts_with("text/plain"));
+    assert!(
+        content_type
+            .to_str()
+            .unwrap()
+            .starts_with("application/openmetrics-text")
+    );
+}
+
+#[actix_web::test]
+async fn test_metrics_negotiates_prometheus_protobuf() {
+    let store = create_test_store();
+    let app = test::init_service(create_test_app_with_metrics(store)).await;
+
+    let req = test::TestRequest::get()
+        .uri("/metrics")
+        .insert_header((
+            header::ACCEPT,
+            treetop_rest::metrics::PROMETHEUS_PROTOBUF_CONTENT_TYPE,
+        ))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert!(resp.status().is_success());
+    assert!(
+        resp.headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("application/vnd.google.protobuf")
+    );
+    let body = test::read_body(resp).await;
+    assert!(!body.is_empty());
+    assert!(!body.starts_with(b"# HELP"));
+}
+
+#[actix_web::test]
+async fn test_metrics_rejects_zero_quality_protobuf() {
+    let store = create_test_store();
+    let app = test::init_service(create_test_app_with_metrics(store)).await;
+
+    let req = test::TestRequest::get()
+        .uri("/metrics")
+        .insert_header((
+            header::ACCEPT,
+            format!(
+                "{}; q=0.000",
+                treetop_rest::metrics::PROMETHEUS_PROTOBUF_CONTENT_TYPE
+            ),
+        ))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert!(resp.status().is_success());
+    assert!(
+        resp.headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("application/openmetrics-text")
+    );
 }
 
 #[actix_web::test]
@@ -189,6 +251,22 @@ async fn test_metrics_has_policy_eval_metrics() {
         body_str.contains("policy_eval_duration_seconds"),
         "Metrics should contain policy_eval_duration_seconds"
     );
+    assert!(
+        body_str.contains("policy_eval_phase_duration_seconds"),
+        "Metrics should contain policy_eval_phase_duration_seconds"
+    );
+    for phase in [
+        "apply_labels",
+        "construct_entities",
+        "resolve_groups",
+        "cedar_authorize",
+        "overhead",
+    ] {
+        assert!(
+            body_str.contains(&format!("phase=\"{phase}\"")),
+            "Metrics should contain the {phase} phase"
+        );
+    }
     assert!(
         body_str.contains("policy_reloads_total"),
         "Metrics should contain policy_reloads_total"
@@ -352,7 +430,7 @@ async fn test_metrics_prometheus_format() {
 
     // Verify metric types
     assert!(
-        body_str.contains("# TYPE policy_evals_total counter"),
+        body_str.contains("# TYPE policy_evals counter"),
         "policy_evals_total should be a counter"
     );
     assert!(
@@ -362,7 +440,7 @@ async fn test_metrics_prometheus_format() {
 
     // Verify HTTP metrics types
     assert!(
-        body_str.contains("# TYPE http_requests_total counter"),
+        body_str.contains("# TYPE http_requests counter"),
         "http_requests_total should be a counter"
     );
     assert!(
@@ -422,6 +500,40 @@ async fn test_openapi_endpoint_uses_fixed_metrics_path() {
 }
 
 #[actix_web::test]
+async fn test_http_metrics_use_route_templates_and_bound_unmatched_paths() {
+    let store = create_test_store();
+    let app = test::init_service(create_test_app_with_metrics(store)).await;
+
+    for path in [
+        "/api/v1/policies/alice",
+        "/api/v1/policies/bob",
+        "/not-a-route/first",
+        "/not-a-route/second",
+    ] {
+        let req = test::TestRequest::get().uri(path).to_request();
+        let _ = test::call_service(&app, req).await;
+    }
+
+    let req = test::TestRequest::get().uri("/metrics").to_request();
+    let resp = test::call_service(&app, req).await;
+    let body = test::read_body(resp).await;
+    let body = std::str::from_utf8(&body).unwrap();
+
+    assert!(body.lines().any(|line| {
+        line.starts_with("http_request_duration_seconds_count")
+            && line.contains("path=\"/api/v1/policies/{user}\"")
+    }));
+    assert!(body.lines().any(|line| {
+        line.starts_with("http_request_duration_seconds_count")
+            && line.contains("path=\"unmatched\"")
+    }));
+    assert!(!body.contains("path=\"/api/v1/policies/alice\""));
+    assert!(!body.contains("path=\"/api/v1/policies/bob\""));
+    assert!(!body.contains("path=\"/not-a-route/first\""));
+    assert!(!body.contains("path=\"/not-a-route/second\""));
+}
+
+#[actix_web::test]
 async fn test_metrics_has_histogram_buckets() {
     let store = create_test_store();
     let app = test::init_service(create_test_app_with_metrics(store)).await;
@@ -450,11 +562,26 @@ async fn test_metrics_has_histogram_buckets() {
     let body = test::read_body(resp).await;
     let body_str = std::str::from_utf8(&body).unwrap();
 
-    // Verify histogram has buckets
+    // Verify the histogram has useful sub-millisecond buckets plus sum and count.
     assert!(
         body_str.contains("policy_eval_duration_seconds_bucket"),
         "Duration histogram should have buckets"
     );
+    for metric in [
+        "http_request_duration_seconds_bucket",
+        "policy_eval_duration_seconds_bucket",
+    ] {
+        for boundary in [
+            "0.00001", "0.000025", "0.00005", "0.0001", "0.00025", "0.0005", "0.001", "0.0025",
+        ] {
+            assert!(
+                body_str.lines().any(|line| {
+                    line.starts_with(metric) && line.contains(&format!("le=\"{boundary}\""))
+                }),
+                "{metric} should include the {boundary} second boundary"
+            );
+        }
+    }
     assert!(
         body_str.contains("policy_eval_duration_seconds_sum"),
         "Duration histogram should have sum"

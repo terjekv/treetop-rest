@@ -519,9 +519,14 @@
         "operationId": "metrics",
         "responses": {
           "200": {
-            "description": "Prometheus metrics",
+            "description": "OpenMetrics text, or Prometheus protobuf with native histograms when requested by Accept",
             "content": {
-              "text/plain; version=0.0.4": {
+              "application/openmetrics-text": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/vnd.google.protobuf": {
                 "schema": {
                   "type": "string"
                 }

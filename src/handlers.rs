@@ -1,5 +1,5 @@
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, http::header, web};
-use prometheus::Registry;
+use prometheus_client::registry::Registry;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -889,14 +889,67 @@ pub async fn get_status(
     tag = "Treetop REST API",
     path = "/metrics",
     responses(
-        (status = 200, description = "Prometheus metrics", body = String, content_type = "text/plain; version=0.0.4"),
+        (status = 200, description = "OpenMetrics text, or Prometheus protobuf with native histograms when requested by Accept", content(
+            (String = "application/openmetrics-text"),
+            (String = "application/vnd.google.protobuf")
+        )),
     ),
 )]
-pub async fn metrics(registry: web::Data<Arc<Registry>>) -> Result<HttpResponse, ServiceError> {
-    match crate::metrics::encode_registry(&registry) {
-        Ok(buf) => Ok(HttpResponse::Ok()
-            .content_type("text/plain; version=0.0.4")
-            .body(buf)),
-        Err(e) => Err(ServiceError::EvaluationError(e.to_string())),
+pub async fn metrics(
+    req: HttpRequest,
+    registry: web::Data<Arc<Registry>>,
+) -> Result<HttpResponse, ServiceError> {
+    if accepts_prometheus_protobuf(&req) {
+        crate::metrics::encode_registry_protobuf(&registry)
+            .map(|body| {
+                HttpResponse::Ok()
+                    .content_type(crate::metrics::PROMETHEUS_PROTOBUF_CONTENT_TYPE)
+                    .body(body)
+            })
+            .map_err(|error| ServiceError::EvaluationError(error.to_string()))
+    } else {
+        crate::metrics::encode_registry_text(&registry)
+            .map(|body| {
+                HttpResponse::Ok()
+                    .content_type(crate::metrics::OPENMETRICS_CONTENT_TYPE)
+                    .body(body)
+            })
+            .map_err(|error| ServiceError::EvaluationError(error.to_string()))
     }
+}
+
+fn accepts_prometheus_protobuf(req: &HttpRequest) -> bool {
+    req.headers()
+        .get_all(header::ACCEPT)
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|media_range| {
+            let mut parts = media_range.split(';').map(str::trim);
+            if !parts.next().is_some_and(|media_type| {
+                media_type.eq_ignore_ascii_case("application/vnd.google.protobuf")
+            }) {
+                return false;
+            }
+
+            let mut prometheus_metric_family = false;
+            let mut delimited = false;
+            let mut enabled = true;
+
+            for parameter in parts {
+                let Some((name, value)) = parameter.split_once('=') else {
+                    continue;
+                };
+                let value = value.trim().trim_matches('"');
+                match name.trim().to_ascii_lowercase().as_str() {
+                    "proto" => {
+                        prometheus_metric_family = value == "io.prometheus.client.MetricFamily";
+                    }
+                    "encoding" => delimited = value.eq_ignore_ascii_case("delimited"),
+                    "q" => enabled = value.parse::<f32>().is_ok_and(|quality| quality > 0.0),
+                    _ => {}
+                }
+            }
+
+            enabled && prometheus_metric_family && delimited
+        })
 }

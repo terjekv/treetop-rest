@@ -14,6 +14,7 @@ pub struct BuildInfo {
     pub profile: Option<&'static str>,
     pub build_unix: Option<i64>,
     pub core: String,
+    pub core_sha: Option<&'static str>,
     pub cedar: &'static str,
 }
 
@@ -59,6 +60,7 @@ pub fn build_info() -> &'static BuildInfo {
         } else {
             None
         };
+        let core = core_build_info();
 
         BuildInfo {
             crate_name: pkg_name,
@@ -70,8 +72,10 @@ pub fn build_info() -> &'static BuildInfo {
             target_triple: option_env!("VERGEN_CARGO_TARGET_TRIPLE"),
             profile: option_env!("VERGEN_CARGO_PROFILE"),
             build_unix,
-            core: core_build_info().version.to_string(),
-            cedar: core_build_info().cedar_version,
+            core: core.version.to_string(),
+            core_sha: option_env!("TREETOP_CORE_GIT_SHA")
+                .or_else(|| core.git.as_ref().map(|git| git.sha)),
+            cedar: core.cedar_version,
         }
     })
 }

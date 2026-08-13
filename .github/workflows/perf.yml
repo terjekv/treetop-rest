@@ -11,7 +11,7 @@ permissions:
 jobs:
   rust-pr-bench:
     name: Gungraun PR Bench
-    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@v3
+    uses: terjekv/github-action-iai-callgrind/.github/workflows/rust-pr-bench.yml@85505416b19a0882644d4e704d80d90a98e1ee52 # v3
     with:
       backend: gungraun
       auto_discover: true
