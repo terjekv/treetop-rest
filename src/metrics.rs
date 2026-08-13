@@ -133,6 +133,14 @@ where
 }
 
 fn metric_action_id(action_id: &str) -> String {
+    if let Some((type_name, entity_id)) = simple_entity_uid_parts(action_id) {
+        let mut encoded = String::with_capacity(type_name.len() + entity_id.len() + 2);
+        encoded.push_str(type_name);
+        encoded.push_str("::");
+        encode_metric_label_component(&mut encoded, entity_id);
+        return encoded;
+    }
+
     match action_id.parse::<EntityUid>() {
         Ok(action) => format!(
             "{}::{}",
@@ -143,9 +151,56 @@ fn metric_action_id(action_id: &str) -> String {
     }
 }
 
+/// Split the canonical form emitted by `treetop_core::Action::to_string`
+/// without invoking Cedar's general entity-UID parser for the common case.
+/// Escaped IDs fall back to Cedar so this optimization cannot reinterpret an
+/// escape sequence differently from the policy engine.
+fn simple_entity_uid_parts(action_id: &str) -> Option<(&str, &str)> {
+    let without_closing_quote = action_id.strip_suffix('"')?;
+    let (type_name, entity_id) = without_closing_quote.rsplit_once("::\"")?;
+
+    if !valid_cedar_type_name(type_name)
+        || entity_id
+            .chars()
+            .any(|character| character == '\\' || character == '"' || character.is_control())
+    {
+        return None;
+    }
+
+    Some((type_name, entity_id))
+}
+
+fn valid_cedar_type_name(type_name: &str) -> bool {
+    type_name.split("::").all(|component| {
+        let mut bytes = component.bytes();
+        bytes
+            .next()
+            .is_some_and(|byte| byte == b'_' || byte.is_ascii_alphabetic())
+            && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+            && !matches!(
+                component,
+                "true"
+                    | "false"
+                    | "if"
+                    | "then"
+                    | "else"
+                    | "in"
+                    | "is"
+                    | "like"
+                    | "has"
+                    | "__cedar"
+            )
+    })
+}
+
 fn metric_label_component(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
 
+    encode_metric_label_component(&mut encoded, value);
+    encoded
+}
+
+fn encode_metric_label_component(encoded: &mut String, value: &str) {
     for character in value.chars() {
         match character {
             '%' => encoded.push_str("%25"),
@@ -160,8 +215,6 @@ fn metric_label_component(value: &str) -> String {
             character => encoded.push(character),
         }
     }
-
-    encoded
 }
 
 pub struct HttpMetrics {
@@ -508,9 +561,39 @@ mod tests {
     fn action_labels_are_canonical_and_collision_safe() {
         assert_eq!(metric_action_id(r#"Action::"view""#), "Action::view");
         assert_eq!(
+            metric_action_id(r#"Infra::Core::Action::"view:album""#),
+            "Infra::Core::Action::view:album"
+        );
+        assert_eq!(
             metric_action_id(r#"Action::"quote\"and%slash\\""#),
             "Action::quote%22and%25slash%5C"
         );
+        assert_eq!(
+            metric_action_id("Action::\"line\\nfeed\""),
+            "Action::line%0Afeed"
+        );
+    }
+
+    #[test]
+    fn simple_action_label_path_only_accepts_unambiguous_cedar_uids() {
+        assert_eq!(
+            simple_entity_uid_parts(r#"Action::"view""#),
+            Some(("Action", "view"))
+        );
+        assert_eq!(
+            simple_entity_uid_parts(r#"Infra::Core::Action::"view:album""#),
+            Some(("Infra::Core::Action", "view:album"))
+        );
+
+        for action_id in [
+            r#"Action::"quote\"""#,
+            "Action::\"line\\nfeed\"",
+            r#"bad-type::"view""#,
+            r#"if::"view""#,
+            r#"Action::view"#,
+        ] {
+            assert_eq!(simple_entity_uid_parts(action_id), None, "{action_id}");
+        }
     }
 
     #[test]

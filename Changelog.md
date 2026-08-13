@@ -35,8 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Cache canonical action labels and resolved Prometheus metric handles so repeated policy evaluations avoid reparsing
-  Cedar entity identifiers and relocking metric families on the authorization hot path.
+- Cache canonical action labels and resolved Prometheus metric handles, and recognize Core's unambiguous canonical
+  action form without a general Cedar parse, so policy evaluations avoid unnecessary parser and metric-family work on
+  the authorization hot path.
 
 ## [0.0.11] - 2026-08-13
 
