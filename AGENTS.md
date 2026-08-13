@@ -143,6 +143,15 @@
   the substantive summary, rationale, behavior notes, and issue references, but remove verification-only sections
   such as test commands, checklists, and `## Verification` before merging.
 
+## Releases
+
+- Before preparing a release commit, update all Rust dependencies and GitHub Actions to their latest stable versions,
+  and pin every Action to its full commit SHA. Refresh `Cargo.lock`, review upstream release notes for compatibility
+  and MSRV changes, and complete the repository's full verification and security checks on the resulting dependency
+  set before tagging the release.
+- Land dependency and GitHub Actions updates before the version-bump release commit so the signed release tag points
+  at a green commit that already contains every update.
+
 ## Change Discipline
 
 - Preserve backward compatibility unless the task explicitly requires a breaking change.
