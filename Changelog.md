@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added adaptive native histograms for HTTP and policy-evaluation latency through negotiated Prometheus protobuf
+  exposition, while retaining classic histogram output.
+- Added `policy_eval_phase_duration_seconds` for the label, entity-construction, group-resolution, Cedar authorization,
+  and residual phases already measured by Treetop Core.
+- Added an opt-in end-to-end latency characterization with representative single and batch workloads, CPU/runtime/build
+  provenance, documented example results, and a reviewable machine-anonymous JSON export. A Linux runner generates
+  scaling matrices across arbitrary counts or exact CPU-affinity sets and production or controlled Actix/Rayon layouts.
+  A k6 2.2.0 scenario adds fixed-sample, sustained, and constant-arrival-rate load from the same or a remote node.
+
+### Changed
+
+- **Breaking metrics exposition change:** Migrated `/metrics` text output from Prometheus 0.0.4 to OpenMetrics 1.0,
+  canonicalized action label values from `Action::\"id\"` to `Action::id`, and replaced raw HTTP paths with route
+  templates (`unmatched` for unknown routes). Metric sample names and label keys remain stable. Update direct text
+  parsers and label/path selectors during rollout; Prometheus scrapers continue to negotiate a supported format.
+- Expanded both latency histograms from the 11 Prometheus default boundaries to a strict 19-boundary superset spanning
+  10 microseconds through 10 seconds. Existing boundaries retain their time series, but wait one full query window
+  before evaluating classic quantiles across the rollout.
+- Replaced the `prometheus` client with `prometheus-client` 0.25.0, refreshed all compatible Rust lockfile dependencies,
+  updated `futures` to 0.3.34, updated `actions/upload-artifact` to v7.0.1, pinned all GitHub Actions to full commit SHAs,
+  and pinned the container builder to Rust 1.97.1 on Alpine 3.24.
+- Emit the full Treetop REST commit SHA and packaged Treetop Core source SHA in build metadata so performance reports
+  identify the exact source revisions.
+
+### Fixed
+
+- Cache canonical action labels and resolved Prometheus metric handles, and recognize Core's unambiguous canonical
+  action form without a general Cedar parse, so policy evaluations avoid unnecessary parser and metric-family work on
+  the authorization hot path.
+
 ## [0.0.11] - 2026-08-13
 
 ### Removed

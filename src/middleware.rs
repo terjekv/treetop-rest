@@ -248,9 +248,13 @@ where
                 info!(message = "Request end", request_id = %request_id, correlation_id = %correlation_id, method = &method, path = &path, client_ip = client_ip_s.as_deref(), run_time = ?elapsed_time, status_code = ?res.status());
                 // Record HTTP metrics
                 let status_code = res.status().as_u16();
+                let metrics_path = res
+                    .request()
+                    .match_pattern()
+                    .unwrap_or_else(|| "unmatched".to_owned());
                 metrics::http_metrics().observe(
                     &method,
-                    &path,
+                    &metrics_path,
                     status_code,
                     client_ip_s.as_deref(),
                     elapsed_time.as_secs_f64(),

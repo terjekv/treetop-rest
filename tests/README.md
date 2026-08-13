@@ -100,10 +100,46 @@ Tests for Prometheus metrics collection and reporting:
 - **Metrics endpoint**: Availability and content-type validation
 - **Build info**: Version labels (app, core, Cedar)
 - **Policy evaluation metrics**: Counters for evaluations, allowed/denied decisions
-- **HTTP request metrics**: Per-endpoint request counting and duration histograms
+- **HTTP request metrics**: Route-template request counting and duration histograms
 - **Client IP tracking**: Proxy-header-aware IP labels in HTTP metrics
-- **Histogram validation**: Bucket, sum, and count fields for latency histograms
-- **Prometheus format**: HELP and TYPE comments for proper format compliance
+- **Histogram validation**: Exact sub-millisecond classic boundaries plus native protobuf buckets
+- **Core phase metrics**: Labels, entity construction, group resolution, Cedar, and residual overhead
+- **Exposition formats**: OpenMetrics text and negotiated Prometheus protobuf
+
+#### Latency Characterization (`tests/latency_characterization.rs`)
+
+An ignored, threshold-free end-to-end characterization starts an in-process Actix server on an ephemeral loopback port.
+It reports full client HTTP timing and the corresponding Treetop Core phase means for health, policy retrieval, simple,
+labeled, and batch authorization workloads. It also supports an explicitly requested machine-anonymous JSON export.
+
+Run it in release mode:
+
+```bash
+cargo test --release --test latency_characterization -- --ignored --nocapture
+```
+
+On Linux, generate the default 1-, 2-, 4-, and 8-CPU JSON samples and a combined Markdown scaling table with:
+
+```bash
+scripts/run-performance-matrix.sh
+```
+
+See [`docs/performance.md`](../docs/performance.md#compare-cpu-allocations-and-runtime-layouts) for arbitrary CPU counts,
+exact CPU sets, sample/concurrency controls, and Actix/Rayon layouts.
+
+For sustained, fixed-arrival-rate, or remote load against an already running server, use the k6 2.2.0-compatible
+scenario:
+
+```bash
+TREETOP_K6_MODE=duration TREETOP_K6_VUS=8 TREETOP_K6_DURATION=60s scripts/run-k6.sh
+```
+
+The wrapper disables k6 usage reporting. Workloads, source-provenance fields, result privacy, and single-node CPU
+isolation are documented in [`docs/performance.md`](../docs/performance.md#sustained-and-remote-load-with-k6).
+
+See [`docs/performance.md`](../docs/performance.md) for workload definitions, environment controls, interpretation, and
+result-sharing privacy boundaries. The test remains ignored during ordinary `cargo test` because wall-clock output is
+machine-dependent; it has no latency pass/fail threshold.
 
 #### OpenAPI Documentation Tests (`tests/openapi_docs_tests.rs`)
 
@@ -148,6 +184,7 @@ cargo test --test handler_tests
 cargo test --test integration_tests
 cargo test --test client_allowlist_tests
 cargo test --test metrics_tests
+cargo test --test latency_characterization
 cargo test --test openapi_docs_tests
 cargo test --test detailed_response_tests
 ```

@@ -60,6 +60,174 @@ numbers when the underlying parser reports them.
 - Static copy: [`docs/openapi.json`](openapi.json). Regenerate it with
   `cargo run --example openapi > docs/openapi.json`.
 
+### GET /metrics
+
+- Purpose: Prometheus/OpenMetrics counters, gauges, and latency histograms.
+- Default response: OpenMetrics 1.0 text with
+  `Content-Type: application/openmetrics-text; version=1.0.0; charset=utf-8`.
+- Native histogram response: length-delimited Prometheus `MetricFamily` protobuf when the `Accept` header requests
+  `application/vnd.google.protobuf`, `proto=io.prometheus.client.MetricFamily`, and `encoding=delimited`.
+- This operational endpoint is subject to the configured client IP allowlist.
+
+The server exposes classic and native representations of both latency histograms. The metric sample names and label
+keys used before this migration are retained:
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `http_requests_total` | `method`, `path`, `status_code`, `client_ip` | Completed HTTP requests. |
+| `http_request_duration_seconds` | `method`, `path`, `status_code` | Server-side HTTP handling time. |
+| `policy_evals_total` | `action` | Core policy decisions. |
+| `policy_evals_allowed_total` | `action` | Allowed Core decisions. |
+| `policy_evals_denied_total` | `action` | Denied Core decisions. |
+| `policy_eval_duration_seconds` | `action` | Total Treetop Core evaluation time per decision. |
+| `policy_eval_phase_duration_seconds` | `action`, `phase` | One Core phase per decision. |
+| `policy_reloads_total` | none | Successful Core policy reloads. |
+| `schema_reloads_total` | none | Successful schema reloads. |
+| `schema_validation_failures_total` | `reason` | Schema validation failures. |
+| `context_validation_failures_total` | `reason` | Request-context validation failures. |
+| `treetop_build_info` | `app_version`, `core_version`, `cedar_version` | Build identity gauge fixed at 1. |
+
+HTTP `path` uses the registered route template, such as `/api/v1/policies/{user}`, rather than the raw user value.
+Requests that do not match a registered route use `path="unmatched"`. This bounds path cardinality. `client_ip` remains
+on the request counter for compatibility but is deliberately absent from the duration histogram.
+
+The action label is the Cedar entity UID without representation quotes, for example `Action::view`. Treat the action
+vocabulary as a controlled, bounded set. Percent, quote, backslash, and control characters inside unusual action IDs
+use uppercase percent encoding to keep text and protobuf labels identical and collision-safe. Dynamic per-request action
+IDs would create high-cardinality metrics.
+
+#### Policy phase semantics
+
+`policy_eval_phase_duration_seconds` builds directly on the phase timings exported by Treetop Core 0.0.19:
+
+| `phase` | Timing boundary |
+| --- | --- |
+| `apply_labels` | Apply configured labels to the request resource. |
+| `construct_entities` | Build Cedar entities used for evaluation. |
+| `resolve_groups` | Resolve principal group entities. |
+| `cedar_authorize` | Call Cedar's `Authorizer::is_authorized`. |
+| `overhead` | Non-negative residual of Core total minus the four named phases. |
+
+The residual currently includes Cedar request construction, result and diagnostic materialization, other unpartitioned
+Core work, and timer precision. If a future optimization requires another internal boundary, add it to Treetop Core's
+`EvaluationPhases` first and then expose it here; the REST server does not duplicate Core timers.
+
+One HTTP authorization batch produces one HTTP observation and one total plus five phase observations per decision.
+Batch decisions can execute concurrently. Consequently, the HTTP duration is not the sum of policy durations, and the
+sum of phase percentiles is not a total percentile. Compare sums or means when estimating phase contribution.
+
+The opt-in [performance characterization](performance.md) reports the wider client-observed HTTP round trip alongside
+these server and Core layers.
+
+#### Histogram layout
+
+OpenMetrics text exposes these 19 finite classic boundaries, in seconds:
+
+```text
+0.000010, 0.000025, 0.000050, 0.000100, 0.000250, 0.000500,
+0.001, 0.0025, 0.005, 0.010, 0.025, 0.050, 0.100, 0.250,
+0.500, 1, 2.5, 5, 10
+```
+
+The layout is a strict superset of the former Prometheus client defaults. It preserves every old boundary while adding
+10, 25, 50, 100, 250, and 500 microsecond buckets plus 1 and 2.5 millisecond buckets. This resolves the normal
+Treetop distribution without sacrificing the previous long-tail coverage.
+
+Each populated classic label set costs 20 bucket series including `+Inf`, plus `_sum` and `_count`: 22 series instead
+of the previous 14, a 57% increase. The phase metric can populate five label sets per observed action, or 110 classic
+series per action. HTTP series scale with observed `method`/route-template/`status_code` combinations. Native ingestion
+uses one sparse histogram series per label set and is the preferred long-term representation for varied workloads.
+
+The protobuf response also contains a standard exponential native histogram with a maximum bucket growth factor of
+1.1 and an instrumentation-side best-effort limit of 160 populated sparse buckets. Native buckets adapt to distributions
+outside the classic range without a server configuration matrix. The fixed classic layout remains fleet-wide so
+classic histograms are aggregatable during migration.
+
+#### Enable native histogram scraping
+
+[Prometheus 3.8 and newer](https://prometheus.io/docs/specs/native_histograms/) support native histograms as a stable
+feature, but Prometheus 3.x still requires explicit scrape configuration. During migration, ingest both forms so
+existing classic queries continue working:
+
+```yaml
+scrape_configs:
+  - job_name: treetop-rest
+    scrape_native_histograms: true
+    always_scrape_classic_histograms: true
+    static_configs:
+      - targets: ["treetop-rest:9999"]
+```
+
+After dashboards, alerts, recording rules, and the longest relevant query window use native histograms, set
+`always_scrape_classic_histograms: false` to avoid storing the classic bucket series. Prometheus then negotiates the
+protobuf response and retains the native part. If remote write is used, configure its native-histogram support as well.
+See the [Prometheus native histogram specification](https://prometheus.io/docs/specs/native_histograms/) for versioned
+scrape and remote-write requirements.
+
+No Treetop server flag selects the exposition: ordinary text scrapers receive the compatibility form, while Prometheus
+content negotiation selects protobuf. A direct protobuf request is:
+
+```bash
+curl -H 'Accept: application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily; encoding=delimited' \
+  http://localhost:9999/metrics --output metrics.pb
+```
+
+#### PromQL examples
+
+Native histogram p95 HTTP latency by route:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (path) (rate(http_request_duration_seconds[5m]))
+)
+```
+
+Native histogram p95 Core phase latency:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (action, phase) (rate(policy_eval_phase_duration_seconds[5m]))
+)
+```
+
+Native histogram mean phase time uses `histogram_sum` and `histogram_count`:
+
+```promql
+sum by (action, phase) (
+  histogram_sum(rate(policy_eval_phase_duration_seconds[5m]))
+)
+/
+sum by (action, phase) (
+  histogram_count(rate(policy_eval_phase_duration_seconds[5m]))
+)
+```
+
+The equivalent classic p95 query keeps the `le` dimension:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (le, path) (rate(http_request_duration_seconds_bucket[5m]))
+)
+```
+
+#### Migration notes
+
+- Metric sample names and label keys are unchanged. Existing exact queries for old classic boundaries continue to use
+  the same time series.
+- `/metrics` text changes from Prometheus 0.0.4 to OpenMetrics 1.0 and ends with `# EOF`. Counter `TYPE` metadata uses
+  the OpenMetrics family name without `_total`; counter sample names still end in `_total`.
+- Action label values change from Cedar's quoted display form, such as `Action::\"view\"`, to `Action::view`.
+- Raw HTTP paths change to route templates, and unmatched requests collapse to `unmatched`. Update dashboards that
+  selected a concrete `/api/v1/policies/<user>` path.
+- Newly added classic buckets and all native histogram series have no pre-deployment history. Avoid aggregating classic
+  quantiles across mixed old/new instances or a range spanning the rollout; wait at least one full query window after
+  every target uses the new layout.
+- Native and classic histogram samples are different Prometheus data types. During dual ingestion, keep their queries
+  separate; do not add them together.
+
 ### GET /api/v1/health
 
 - Purpose: legacy liveness probe retained for compatibility. New deployments should

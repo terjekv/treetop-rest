@@ -53,6 +53,9 @@ value is set.
 - The batch size limit applies to the `requests` array accepted by `POST /api/v1/authorize`; larger batches receive
   `400 Bad Request` before policy evaluation begins.
 - The client allowlist accepts comma-separated IPv4/IPv6 addresses or CIDRs. Use `*` to allow all.
+- Histogram boundaries are intentionally fixed across server instances rather than configurable. Native histogram
+  selection is controlled by Prometheus content negotiation and scrape settings; see
+  [the metrics API reference](api.md#get-metrics).
 
 ## Summary
 

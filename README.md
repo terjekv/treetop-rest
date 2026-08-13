@@ -107,6 +107,27 @@ For typed command-line access, interactive REPL support, configuration migration
 matrix queries, use [treetop-cli](https://github.com/terjekv/treetop-cli). Version 0.0.1 depends
 exactly on `treetop-client` 0.0.2 and is the migration target for the CLI bundled in REST v0.0.10.
 
+## Metrics and performance
+
+`GET /metrics` exposes OpenMetrics text with backward-compatible classic histogram series. Prometheus can negotiate
+protobuf to ingest adaptive native histograms. Latency is available at three distinct levels:
+
+- server-side HTTP handling in `http_request_duration_seconds`;
+- total Treetop Core evaluation in `policy_eval_duration_seconds`;
+- label, entity, group, Cedar authorization, and residual Core phases in
+  `policy_eval_phase_duration_seconds`.
+
+The classic layout includes boundaries from 10 microseconds through 10 seconds, while native histograms adapt across
+workload distributions. See the [metrics API reference](docs/api.md#get-metrics) for labels, bucket and series cost,
+Prometheus scrape configuration, PromQL examples, and migration notes.
+
+For repeatable client-observed HTTP throughput/latency and the matching Core phase means, run the opt-in release-mode
+characterization documented in [docs/performance.md](docs/performance.md). It can export a reviewable JSON report for
+voluntary machine-anonymous result sharing, including CPU/OS setup and REST/Core/Cedar version and source provenance but
+no automatic telemetry. The included Linux matrix runner defaults to real 1-, 2-, 4-, and 8-CPU allocations, accepts
+arbitrary counts or exact CPU sets, and can compare production, HTTP-heavy, batch-heavy, and combined thread layouts. A
+separate k6 scenario covers sustained, fixed-arrival-rate, and remote load while keeping result publication opt-in.
+
 ## Development
 
 There is also a `docker-compose.yml` to set up a minialist web server to host cedar policies.

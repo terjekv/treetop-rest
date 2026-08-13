@@ -95,9 +95,7 @@ fn openapi_describes_response_formats_and_operation_tags() {
             assert_eq!(operation["tags"], serde_json::json!(["Treetop REST API"]));
         }
     }
-    assert!(
-        spec["paths"]["/metrics"]["get"]["responses"]["200"]["content"]
-            ["text/plain; version=0.0.4"]
-            .is_object()
-    );
+    let metrics_content = &spec["paths"]["/metrics"]["get"]["responses"]["200"]["content"];
+    assert!(metrics_content["application/openmetrics-text"].is_object());
+    assert!(metrics_content["application/vnd.google.protobuf"].is_object());
 }
