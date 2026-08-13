@@ -41,6 +41,30 @@ A batch has one HTTP observation and one policy/phase observation per decision. 
 so HTTP time is neither the sum of evaluation times nor directly comparable to a single evaluation percentile.
 Percentiles from separate histograms must not be added or subtracted.
 
+## Deterministic regression benchmarks
+
+The pull-request performance workflow discovers every `benches/*_callgrind.rs` target and compares its instruction
+count with the base commit. Unlike the wall-clock characterization, these Gungraun/Callgrind results are deterministic
+enough to enforce the workflow's regression threshold.
+
+Authorization is covered in both configurations that matter for interpreting observability cost:
+
+- `authorize_batch_brief_128_callgrind` evaluates 128 decisions with Treetop Core's no-op metrics sink.
+- `authorize_batch_metrics_128_callgrind` runs the same workload after installing the production Prometheus sink. Its
+  setup is outside the measured region, while metric recording for every decision remains inside it.
+
+Run an individual comparison locally with the Gungraun runner matching the repository dependency:
+
+```bash
+cargo install gungraun-runner --version 0.19.4 --locked
+cargo bench --bench authorize_batch_brief_128_callgrind
+cargo bench --bench authorize_batch_metrics_128_callgrind
+```
+
+Gungraun compares against the prior local result for the same target. Run it once before and once after a change without
+removing `target/gungraun` between runs. Compare absolute instruction counts between the no-op and production-metrics
+targets only when both were built from the same commit with the same toolchain.
+
 ## Reproduce the characterization
 
 Run the ignored test in release mode. It starts a real Actix server on an ephemeral loopback port and does not need

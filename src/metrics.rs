@@ -1,6 +1,7 @@
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::hash::Hash;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use cedar_policy::EntityUid;
 use prometheus_client::encoding::{EncodeLabelSet, prometheus_protobuf, text};
@@ -70,6 +71,51 @@ struct BuildInfoLabels {
 }
 
 type DurationFamily<L> = Family<L, Histogram, fn() -> Histogram>;
+
+struct EvaluationPhaseMetric {
+    labels: EvaluationPhaseLabels,
+    histogram: OnceLock<Histogram>,
+}
+
+impl EvaluationPhaseMetric {
+    fn new(action: &str, phase: &'static str) -> Self {
+        Self {
+            labels: EvaluationPhaseLabels {
+                action: action.to_owned(),
+                phase,
+            },
+            histogram: OnceLock::new(),
+        }
+    }
+}
+
+struct ActionMetrics {
+    labels: ActionLabels,
+    evals_total: OnceLock<Counter>,
+    evals_allowed: OnceLock<Counter>,
+    evals_denied: OnceLock<Counter>,
+    eval_duration_seconds: OnceLock<Histogram>,
+    phases: [EvaluationPhaseMetric; 5],
+}
+
+impl ActionMetrics {
+    fn new(action: String) -> Self {
+        Self {
+            phases: [
+                EvaluationPhaseMetric::new(&action, "apply_labels"),
+                EvaluationPhaseMetric::new(&action, "construct_entities"),
+                EvaluationPhaseMetric::new(&action, "resolve_groups"),
+                EvaluationPhaseMetric::new(&action, "cedar_authorize"),
+                EvaluationPhaseMetric::new(&action, "overhead"),
+            ],
+            labels: ActionLabels { action },
+            evals_total: OnceLock::new(),
+            evals_allowed: OnceLock::new(),
+            evals_denied: OnceLock::new(),
+            eval_duration_seconds: OnceLock::new(),
+        }
+    }
+}
 
 fn duration_histogram() -> Histogram {
     Histogram::new_classic_and_native(
@@ -269,6 +315,7 @@ pub struct PrometheusMetricsSink {
     eval_duration_seconds: DurationFamily<ActionLabels>,
     eval_phase_duration_seconds: DurationFamily<EvaluationPhaseLabels>,
     reloads_total: Counter,
+    action_metrics: RwLock<HashMap<String, Arc<ActionMetrics>>>,
 }
 
 impl PrometheusMetricsSink {
@@ -320,14 +367,37 @@ impl PrometheusMetricsSink {
             eval_duration_seconds,
             eval_phase_duration_seconds,
             reloads_total,
+            action_metrics: RwLock::new(HashMap::new()),
         }
     }
 
-    fn observe_phase(&self, action: &str, phase: &'static str, duration_ms: f64) {
-        self.eval_phase_duration_seconds
-            .get_or_create_owned(&EvaluationPhaseLabels {
-                action: action.to_owned(),
-                phase,
+    fn action_metrics(&self, action_id: &str) -> Arc<ActionMetrics> {
+        // The Core action ID is stable for a bounded action vocabulary. Cache by
+        // that raw value so steady-state observations do not need to reparse a
+        // Cedar EntityUid merely to find their canonical Prometheus label.
+        if let Some(metrics) = self
+            .action_metrics
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(action_id)
+        {
+            return Arc::clone(metrics);
+        }
+
+        let metrics = Arc::new(ActionMetrics::new(metric_action_id(action_id)));
+        let mut cached = self
+            .action_metrics
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(cached.entry(action_id.to_owned()).or_insert(metrics))
+    }
+
+    fn observe_phase(&self, metric: &EvaluationPhaseMetric, duration_ms: f64) {
+        metric
+            .histogram
+            .get_or_init(|| {
+                self.eval_phase_duration_seconds
+                    .get_or_create_owned(&metric.labels)
             })
             .observe(duration_ms / 1_000.0);
     }
@@ -335,27 +405,38 @@ impl PrometheusMetricsSink {
 
 impl MetricsSink for PrometheusMetricsSink {
     fn on_evaluation(&self, stats: &EvaluationStats) {
-        let labels = ActionLabels {
-            action: metric_action_id(&stats.action_id),
-        };
-        self.evals_total.get_or_create_owned(&labels).inc();
+        let metrics = self.action_metrics(&stats.action_id);
+        metrics
+            .evals_total
+            .get_or_init(|| self.evals_total.get_or_create_owned(&metrics.labels))
+            .inc();
         if stats.allowed {
-            self.evals_allowed.get_or_create_owned(&labels).inc();
+            metrics
+                .evals_allowed
+                .get_or_init(|| self.evals_allowed.get_or_create_owned(&metrics.labels))
+                .inc();
         } else {
-            self.evals_denied.get_or_create_owned(&labels).inc();
+            metrics
+                .evals_denied
+                .get_or_init(|| self.evals_denied.get_or_create_owned(&metrics.labels))
+                .inc();
         }
-        self.eval_duration_seconds
-            .get_or_create_owned(&labels)
+        metrics
+            .eval_duration_seconds
+            .get_or_init(|| {
+                self.eval_duration_seconds
+                    .get_or_create_owned(&metrics.labels)
+            })
             .observe(stats.duration.as_secs_f64());
     }
 
     fn on_evaluation_phases(&self, stats: &EvaluationStats, phases: &EvaluationPhases) {
-        let action = metric_action_id(&stats.action_id);
-        self.observe_phase(&action, "apply_labels", phases.apply_labels_ms);
-        self.observe_phase(&action, "construct_entities", phases.construct_entities_ms);
-        self.observe_phase(&action, "resolve_groups", phases.resolve_groups_ms);
-        self.observe_phase(&action, "cedar_authorize", phases.authorize_ms);
-        self.observe_phase(&action, "overhead", phases.overhead_ms());
+        let metrics = self.action_metrics(&stats.action_id);
+        self.observe_phase(&metrics.phases[0], phases.apply_labels_ms);
+        self.observe_phase(&metrics.phases[1], phases.construct_entities_ms);
+        self.observe_phase(&metrics.phases[2], phases.resolve_groups_ms);
+        self.observe_phase(&metrics.phases[3], phases.authorize_ms);
+        self.observe_phase(&metrics.phases[4], phases.overhead_ms());
     }
 
     fn on_reload(&self, _stats: &ReloadStats) {
@@ -501,6 +582,42 @@ mod tests {
                 "missing phase {phase} in:\n{text}"
             );
         }
+    }
+
+    #[test]
+    fn action_metric_handles_are_cached_across_core_callbacks() {
+        let mut registry = Registry::default();
+        let sink = PrometheusMetricsSink::new(&mut registry);
+        let stats = evaluation_stats();
+        let phases = EvaluationPhases {
+            apply_labels_ms: 0.01,
+            construct_entities_ms: 0.02,
+            resolve_groups_ms: 0.03,
+            authorize_ms: 0.04,
+            total_ms: 0.15,
+        };
+
+        sink.on_evaluation(&stats);
+        sink.on_evaluation_phases(&stats, &phases);
+        sink.on_evaluation(&stats);
+        sink.on_evaluation_phases(&stats, &phases);
+
+        let cached = sink
+            .action_metrics
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let metrics = cached.get(&stats.action_id).unwrap();
+        assert_eq!(cached.len(), 1);
+        assert_eq!(metrics.evals_total.get().unwrap().get(), 2);
+        assert_eq!(metrics.evals_allowed.get().unwrap().get(), 2);
+        assert!(metrics.evals_denied.get().is_none());
+        assert!(metrics.eval_duration_seconds.get().is_some());
+        assert!(
+            metrics
+                .phases
+                .iter()
+                .all(|phase| phase.histogram.get().is_some())
+        );
     }
 
     #[test]

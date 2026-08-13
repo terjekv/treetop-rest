@@ -101,6 +101,10 @@ name = "authorize_batch_detailed_128_callgrind"
 harness = false
 
 [[bench]]
+name = "authorize_batch_metrics_128_callgrind"
+harness = false
+
+[[bench]]
 name = "labels_callgrind"
 harness = false
 

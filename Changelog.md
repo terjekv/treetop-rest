@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Emit the full Treetop REST commit SHA and packaged Treetop Core source SHA in build metadata so performance reports
   identify the exact source revisions.
 
+### Fixed
+
+- Cache canonical action labels and resolved Prometheus metric handles so repeated policy evaluations avoid reparsing
+  Cedar entity identifiers and relocking metric families on the authorization hot path.
+
 ## [0.0.11] - 2026-08-13
 
 ### Removed
