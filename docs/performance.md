@@ -273,19 +273,21 @@ The phase table aggregates all warm-up and measured decisions at both concurrenc
 
 The same node was constrained to CPU sets `0`, `0,16`, `0,1`, `0-3`, and `0-7` with the matrix runner's `default`
 production layout. CPUs 0 and 16 are SMT siblings on one physical core; CPUs 0 and 1 are separate physical cores. Each
-point used 200 warm-ups and 1,000 samples. The REST working tree and Core SHA were the same as the example above. This
-run is sufficient to illustrate the report and topology effects, but should be repeated with the default or a larger
-sample count before using its tail values for capacity planning.
+point used 200 warm-ups and 1,000 samples. The run used clean REST commit
+`b82bc76b0074b53081cb6231aa8a6c63bff72073` and the Core SHA above. This sample is sufficient to illustrate the report
+and topology effects, but should be repeated with the default or a larger sample count before using its tail values for
+capacity planning. The [published result](performance-results/2026-08-13-xeon-silver-4216.md) contains the complete
+HTTP table, phase means, CPU specifications, and reproduction command.
 
 | CPU set | Actix/Rayon | Maximum concurrency | `livez` requests/s | Simple authorize requests/s | Batch-128 requests/s at concurrency 1 | Batch-128 p95 at concurrency 1 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `0` | 1/1 | 1 | 15,767 | 5,701 | 140 | 7,234.5 µs |
-| `0,16` | 1/1 | 2 | 19,300 | 7,422 | 139 | 7,251.8 µs |
-| `0,1` | 1/1 | 2 | 30,318 | 10,020 | 141 | 7,151.2 µs |
-| `0-3` | 2/2 | 4 | 33,485 | 19,700 | 252 | 3,997.2 µs |
-| `0-7` | 4/4 | 8 | 37,511 | 36,589 | 424 | 2,374.8 µs |
+| `0` | 1/1 | 1 | 15,910 | 5,758 | 140 | 7,182.0 µs |
+| `0,16` | 1/1 | 2 | 19,339 | 7,395 | 138 | 7,274.8 µs |
+| `0,1` | 1/1 | 2 | 30,365 | 10,096 | 141 | 7,161.6 µs |
+| `0-3` | 2/2 | 4 | 34,561 | 17,974 | 249 | 4,054.1 µs |
+| `0-7` | 4/4 | 8 | 38,434 | 34,782 | 420 | 2,401.9 µs |
 
-Two logical CPUs are not necessarily two cores: at concurrency 2, the SMT-sibling set reached about 74% of the simple
+Two logical CPUs are not necessarily two cores: at concurrency 2, the SMT-sibling set reached about 73% of the simple
 authorization throughput of the separate-core set. The cheap liveness path approached a plateau after two physical
 cores, while independent simple authorization throughput continued to scale through eight CPUs. A single 128-decision
 batch remained flat while the production calculation selected one Rayon thread, then improved when two and four Rayon
