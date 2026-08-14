@@ -110,9 +110,11 @@ exactly on `treetop-client` 0.0.2 and is the migration target for the CLI bundle
 ## Metrics and performance
 
 `GET /metrics` exposes OpenMetrics text with backward-compatible classic histogram series. Prometheus can negotiate
-protobuf to ingest adaptive native histograms. Latency is available at three distinct levels:
+protobuf to ingest adaptive native histograms. Latency is available at four distinct levels:
 
 - server-side HTTP handling in `http_request_duration_seconds`;
+- accepted authorization-request handling by bounded batch-size class in
+  `authorization_request_duration_seconds`, paired with the `authorization_batch_size` distribution;
 - total Treetop Core evaluation in `policy_eval_duration_seconds`;
 - label, entity, group, Cedar authorization, and residual Core phases in
   `policy_eval_phase_duration_seconds`.

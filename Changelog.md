@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `authorization_batch_size` and bounded `batch_size_class` labels on a dedicated authorization latency histogram
+  so operators can correlate slow REST authorization requests with their batch sizes and calculate amortized server
+  time per authorization check.
 - Added adaptive native histograms for HTTP and policy-evaluation latency through negotiated Prometheus protobuf
   exposition, while retaining classic histogram output.
 - Added `policy_eval_phase_duration_seconds` for the label, entity-construction, group-resolution, Cedar authorization,

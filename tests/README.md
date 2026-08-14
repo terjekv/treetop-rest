@@ -101,6 +101,7 @@ Tests for Prometheus metrics collection and reporting:
 - **Build info**: Version labels (app, core, Cedar)
 - **Policy evaluation metrics**: Counters for evaluations, allowed/denied decisions
 - **HTTP request metrics**: Route-template request counting and duration histograms
+- **Authorization batch metrics**: Accepted batch-size distribution and latency correlation by fixed size class
 - **Client IP tracking**: Proxy-header-aware IP labels in HTTP metrics
 - **Histogram validation**: Exact sub-millisecond classic boundaries plus native protobuf buckets
 - **Core phase metrics**: Labels, entity construction, group resolution, Cedar, and residual overhead

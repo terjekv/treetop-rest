@@ -519,7 +519,7 @@
         "operationId": "metrics",
         "responses": {
           "200": {
-            "description": "OpenMetrics text, or Prometheus protobuf with native histograms when requested by Accept",
+            "description": "OpenMetrics text, including authorization batch-size metrics, or Prometheus protobuf with native histograms when requested by Accept",
             "content": {
               "application/openmetrics-text": {
                 "schema": {

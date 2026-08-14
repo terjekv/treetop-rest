@@ -64,6 +64,11 @@ struct EvaluationPhaseLabels {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct AuthorizationDurationLabels {
+    batch_size_class: &'static str,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct BuildInfoLabels {
     app_version: String,
     core_version: String,
@@ -130,6 +135,79 @@ where
     L: Clone + Hash + Eq,
 {
     Family::new_with_constructor(duration_histogram as fn() -> Histogram)
+}
+
+const AUTHORIZATION_BATCH_SIZE_BUCKETS: &[f64] = &[0.0, 1.0, 4.0, 8.0, 32.0, 128.0, 512.0];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AcceptedAuthorizationBatch {
+    size: usize,
+}
+
+impl AcceptedAuthorizationBatch {
+    pub(crate) const fn new(size: usize) -> Self {
+        Self { size }
+    }
+
+    const fn size_class(self) -> &'static str {
+        match self.size {
+            0 => "0",
+            1 => "1",
+            2..=4 => "2-4",
+            5..=8 => "5-8",
+            9..=32 => "9-32",
+            33..=128 => "33-128",
+            129..=512 => "129-512",
+            _ => "513+",
+        }
+    }
+}
+
+struct AuthorizationMetrics {
+    batch_size: Histogram,
+    request_duration_seconds: DurationFamily<AuthorizationDurationLabels>,
+}
+
+impl AuthorizationMetrics {
+    fn new(registry: &mut Registry) -> Self {
+        let batch_size = Histogram::new(AUTHORIZATION_BATCH_SIZE_BUCKETS.iter().copied());
+        let request_duration_seconds = duration_family();
+
+        registry.register(
+            "authorization_batch_size",
+            "Authorization checks per completed, accepted POST /api/v1/authorize request; admission-rejected requests, payload or JSON extraction failures, and over-limit batches are excluded",
+            batch_size.clone(),
+        );
+        registry.register_with_unit(
+            "authorization_request_duration",
+            "Server-side latency for completed, accepted POST /api/v1/authorize requests by bounded batch-size class; admission-rejected requests, payload or JSON extraction failures, and over-limit batches are excluded",
+            Unit::Seconds,
+            request_duration_seconds.clone(),
+        );
+
+        Self {
+            batch_size,
+            request_duration_seconds,
+        }
+    }
+
+    fn observe(&self, batch: AcceptedAuthorizationBatch, duration_secs: f64) {
+        self.batch_size.observe(batch.size as f64);
+        self.request_duration_seconds
+            .get_or_create_owned(&AuthorizationDurationLabels {
+                batch_size_class: batch.size_class(),
+            })
+            .observe(duration_secs);
+    }
+}
+
+static AUTHORIZATION_METRICS: OnceLock<Arc<AuthorizationMetrics>> = OnceLock::new();
+
+pub(crate) fn record_authorization_request(batch: AcceptedAuthorizationBatch, duration_secs: f64) {
+    AUTHORIZATION_METRICS
+        .get()
+        .expect("authorization metrics not initialized")
+        .observe(batch, duration_secs);
 }
 
 fn metric_action_id(action_id: &str) -> String {
@@ -522,6 +600,9 @@ pub fn init_prometheus() -> Result<Arc<Registry>, Box<dyn std::error::Error>> {
     let http = Arc::new(HttpMetrics::new(&mut registry));
     let _ = HTTP_METRICS.set(http);
 
+    let authorization = Arc::new(AuthorizationMetrics::new(&mut registry));
+    let _ = AUTHORIZATION_METRICS.set(authorization);
+
     let service = Arc::new(ServiceMetrics::new(&mut registry));
     let _ = SERVICE_METRICS.set(service);
 
@@ -610,6 +691,62 @@ mod tests {
         ] {
             assert!(LATENCY_BUCKETS.contains(&historical));
         }
+    }
+
+    #[test]
+    fn authorization_batch_size_classes_cover_all_boundaries() {
+        for (size, expected) in [
+            (0, "0"),
+            (1, "1"),
+            (2, "2-4"),
+            (4, "2-4"),
+            (5, "5-8"),
+            (8, "5-8"),
+            (9, "9-32"),
+            (32, "9-32"),
+            (33, "33-128"),
+            (128, "33-128"),
+            (129, "129-512"),
+            (512, "129-512"),
+            (513, "513+"),
+            (usize::MAX, "513+"),
+        ] {
+            assert_eq!(AcceptedAuthorizationBatch::new(size).size_class(), expected);
+        }
+    }
+
+    #[test]
+    fn authorization_metrics_expose_batch_size_and_correlated_latency() {
+        let mut registry = Registry::default();
+        let metrics = AuthorizationMetrics::new(&mut registry);
+        metrics.observe(AcceptedAuthorizationBatch::new(33), 0.025);
+
+        let body = String::from_utf8(encode_registry_text(&registry).unwrap()).unwrap();
+        for metric in [
+            "authorization_batch_size",
+            "authorization_request_duration_seconds",
+        ] {
+            let help = body
+                .lines()
+                .find(|line| line.starts_with(&format!("# HELP {metric} ")))
+                .unwrap();
+            assert!(help.contains("admission-rejected requests"));
+            assert!(help.contains("over-limit batches are excluded"));
+        }
+        assert!(body.contains("# TYPE authorization_batch_size histogram"));
+        for boundary in ["0.0", "1.0", "4.0", "8.0", "32.0", "128.0", "512.0"] {
+            assert!(body.lines().any(|line| {
+                line.starts_with("authorization_batch_size_bucket{")
+                    && line.contains(&format!("le=\"{boundary}\""))
+            }));
+        }
+        assert!(body.contains("authorization_batch_size_sum 33.0"));
+        assert!(body.contains("authorization_batch_size_count 1"));
+        assert!(body.lines().any(|line| {
+            line.starts_with("authorization_request_duration_seconds_count{")
+                && line.contains("batch_size_class=\"33-128\"")
+                && line.ends_with(" 1")
+        }));
     }
 
     #[test]
@@ -719,5 +856,32 @@ mod tests {
         assert_eq!(histogram.bucket.len(), LATENCY_BUCKETS.len() + 1);
         assert!(!histogram.positive_span.is_empty());
         assert!(!histogram.positive_delta.is_empty());
+    }
+
+    #[test]
+    fn protobuf_includes_authorization_batch_and_native_latency_histograms() {
+        let mut registry = Registry::default();
+        let metrics = AuthorizationMetrics::new(&mut registry);
+        metrics.observe(AcceptedAuthorizationBatch::new(33), 0.025);
+
+        let families = prometheus_protobuf::encode(&registry).unwrap();
+        let batch_histogram = families
+            .iter()
+            .find(|family| family.name == "authorization_batch_size")
+            .and_then(|family| family.metric[0].histogram.as_ref())
+            .unwrap();
+        assert_eq!(
+            batch_histogram.bucket.len(),
+            AUTHORIZATION_BATCH_SIZE_BUCKETS.len() + 1
+        );
+
+        let duration_histogram = families
+            .iter()
+            .find(|family| family.name == "authorization_request_duration_seconds")
+            .and_then(|family| family.metric[0].histogram.as_ref())
+            .unwrap();
+        assert_eq!(duration_histogram.bucket.len(), LATENCY_BUCKETS.len() + 1);
+        assert!(!duration_histogram.positive_span.is_empty());
+        assert!(!duration_histogram.positive_delta.is_empty());
     }
 }

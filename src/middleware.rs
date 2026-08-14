@@ -1,4 +1,7 @@
-use crate::{config::ClientAllowlist, metrics};
+use crate::{
+    config::ClientAllowlist,
+    metrics::{self, AcceptedAuthorizationBatch},
+};
 use actix_service::{Service, Transform};
 use actix_web::{
     Error, HttpMessage,
@@ -259,6 +262,14 @@ where
                     client_ip_s.as_deref(),
                     elapsed_time.as_secs_f64(),
                 );
+                if let Some(batch) = res
+                    .request()
+                    .extensions()
+                    .get::<AcceptedAuthorizationBatch>()
+                    .copied()
+                {
+                    metrics::record_authorization_request(batch, elapsed_time.as_secs_f64());
+                }
 
                 res.headers_mut().insert(
                     REQUEST_ID,
