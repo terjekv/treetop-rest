@@ -223,9 +223,9 @@ For a publishable result, provide the target build provenance and the server CPU
 into the report and do not become metric tags:
 
 ```bash
-TREETOP_K6_REST_VERSION=0.0.11 \
+TREETOP_K6_REST_VERSION=0.0.12 \
 TREETOP_K6_REST_SHA=<full-rest-sha> \
-TREETOP_K6_CORE_VERSION=0.0.19 \
+TREETOP_K6_CORE_VERSION=0.0.20 \
 TREETOP_K6_CORE_SHA=<full-core-sha> \
 TREETOP_K6_CEDAR_VERSION=4.12.0 \
 TREETOP_K6_SERVER_CPUS=0-3 \
