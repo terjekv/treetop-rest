@@ -30,7 +30,7 @@ server handling, response serialization, and response transfer.
 
 The HTTP histogram starts inside Treetop's tracing middleware and stops when the Actix service returns its response. It
 does not include client work or transferring the completed response to the client. The policy histograms come directly
-from the `treetop-core` 0.0.20 observability sink:
+from the `treetop-core` 0.0.21 observability sink:
 
 - `policy_eval_duration_seconds` is Core's total evaluation timer for one authorization decision.
 - `cedar_authorize` measures the Cedar `Authorizer::is_authorized` call.
@@ -225,7 +225,7 @@ into the report and do not become metric tags:
 ```bash
 TREETOP_K6_REST_VERSION=0.0.12 \
 TREETOP_K6_REST_SHA=<full-rest-sha> \
-TREETOP_K6_CORE_VERSION=0.0.20 \
+TREETOP_K6_CORE_VERSION=0.0.21 \
 TREETOP_K6_CORE_SHA=<full-core-sha> \
 TREETOP_K6_CEDAR_VERSION=4.12.0 \
 TREETOP_K6_SERVER_CPUS=0-3 \

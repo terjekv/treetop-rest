@@ -622,7 +622,7 @@ fn anonymous_report_schema_includes_source_provenance_without_host_identity() {
         treetop_rest_version: "0.0.12",
         treetop_rest_sha: "rest-sha".to_owned(),
         treetop_rest_dirty: true,
-        treetop_core_version: "0.0.20".to_owned(),
+        treetop_core_version: "0.0.21".to_owned(),
         treetop_core_sha: "core-sha".to_owned(),
         treetop_core_dirty: false,
         cedar_version: "4.12.0",
