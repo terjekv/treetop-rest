@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::{Arc, OnceLock, RwLock};
 use treetop_core::{Action, Principal, Request, Resource, User};
 use treetop_rest::handlers;
+use treetop_rest::middleware::TracingMiddleware;
 use treetop_rest::models::AuthorizeRequest;
 use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
@@ -633,6 +634,98 @@ async fn test_http_metrics_include_client_ip_label() {
     );
 }
 
+#[actix_web::test]
+async fn test_authorization_metrics_correlate_accepted_batch_size_and_exclude_rejections() {
+    let store = create_test_store();
+    let registry = get_metrics_registry();
+    let parallel = ParallelConfig::new(1, 1, None);
+    let runtime = handlers::AuthorizeRuntimeConfig {
+        max_batch_size: 33,
+        ..handlers::AuthorizeRuntimeConfig::default()
+    };
+    let app = test::init_service(
+        App::new()
+            .wrap(TracingMiddleware::new())
+            .app_data(web::Data::new(store))
+            .app_data(web::Data::new(registry))
+            .app_data(web::Data::new(parallel))
+            .app_data(web::Data::new(runtime))
+            .configure(handlers::init),
+    )
+    .await;
+
+    let check = Request {
+        principal: Principal::User(User::from_str("User::\"alice\"").unwrap()),
+        action: Action::from_str("Action::\"view\"").unwrap(),
+        resource: Resource::new("Photo", "VacationPhoto94.jpg"),
+    };
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize")
+        .set_json(AuthorizeRequest::single(check.clone()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let accepted = AuthorizeRequest::from_requests(std::iter::repeat_n(check.clone(), 33));
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize")
+        .set_json(accepted)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let over_limit = AuthorizeRequest::from_requests(std::iter::repeat_n(check, 34));
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize")
+        .set_json(over_limit)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/authorize")
+        .insert_header((header::CONTENT_TYPE, "application/json"))
+        .set_payload("{not-json")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    let req = test::TestRequest::get().uri("/metrics").to_request();
+    let resp = test::call_service(&app, req).await;
+    let body = test::read_body(resp).await;
+    let body = std::str::from_utf8(&body).unwrap();
+
+    assert!(
+        body.contains(
+            "# HELP authorization_batch_size Authorization checks per completed, accepted"
+        )
+    );
+    assert!(body.contains("over-limit batches are excluded"));
+    assert!(body.lines().any(|line| {
+        line.starts_with("authorization_request_duration_seconds_count{")
+            && line.contains("batch_size_class=\"1\"")
+    }));
+    assert_eq!(
+        extract_labeled_metric_value(
+            body,
+            "authorization_request_duration_seconds_count",
+            &["batch_size_class=\"33-128\""],
+        ),
+        1.0
+    );
+    let through_32 =
+        extract_labeled_metric_value(body, "authorization_batch_size_bucket", &["le=\"32.0\""]);
+    let through_128 =
+        extract_labeled_metric_value(body, "authorization_batch_size_bucket", &["le=\"128.0\""]);
+    assert_eq!(through_128 - through_32, 1.0);
+    assert!(body.lines().any(|line| {
+        line.starts_with("http_request_duration_seconds_count{")
+            && line.contains("path=\"/api/v1/authorize\"")
+            && line.contains("status_code=\"200\"")
+    }));
+}
+
 /// Helper function to extract a metric value from Prometheus text format
 /// This is a simple parser that finds the first occurrence of the metric name
 /// and extracts its value (works for counters without labels at the end)
@@ -653,4 +746,17 @@ fn extract_metric_value(metrics: &str, metric_name: &str) -> f64 {
         }
     }
     0.0
+}
+
+fn extract_labeled_metric_value(metrics: &str, metric_name: &str, labels: &[&str]) -> f64 {
+    metrics
+        .lines()
+        .find(|line| {
+            line.starts_with(metric_name)
+                && !line.starts_with('#')
+                && labels.iter().all(|label| line.contains(label))
+        })
+        .and_then(|line| line.split_whitespace().last())
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0.0)
 }

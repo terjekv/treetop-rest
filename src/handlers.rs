@@ -556,6 +556,7 @@ pub struct AuthorizeQuery {
         ),
     )]
 pub async fn authorize(
+    http_req: HttpRequest,
     store: web::Data<SharedPolicyStore>,
     parallel: web::Data<ParallelConfig>,
     runtime_cfg: Option<web::Data<AuthorizeRuntimeConfig>>,
@@ -570,6 +571,9 @@ pub async fn authorize(
             runtime_cfg.max_batch_size
         )));
     }
+    http_req
+        .extensions_mut()
+        .insert(metrics::AcceptedAuthorizationBatch::new(req.requests.len()));
 
     let store = store.read()?;
     let engine_snapshot = store.engine.clone();
@@ -889,7 +893,7 @@ pub async fn get_status(
     tag = "Treetop REST API",
     path = "/metrics",
     responses(
-        (status = 200, description = "OpenMetrics text, or Prometheus protobuf with native histograms when requested by Accept", content(
+        (status = 200, description = "OpenMetrics text, including authorization batch-size metrics, or Prometheus protobuf with native histograms when requested by Accept", content(
             (String = "application/openmetrics-text"),
             (String = "application/vnd.google.protobuf")
         )),

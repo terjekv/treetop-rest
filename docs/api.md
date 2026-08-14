@@ -69,13 +69,15 @@ numbers when the underlying parser reports them.
   `application/vnd.google.protobuf`, `proto=io.prometheus.client.MetricFamily`, and `encoding=delimited`.
 - This operational endpoint is subject to the configured client IP allowlist.
 
-The server exposes classic and native representations of both latency histograms. The metric sample names and label
-keys used before this migration are retained:
+The server exposes classic and native representations of its latency histograms. The metric sample names and label keys
+used before this migration are retained:
 
 | Metric | Labels | Meaning |
 | --- | --- | --- |
 | `http_requests_total` | `method`, `path`, `status_code`, `client_ip` | Completed HTTP requests. |
 | `http_request_duration_seconds` | `method`, `path`, `status_code` | Server-side HTTP handling time. |
+| `authorization_batch_size` | none | Authorization checks per completed, accepted authorization request. |
+| `authorization_request_duration_seconds` | `batch_size_class` | Server-side authorization-request latency by bounded batch-size class. |
 | `policy_evals_total` | `action` | Core policy decisions. |
 | `policy_evals_allowed_total` | `action` | Allowed Core decisions. |
 | `policy_evals_denied_total` | `action` | Denied Core decisions. |
@@ -90,6 +92,18 @@ keys used before this migration are retained:
 HTTP `path` uses the registered route template, such as `/api/v1/policies/{user}`, rather than the raw user value.
 Requests that do not match a registered route use `path="unmatched"`. This bounds path cardinality. `client_ip` remains
 on the request counter for compatibility but is deliberately absent from the duration histogram.
+
+`authorization_batch_size` records one observation after a `POST /api/v1/authorize` request has passed admission,
+payload and JSON extraction, and the configured maximum-batch check and has produced a response. Its `_sum` is the
+number of accepted authorization checks and its `_count` is the number of accepted HTTP batches. The fixed classic
+boundaries are `0`, `1`, `4`, `8`, `32`, `128`, and `512`, plus `+Inf`.
+
+`authorization_request_duration_seconds` uses the same server-side timer as `http_request_duration_seconds` and labels
+each accepted batch as `0`, `1`, `2-4`, `5-8`, `9-32`, `33-128`, `129-512`, or `513+`. These values remain fixed when
+instances configure different `TREETOP_MAX_BATCH_SIZE` values, so fleet aggregation stays safe. Empty batches retain
+their existing accepted behavior and use class `0`. Admission failures, payload or JSON extraction failures, and
+over-limit batches are absent from both authorization metrics; an accepted batch that later returns an application
+error remains included.
 
 The action label is the Cedar entity UID without representation quotes, for example `Action::view`. Treat the action
 vocabulary as a controlled, bounded set. Percent, quote, backslash, and control characters inside unusual action IDs
@@ -135,8 +149,10 @@ Treetop distribution without sacrificing the previous long-tail coverage.
 
 Each populated classic label set costs 20 bucket series including `+Inf`, plus `_sum` and `_count`: 22 series instead
 of the previous 14, a 57% increase. The phase metric can populate five label sets per observed action, or 110 classic
-series per action. HTTP series scale with observed `method`/route-template/`status_code` combinations. Native ingestion
-uses one sparse histogram series per label set and is the preferred long-term representation for varied workloads.
+series per action. Authorization latency can populate eight fixed batch classes, or 176 classic series, and its batch
+size histogram costs ten series. HTTP series scale with observed `method`/route-template/`status_code` combinations.
+Native ingestion uses one sparse histogram series per label set and is the preferred long-term representation for
+varied workloads.
 
 The protobuf response also contains a standard exponential native histogram with a maximum bucket growth factor of
 1.1 and an instrumentation-side best-effort limit of 160 populated sparse buckets. Native buckets adapt to distributions
@@ -173,6 +189,47 @@ curl -H 'Accept: application/vnd.google.protobuf; proto=io.prometheus.client.Met
 ```
 
 #### PromQL examples
+
+Native histogram p95 authorization latency by batch-size class:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (batch_size_class) (rate(authorization_request_duration_seconds[5m]))
+)
+```
+
+Native histogram mean authorization latency by batch-size class:
+
+```promql
+sum by (batch_size_class) (
+  histogram_sum(rate(authorization_request_duration_seconds[5m]))
+)
+/
+sum by (batch_size_class) (
+  histogram_count(rate(authorization_request_duration_seconds[5m]))
+)
+```
+
+With classic histograms retained, amortized server time per accepted authorization check is total batch wall time
+divided by the exact number of checks:
+
+```promql
+sum(rate(authorization_request_duration_seconds_sum[5m]))
+/
+sum(rate(authorization_batch_size_sum[5m]))
+```
+
+When authorization latency is ingested only as a native histogram, use its native sum with the classic batch-size sum:
+
+```promql
+sum(histogram_sum(rate(authorization_request_duration_seconds[5m])))
+/
+sum(rate(authorization_batch_size_sum[5m]))
+```
+
+This ratio measures batching efficiency in server wall-clock seconds per check. It is not individual evaluation
+latency: decisions in a batch can run concurrently. Use `policy_eval_duration_seconds` for Core time per decision.
 
 Native histogram p95 HTTP latency by route:
 
