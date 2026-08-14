@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `treetop-core` to 0.0.20 for the borrowed evaluation-observation API used by the detailed authorization
+  timing metrics.
 - Move the canonical source repository and container distribution to the
   `treetop-policy-engine` organization. New server images are published only to
   `ghcr.io/treetop-policy-engine/treetop-rest`; personal GHCR and Docker Hub paths are no longer
