@@ -30,6 +30,8 @@ RUN cargo build --release --bin treetop-server
 # Runtime stage
 FROM alpine:3.24
 
+LABEL org.opencontainers.image.source="https://github.com/treetop-policy-engine/treetop-rest"
+
 RUN apk add --no-cache \
     ca-certificates \
     curl

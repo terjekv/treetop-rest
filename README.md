@@ -1,16 +1,20 @@
 # A REST server for Treetop
 
-This is a REST server providing a REST API for [Treetop](https://github.com/terjekv/treetop-core),
-a policy management framework.
+This is a REST server providing a REST API for
+[Treetop](https://github.com/treetop-policy-engine/treetop-core), a policy management framework.
 
 Version 0.0.11 and later contain only the server. The bundled `treetop-cli` binary was removed after
 the v0.0.10 bridge release. Install the supported standalone CLI from the
-[treetop-cli repository](https://github.com/terjekv/treetop-cli); its configuration, matrix syntax,
-and release binaries are documented there.
+[treetop-cli repository](https://github.com/treetop-policy-engine/treetop-cli); its configuration,
+matrix syntax, and release binaries are documented there.
 
 See [docs/api.md](docs/api.md) for the HTTP API reference. A running server exposes
 the generated OpenAPI document at `/openapi.json` and Swagger UI at `/swagger-ui/`.
 The generated specification is also checked in at [docs/openapi.json](docs/openapi.json).
+
+Tagged server images are published at
+`ghcr.io/treetop-policy-engine/treetop-rest:<version>`. Personal GHCR and Docker Hub namespaces
+are no longer updated.
 
 ## Server startup
 
@@ -104,7 +108,8 @@ $ curl -X POST 'http://localhost:9999/api/v1/authorize?detail=brief' \
 ```
 
 For typed command-line access, interactive REPL support, configuration migration details, and
-matrix queries, use [treetop-cli](https://github.com/terjekv/treetop-cli). Version 0.0.1 depends
+matrix queries, use
+[treetop-cli](https://github.com/treetop-policy-engine/treetop-cli). Version 0.0.1 depends
 exactly on `treetop-client` 0.0.2 and is the migration target for the CLI bundled in REST v0.0.10.
 
 ## Metrics and performance

@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Move the canonical source repository and container distribution to the
+  `treetop-policy-engine` organization. New server images are published only to
+  `ghcr.io/treetop-policy-engine/treetop-rest`; personal GHCR and Docker Hub paths are no longer
+  updated.
 - **Breaking metrics exposition change:** Migrated `/metrics` text output from Prometheus 0.0.4 to OpenMetrics 1.0,
   canonicalized action label values from `Action::\"id\"` to `Action::id`, and replaced raw HTTP paths with route
   templates (`unmatched` for unknown routes). Metric sample names and label keys remain stable. Update direct text
@@ -49,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking packaging change:** Removed the bundled `treetop-cli` binary, public `treetop_rest::cli`
   module, CLI-only dependencies, matrix benchmarks, tests, and documentation. Users of the v0.0.10
   bridge binary should install
-  [treetop-cli v0.0.1](https://github.com/terjekv/treetop-cli/releases/tag/v0.0.1), which preserves
+  [treetop-cli v0.0.1](https://github.com/treetop-policy-engine/treetop-cli/releases/tag/v0.0.1),
+  which preserves
   the CLI/REPL configuration and history locations and uses `treetop-client` 0.0.2.
 
 ### Changed
@@ -73,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   representations, and the actual structured error response in the generated spec.
 - Marked v0.0.10 as the final bridge release that includes the bundled
   `treetop-cli`. Future CLI releases are available from the standalone
-  [treetop-cli repository](https://github.com/terjekv/treetop-cli).
+  [treetop-cli repository](https://github.com/treetop-policy-engine/treetop-cli).
 
 ### Fixed
 
