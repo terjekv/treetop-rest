@@ -5,8 +5,8 @@ This document describes configuration for `treetop-server`.
 ## Overview
 
 The server uses command-line flags and environment variables. It does not use a configuration file.
-The standalone [treetop-cli](https://github.com/terjekv/treetop-cli) has its own configuration
-documentation and release lifecycle.
+The standalone [treetop-cli](https://github.com/treetop-policy-engine/treetop-cli) has its own
+configuration documentation and release lifecycle.
 
 ## Server configuration
 
@@ -61,4 +61,5 @@ value is set.
 
 Server configuration comes from flags, then environment variables, then built-in defaults. For CLI
 configuration—including `--server-url`, config/history paths, and legacy host/port migration—see the
-[standalone CLI configuration guide](https://github.com/terjekv/treetop-cli/blob/main/docs/config.md).
+[standalone CLI configuration
+guide](https://github.com/treetop-policy-engine/treetop-cli/blob/main/docs/config.md).
