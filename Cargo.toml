@@ -21,10 +21,11 @@ ipnet = "2.12.1"
 lru = "0.18.2"
 rayon = "1.12.0"
 regex = "1.13.1"
-reqwest = { version = "0.13.4", features = ["json"] }
+reqwest = { version = "0.13.4", features = ["json", "stream"] }
 serde = "1.0.229"
 serde_json = "1.0.151"
 sha2 = "0.11.0"
+subtle = "2.6.1"
 tokio = { version = "1.53.1", features = ["full"] }
 tracing = "0.1.44"
 tracing-actix-web = "0.7.22"
@@ -36,6 +37,7 @@ tracing-subscriber = { version = "0.3.23", features = [
     "serde_json",
 ] }
 treetop-core = { version = "0.0.21", features = ["observability"] }
+treetop-bundle = "=0.0.1"
 prometheus-client = { version = "0.25.0", features = ["prometheus_protobuf", "protobuf-protox"] }
 url = { version = "2.5.8", features = ["serde"] }
 utoipa = { version = "5.5.0", features = ["actix_extras", "chrono", "yaml"] }
@@ -46,6 +48,8 @@ cedar-policy = "4.12.0"
 [dev-dependencies]
 actix-rt = "2.11.0"
 actix-http = "3.13.3"
+base64 = "0.22.1"
+ed25519-dalek = { version = "2.2.0", features = ["pem", "pkcs8"] }
 rstest = "0.26.1"
 tempfile = "3.27.0"
 gungraun = "0.19.4"
@@ -122,6 +126,22 @@ harness = false
 
 [[bench]]
 name = "middleware_ip_allowlist_miss_callgrind"
+harness = false
+
+[[bench]]
+name = "middleware_ip_wildcard_callgrind"
+harness = false
+
+[[bench]]
+name = "middleware_access_disabled_callgrind"
+harness = false
+
+[[bench]]
+name = "middleware_access_token_hit_callgrind"
+harness = false
+
+[[bench]]
+name = "middleware_access_token_miss_callgrind"
 harness = false
 
 [[bench]]

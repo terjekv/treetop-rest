@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added optional polling and authenticated upload of deterministic `.tar.gz` Treetop policy bundles, with bounded
+  streaming, conditional requests, atomic policy/schema/label replacement, last-known-good readiness behavior, and
+  bundle identity and signature details in status metadata.
+- Added Ed25519 bundle trust configuration, optional or required signature policies, multi-key rotation support, and
+  bounded bundle reload success and failure metrics.
+- Added independent environment-only IP/CIDR and opaque Bearer-token admission controls for `/api/v1/**` and
+  `/metrics`, explicit trusted-proxy chain walking for `X-Forwarded-For`, fixed-reason rejection metrics, and OpenAPI
+  Bearer security metadata.
+
+### Changed
+
+- Legacy label loading now uses the shared `treetop-bundle` parser and intentionally rejects unknown fields, empty
+  values or pattern lists, duplicate names or destinations, invalid Cedar entity types, and invalid regular
+  expressions. Labels must also match an active schema's entity and attribute types. Bundle loads always apply strict
+  aggregate schema validation when a schema is present.
+- **Breaking security change:** The client allowlist now defaults to open instead of loopback-only. Deployments that
+  relied on the old default must set `TREETOP_CLIENT_ALLOWLIST=127.0.0.1,::1` before upgrading. Allowlist and trusted
+  proxy settings are now environment-only, and configured ACL and Bearer controls must both pass.
+
+### Removed
+
+- Removed `--client-allowlist`, `--trust-ip-headers`, and `TREETOP_TRUST_IP_HEADERS`. Use
+  `TREETOP_CLIENT_ALLOWLIST` and explicit `TREETOP_TRUSTED_PROXIES` networks instead.
+
+### Security
+
+- Signed bundles are accepted only when their Ed25519 signature matches a configured SPKI public key; malformed,
+  invalid, or untrusted signatures are never downgraded to unsigned content. Private signing material is not loaded by
+  the REST service.
+- Access tokens are validated at startup, retained only as unique SHA-256 digests, compared without early-exit digest
+  equality, never logged, and rejected through a credential-independent `401` response. Operators must use TLS outside
+  loopback and may rotate tokens by overlapping old and new values across restarts.
+
 ## [0.0.12] - 2026-08-14
 
 ### Added

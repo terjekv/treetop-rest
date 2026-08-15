@@ -21,7 +21,7 @@ type BenchCtx = (BoxedService, ServiceRequest);
 
 fn setup_tracing() -> BenchCtx {
     init_metrics();
-    let middleware = TracingMiddleware::new_with_trust(true);
+    let middleware = TracingMiddleware::new();
     let service = fn_service(|req: ServiceRequest| async move {
         Ok(req.into_response(HttpResponse::Ok().finish()))
     });

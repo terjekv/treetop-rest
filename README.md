@@ -40,28 +40,80 @@ The server supports the following environment variables:
   `TREETOP_SCHEMA_URL` (default: `60`).
 - `TREETOP_SCHEMA_VALIDATION_MODE`: Schema mode for policy/schema reloads: `permissive` or `strict`
   (default: `permissive`).
-- `TREETOP_CLIENT_ALLOWLIST`: Whitelist of client IPs or CIDR blocks. Use `*` to allow all,
-  or comma-separated IPv4/IPv6 addresses/CIDRs (default: `127.0.0.1,::1`).
-- `TREETOP_TRUST_IP_HEADERS`: Whether to trust proxy IP headers (`X-Forwarded-For`, `Forwarded`).
-  If `false`, only uses peer address (default: `true`).
+- `TREETOP_BUNDLE_URL`: An optional URL for a complete `.tar.gz` policy bundle. It is mutually exclusive with the
+  policy, labels, and schema URLs.
+- `TREETOP_BUNDLE_UPDATE_FREQUENCY`: Bundle polling frequency in seconds (default: `60`).
+- `TREETOP_MAX_BUNDLE_COMPRESSED_BYTES`: Maximum compressed bundle size (default: `10485760`).
+- `TREETOP_MAX_BUNDLE_UNCOMPRESSED_BYTES`: Maximum total uncompressed bundle size (default: `52428800`).
+- `TREETOP_BUNDLE_TRUSTED_KEYS`: Comma-separated Ed25519 SPKI PEM public-key paths.
+- `TREETOP_BUNDLE_SIGNATURE_POLICY`: `allow-unsigned` or `required` (default: `allow-unsigned`). A signed bundle must
+  always match a trusted key.
+- `TREETOP_CLIENT_ALLOWLIST`: Environment-only comma-separated IPv4/IPv6 addresses and CIDRs. Unset, blank, or `*`
+  allows every client (default: open).
+- `TREETOP_ACCESS_TOKENS`: Environment-only comma-separated opaque Bearer tokens accepted by protected endpoints.
+  Unset or blank disables token authentication.
+- `TREETOP_TRUSTED_PROXIES`: Environment-only comma-separated IPv4/IPv6 proxy addresses and CIDRs whose
+  `X-Forwarded-For` contributions may be trusted.
 - `TREETOP_MAX_CONTEXT_BYTES`: Maximum request context payload size in bytes (default: `16384`).
 - `TREETOP_MAX_CONTEXT_DEPTH`: Maximum request context nesting depth (default: `8`).
 - `TREETOP_MAX_CONTEXT_KEYS`: Maximum number of top-level request context keys (default: `64`).
 - `TREETOP_MAX_BATCH_SIZE`: Maximum number of authorization checks accepted in one request (default: `1024`).
 - `TREETOP_MAX_REQUEST_SIZE`: Maximum request body size in bytes (default: `10485760` = 10 MB).
 
+### Admission controls
+
+`/api/v1/**` and `/metrics` are protected. `/livez`, `/readyz`, both OpenAPI JSON paths, and `/swagger-ui/**` remain
+public. The allowlist and Bearer controls are independent:
+
+| Allowlist | Access tokens | Mode |
+| --- | --- | --- |
+| open | disabled | Open; admission middleware is not installed. |
+| configured | disabled | Client IP must match the allowlist. |
+| open | configured | A valid `Authorization: Bearer <token>` is required. |
+| configured | configured | The IP check and then the Bearer check must both pass. |
+
+The allowlist default changed from loopback-only to open. Existing deployments relying on the old default must set
+`TREETOP_CLIENT_ALLOWLIST=127.0.0.1,::1` explicitly. The old `--client-allowlist`, `--trust-ip-headers`, and
+`TREETOP_TRUST_IP_HEADERS` settings were removed; admission settings are deliberately environment-only.
+
+Forwarded addresses are ignored unless the connection peer matches `TREETOP_TRUSTED_PROXIES`. The server supports only
+`X-Forwarded-For` and walks the chain from the socket peer toward the claimed client, skipping trusted proxies. Include
+every ingress and reverse-proxy network that directly precedes the server, and never trust a broader network than
+necessary.
+
+Access tokens are static until restart and are stored in memory as SHA-256 digests. Use HTTPS whenever a token crosses
+anything other than a loopback connection. For rotation, configure the old and new tokens together, migrate clients,
+then remove the old token in a later restart. Direct browser clients also need HTTPS and CORS permission for the
+`Authorization` header. A production ingress may inject a shared Bearer credential server-side, but every user of that
+ingress then inherits the credential's authority.
+
 ### Client interaction
 
 From the command line, you can use `curl` to interact with the API. For example, to upload a policy file, you can use:
 
 ```bash
-curl -X POST http://localhost:9999/api/v1/policies -H "Content-Type: text/plain" -H "X-Upload-Token: <your-upload-token>" --data-binary @testdata/default.cedar
+curl -X POST http://localhost:9999/api/v1/policies \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: text/plain" \
+  -H "X-Upload-Token: <upload-token>" \
+  --data-binary @testdata/default.cedar
+```
+
+Complete bundles can be uploaded atomically with the same upload credentials:
+
+```bash
+curl -X POST http://localhost:9999/api/v1/bundle \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/gzip" \
+  -H "X-Upload-Token: <upload-token>" \
+  --data-binary @bundle.tar.gz
 ```
 
 To check a request, you can use:
 
 ```bash
 $ curl -X POST 'http://localhost:9999/api/v1/authorize?detail=brief' \
+  -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "requests": [
@@ -85,6 +137,7 @@ To check a request with request-scoped context, include a `context` object:
 
 ```bash
 $ curl -X POST 'http://localhost:9999/api/v1/authorize?detail=brief' \
+  -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "requests": [

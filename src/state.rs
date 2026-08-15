@@ -4,22 +4,22 @@ use cedar_policy::{
 };
 use chrono::{DateTime, Utc};
 use lru::LruCache;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt::{Display, Formatter, Result as FmtResult, Write};
 use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, RwLock};
-use tracing::{debug, trace, warn};
-use treetop_core::{LabelRegistryBuilder, Labeler, PolicyEngine, RegexLabeler};
+use tracing::{debug, warn};
+use treetop_bundle::{LabelSet, ValidatedBundle};
+use treetop_core::{LabelRegistryBuilder, Labeler, PolicyEngine};
 use utoipa::ToSchema;
 
 use crate::{
     config::SchemaValidationMode,
     errors::ServiceError,
     metrics,
-    models::{Endpoint, RequestContextStatus, UserPolicies},
+    models::{BundleMetadata, Endpoint, RequestContextStatus, UserPolicies},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -150,79 +150,11 @@ impl<T: MetadataParser> Metadata<T> {
     }
 }
 
-#[derive(Deserialize)]
-struct Label {
-    kind: String,
-    field: String,
-    output: String,
-    patterns: Vec<RawPattern>,
-}
-
-#[derive(Deserialize)]
-struct RawPattern {
-    name: String,
-    regex: String,
-}
-
 /// Parse labels from JSON and return them as a vector of labelers.
 ///
 /// The format of the JSON is expected to be an array of objects, each with a "kind", "field", "output" and "patterns" field.
 pub fn parse_labels(content: &str) -> Result<Vec<Arc<dyn Labeler>>, ServiceError> {
-    let labels: Vec<Label> = serde_json::from_str(content)?;
-
-    let mut labels_for_registry: Vec<Arc<dyn Labeler>> = Vec::new();
-
-    for label in labels {
-        let mut patterns: Vec<(String, Regex)> = Vec::new();
-
-        for r in &label.patterns {
-            if r.name.is_empty() || r.regex.is_empty() {
-                tracing::error!(
-                    message = "Invalid pattern: name or regex is empty",
-                    name = &r.name,
-                    regex = &r.regex
-                );
-                return Err(ServiceError::InvalidJsonPayload(
-                    "Invalid pattern: name or regex is empty".to_string(),
-                ));
-            }
-
-            let regex = match Regex::new(&r.regex) {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::error!(
-                        message = "Invalid regex in pattern",
-                        name = &r.name,
-                        regex = &r.regex,
-                        error = %e
-                    );
-                    return Err(ServiceError::InvalidJsonPayload(format!(
-                        "Invalid regex in pattern: {e}"
-                    )));
-                }
-            };
-
-            patterns.push((r.name.clone(), regex));
-        }
-
-        debug!(
-            update = "Updating pattern",
-            kind = label.kind,
-            field = label.field,
-            output = label.output,
-            count = patterns.len()
-        );
-        trace!(patterns = ?patterns);
-
-        labels_for_registry.push(Arc::new(RegexLabeler::new(
-            label.kind,
-            label.field,
-            label.output,
-            patterns,
-        )));
-    }
-
-    Ok(labels_for_registry)
+    Ok(LabelSet::from_json_str(content)?.to_labelers())
 }
 
 /// Count the number of policy entries in the content.
@@ -252,8 +184,7 @@ impl MetadataParser for OfPolicies {
 /// ```
 impl MetadataParser for OfLabels {
     fn count_entries(content: &str) -> Result<usize, ServiceError> {
-        let raw: Vec<Label> = serde_json::from_str(content)?;
-        Ok(raw.len())
+        Ok(LabelSet::from_json_str(content)?.rules().len())
     }
 
     fn process_content(content: &str) -> Result<(), ServiceError> {
@@ -289,6 +220,8 @@ pub struct PolicyStore {
     pub policies: Metadata<OfPolicies>,
     pub labels: Metadata<OfLabels>,
     pub schema: Metadata<OfSchema>,
+    pub bundle: Option<BundleMetadata>,
+    pub bundle_url_mode: bool,
     pub label_registry_labelers: Vec<Arc<dyn Labeler>>,
     remote_loads: RemoteLoadStatus,
     list_policies_raw_cache: Mutex<LruCache<ListPoliciesCacheKey, Arc<String>>>,
@@ -300,6 +233,7 @@ pub(crate) enum RemoteSourceKind {
     Policies,
     Labels,
     Schema,
+    Bundle,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -307,6 +241,17 @@ struct RemoteLoadStatus {
     policies: bool,
     labels: bool,
     schema: bool,
+    bundle: bool,
+}
+
+pub struct PreparedBundle {
+    engine: Arc<PolicyEngine>,
+    policies: Metadata<OfPolicies>,
+    labels: Metadata<OfLabels>,
+    schema: Metadata<OfSchema>,
+    labelers: Vec<Arc<dyn Labeler>>,
+    request_context_status: RequestContextStatus,
+    bundle: BundleMetadata,
 }
 
 impl Default for PolicyStore {
@@ -322,6 +267,8 @@ impl Default for PolicyStore {
             policies: Metadata::<OfPolicies>::new(String::new(), None, None).unwrap(),
             labels: Metadata::<OfLabels>::new(String::new(), None, None).unwrap(),
             schema: Metadata::<OfSchema>::new(String::new(), None, None).unwrap(),
+            bundle: None,
+            bundle_url_mode: false,
             label_registry_labelers: Vec::new(),
             remote_loads: RemoteLoadStatus::default(),
             list_policies_raw_cache: Mutex::new(LruCache::new(
@@ -348,6 +295,8 @@ impl PolicyStore {
             policies: Metadata::<OfPolicies>::new(String::new(), None, None)?,
             labels: Metadata::<OfLabels>::new(String::new(), None, None)?,
             schema: Metadata::<OfSchema>::new(String::new(), None, None)?,
+            bundle: None,
+            bundle_url_mode: false,
             label_registry_labelers: Vec::new(),
             remote_loads: RemoteLoadStatus::default(),
             list_policies_raw_cache: Mutex::new(LruCache::new(
@@ -386,6 +335,10 @@ impl PolicyStore {
                 self.schema.refresh_frequency = Some(refresh_frequency);
                 self.remote_loads.schema = false;
             }
+            RemoteSourceKind::Bundle => {
+                self.bundle_url_mode = true;
+                self.remote_loads.bundle = false;
+            }
         }
     }
 
@@ -395,6 +348,7 @@ impl PolicyStore {
             RemoteSourceKind::Policies => self.remote_loads.policies = true,
             RemoteSourceKind::Labels => self.remote_loads.labels = true,
             RemoteSourceKind::Schema => self.remote_loads.schema = true,
+            RemoteSourceKind::Bundle => self.remote_loads.bundle = true,
         }
     }
 
@@ -403,9 +357,13 @@ impl PolicyStore {
     /// A source remains ready after its first successful load because the store keeps
     /// serving the last-known-good value when a later refresh fails.
     pub(crate) fn configured_sources_loaded(&self) -> bool {
-        (self.policies.source.is_none() || self.remote_loads.policies)
-            && (self.labels.source.is_none() || self.remote_loads.labels)
-            && (self.schema.source.is_none() || self.remote_loads.schema)
+        if self.bundle_url_mode {
+            self.remote_loads.bundle
+        } else {
+            (self.policies.source.is_none() || self.remote_loads.policies)
+                && (self.labels.source.is_none() || self.remote_loads.labels)
+                && (self.schema.source.is_none() || self.remote_loads.schema)
+        }
     }
 
     fn current_schema(&self) -> Result<Option<CedarSchema>, ServiceError> {
@@ -532,6 +490,7 @@ impl PolicyStore {
         let labelers = self.label_registry_labelers.clone();
         self.rebuild_engine_for_dsl_with_parts(dsl, schema, &labelers)?;
         self.policies = metadata;
+        self.bundle = None;
         self.clear_list_policies_cache()?;
         Ok(())
     }
@@ -561,11 +520,15 @@ impl PolicyStore {
                 return Err(ServiceError::SchemaValidationError(e.to_string()));
             }
         };
+        if !self.labels.content.is_empty() {
+            LabelSet::from_json_str(&self.labels.content)?.validate_schema_json_str(schema)?;
+        }
         let dsl = self.policies.content.clone();
         let labelers = self.label_registry_labelers.clone();
         self.rebuild_engine_for_dsl_with_parts(&dsl, Some(parsed_schema), &labelers)?;
 
         self.schema = metadata;
+        self.bundle = None;
         metrics::record_schema_reload();
         Ok(())
     }
@@ -580,15 +543,85 @@ impl PolicyStore {
         let source = source.or(old_metadata.source);
         let refresh_frequency = refresh_frequency.or(old_metadata.refresh_frequency);
 
+        let label_set = LabelSet::from_json_str(labels)?;
+        if !self.schema.content.is_empty() {
+            label_set.validate_schema_json_str(&self.schema.content)?;
+        }
         let metadata = Metadata::<OfLabels>::new(labels.to_string(), source, refresh_frequency)?;
-        let labelers = parse_labels(labels)?;
+        let labelers = label_set.to_labelers();
         let dsl = self.policies.content.clone();
         let schema = self.current_schema()?;
         self.rebuild_engine_for_dsl_with_parts(&dsl, schema, &labelers)?;
 
         self.label_registry_labelers = labelers;
         self.labels = metadata;
+        self.bundle = None;
         self.clear_list_policies_cache()?;
+        Ok(())
+    }
+
+    /// Prepare a complete bundle replacement without holding the store write lock.
+    pub fn prepare_bundle(
+        validated: &ValidatedBundle,
+        source: Option<Endpoint>,
+        refresh_frequency: Option<u32>,
+    ) -> Result<PreparedBundle, ServiceError> {
+        let engine = Arc::new(validated.prepare_engine()?);
+        let policies = Metadata::<OfPolicies>::new(
+            validated.policies().to_string(),
+            source.clone(),
+            refresh_frequency,
+        )?;
+        let labels_json = validated.labels_json()?;
+        let labels = Metadata::<OfLabels>::new(labels_json, source.clone(), refresh_frequency)?;
+        let schema = match validated.schema_json_string()? {
+            Some(schema_json) => {
+                Metadata::<OfSchema>::new(schema_json, source.clone(), refresh_frequency)?
+            }
+            None => {
+                let mut metadata = Metadata::<OfSchema>::new(String::new(), None, None)?;
+                metadata.source = source.clone();
+                metadata.refresh_frequency = refresh_frequency;
+                metadata
+            }
+        };
+        let signature = validated.verified_signature();
+        Ok(PreparedBundle {
+            engine,
+            policies,
+            labels,
+            schema,
+            labelers: validated.labels().to_labelers(),
+            request_context_status: if validated.schema_json().is_some() {
+                RequestContextStatus::schema_backed()
+            } else {
+                RequestContextStatus::no_schema()
+            },
+            bundle: BundleMetadata {
+                format_version: validated.format_version(),
+                bundle_id: validated.bundle_id().to_string(),
+                archive_sha256: validated.archive_sha256().to_string(),
+                compressed_size: validated.compressed_size(),
+                module_count: validated.module_count(),
+                signed: signature.is_signed(),
+                signing_key_id: signature.key_id().map(ToString::to_string),
+                source,
+                refresh_frequency,
+                loaded_at: Utc::now(),
+            },
+        })
+    }
+
+    /// Atomically publish a previously prepared bundle candidate.
+    pub fn apply_prepared_bundle(&mut self, prepared: PreparedBundle) -> Result<(), ServiceError> {
+        self.clear_list_policies_cache()?;
+        self.engine = prepared.engine;
+        self.policies = prepared.policies;
+        self.labels = prepared.labels;
+        self.schema = prepared.schema;
+        self.label_registry_labelers = prepared.labelers;
+        self.request_context_status = prepared.request_context_status;
+        self.bundle = Some(prepared.bundle);
         Ok(())
     }
 
@@ -734,7 +767,25 @@ permit (
   "": {
     "entityTypes": {
       "User": {},
-      "Photo": {}
+      "Photo": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "name": {
+              "type": "String",
+              "required": true
+            },
+            "nameLabels": {
+              "type": "Set",
+              "element": {
+                "type": "String"
+              },
+              "required": false
+            }
+          },
+          "additionalAttributes": false
+        }
+      }
     },
     "actions": {
       "view": {
@@ -1190,5 +1241,17 @@ permit (
             store.request_context_status,
             RequestContextStatus::schema_backed()
         );
+    }
+
+    #[test]
+    fn test_policy_store_rejects_labels_incompatible_with_schema() {
+        let mut store = PolicyStore::new().unwrap();
+        store.set_schema(CONTEXT_SCHEMA_JSON, None, None).unwrap();
+        let incompatible = LABELS_JSON.replace("nameLabels", "missingLabels");
+
+        let error = store.set_labels(&incompatible, None, None).unwrap_err();
+
+        assert!(error.to_string().contains("missingLabels is not declared"));
+        assert!(store.labels.content.is_empty());
     }
 }

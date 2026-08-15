@@ -53,6 +53,10 @@ Authorization is covered in both configurations that matter for interpreting obs
 - `authorize_batch_metrics_128_callgrind` runs the same workload after installing the production Prometheus sink. Its
   setup is outside the measured region, while metric recording for every decision remains inside it.
 
+Admission-control microbenchmarks cover direct peer resolution, trusted forwarding, the conditional disabled check,
+wildcard allowlists, ACL hits and misses, and access-token digest hits and misses. Configuration parsing and token
+digest construction remain outside the measured regions.
+
 Run an individual comparison locally with the Gungraun runner matching the repository dependency:
 
 ```bash

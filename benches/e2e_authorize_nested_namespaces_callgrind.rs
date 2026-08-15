@@ -7,9 +7,8 @@ use gungraun::{library_benchmark, library_benchmark_group, main};
 use std::str::FromStr;
 use std::sync::{Arc, Once, RwLock};
 use treetop_core::{Action, Principal, Request, Resource, User};
-use treetop_rest::config::ClientAllowlist;
 use treetop_rest::handlers;
-use treetop_rest::middleware::{ClientAllowlistMiddleware, TracingMiddleware};
+use treetop_rest::middleware::TracingMiddleware;
 use treetop_rest::models::AuthorizeRequest;
 use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
@@ -57,12 +56,9 @@ fn setup_nested() -> BenchCtx {
     init_metrics_once();
     let store = build_store();
     let parallel = ParallelConfig::new(1, 1, Some(usize::MAX));
-    let allowlist = ClientAllowlist::from_str("*").unwrap();
-
     let app = futures::executor::block_on(test::init_service(
         App::new()
-            .wrap(ClientAllowlistMiddleware::new_with_trust(allowlist, true))
-            .wrap(TracingMiddleware::new_with_trust(true))
+            .wrap(TracingMiddleware::new())
             .app_data(web::Data::new(store))
             .app_data(web::Data::new(parallel))
             .route("/api/v1/authorize", web::post().to(handlers::authorize)),

@@ -12,9 +12,8 @@ use actix_web::{App, HttpServer, dev::ServerHandle, web};
 use futures_util::{StreamExt, stream};
 use serde::Serialize;
 use treetop_core::{Action, AttrValue, Principal, Request, Resource, User};
-use treetop_rest::config::ClientAllowlist;
 use treetop_rest::handlers;
-use treetop_rest::middleware::{ClientAllowlistMiddleware, TracingMiddleware};
+use treetop_rest::middleware::TracingMiddleware;
 use treetop_rest::models::AuthorizeRequest;
 use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
@@ -260,17 +259,12 @@ fn spawn_server() -> (String, ServerHandle, ParallelConfig) {
         env_optional_usize("TREETOP_PERF_RAYON_THREADS"),
         env_optional_usize("TREETOP_PERF_PAR_THRESHOLD"),
     );
-    let allowlist = ClientAllowlist::from_str("*").unwrap();
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let address = listener.local_addr().unwrap();
 
     let server = HttpServer::new(move || {
         App::new()
-            .wrap(ClientAllowlistMiddleware::new_with_trust(
-                allowlist.clone(),
-                false,
-            ))
-            .wrap(TracingMiddleware::new_with_trust(false))
+            .wrap(TracingMiddleware::new())
             .app_data(web::Data::new(store.clone()))
             .app_data(web::Data::new(parallel))
             .app_data(web::Data::new(registry.clone()))

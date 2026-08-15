@@ -363,6 +363,9 @@ pub struct ServiceMetrics {
     schema_reloads_total: Counter,
     schema_validation_failures_total: Family<ReasonLabels, Counter>,
     context_validation_failures_total: Family<ReasonLabels, Counter>,
+    admission_rejections_total: Family<ReasonLabels, Counter>,
+    bundle_reloads_total: Counter,
+    bundle_reload_failures_total: Family<ReasonLabels, Counter>,
 }
 
 impl ServiceMetrics {
@@ -370,6 +373,9 @@ impl ServiceMetrics {
         let schema_reloads_total = Counter::default();
         let schema_validation_failures_total = Family::default();
         let context_validation_failures_total = Family::default();
+        let admission_rejections_total = Family::default();
+        let bundle_reloads_total = Counter::default();
+        let bundle_reload_failures_total = Family::default();
 
         registry.register(
             "schema_reloads",
@@ -386,11 +392,29 @@ impl ServiceMetrics {
             "Total context validation failures",
             context_validation_failures_total.clone(),
         );
+        registry.register(
+            "admission_rejections",
+            "Total requests rejected by server admission controls",
+            admission_rejections_total.clone(),
+        );
+        registry.register(
+            "bundle_reloads",
+            "Total number of verified bundle replacements",
+            bundle_reloads_total.clone(),
+        );
+        registry.register(
+            "bundle_reload_failures",
+            "Total bundle reload failures by bounded reason",
+            bundle_reload_failures_total.clone(),
+        );
 
         Self {
             schema_reloads_total,
             schema_validation_failures_total,
             context_validation_failures_total,
+            admission_rejections_total,
+            bundle_reloads_total,
+            bundle_reload_failures_total,
         }
     }
 
@@ -412,6 +436,76 @@ impl ServiceMetrics {
                 reason: reason.to_owned(),
             })
             .inc();
+    }
+
+    pub fn record_admission_rejection(&self, reason: AdmissionRejectionReason) {
+        self.admission_rejections_total
+            .get_or_create_owned(&ReasonLabels {
+                reason: reason.as_str().to_owned(),
+            })
+            .inc();
+    }
+
+    pub fn record_bundle_reload(&self) {
+        self.bundle_reloads_total.inc();
+    }
+
+    pub fn record_bundle_failure(&self, reason: BundleFailureReason) {
+        self.bundle_reload_failures_total
+            .get_or_create_owned(&ReasonLabels {
+                reason: reason.as_str().to_owned(),
+            })
+            .inc();
+    }
+}
+
+/// Fixed bundle failure reasons keep the Prometheus label set bounded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BundleFailureReason {
+    Fetch,
+    SizeLimit,
+    Archive,
+    Validation,
+    SignatureMissing,
+    UntrustedKey,
+    InvalidSignature,
+    Store,
+}
+
+impl BundleFailureReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fetch => "fetch",
+            Self::SizeLimit => "size_limit",
+            Self::Archive => "archive",
+            Self::Validation => "validation",
+            Self::SignatureMissing => "signature_missing",
+            Self::UntrustedKey => "untrusted_key",
+            Self::InvalidSignature => "invalid_signature",
+            Self::Store => "store",
+        }
+    }
+}
+
+/// Fixed rejection reasons keep the Prometheus label set bounded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdmissionRejectionReason {
+    ClientIpUnresolved,
+    ClientIpNotAllowed,
+    AccessTokenMissing,
+    AccessTokenMalformed,
+    AccessTokenInvalid,
+}
+
+impl AdmissionRejectionReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ClientIpUnresolved => "client_ip_unresolved",
+            Self::ClientIpNotAllowed => "client_ip_not_allowed",
+            Self::AccessTokenMissing => "access_token_missing",
+            Self::AccessTokenMalformed => "access_token_malformed",
+            Self::AccessTokenInvalid => "access_token_invalid",
+        }
     }
 }
 
@@ -436,6 +530,24 @@ pub fn record_schema_validation_failure(reason: &str) {
 pub fn record_context_validation_failure(reason: &str) {
     if let Some(metrics) = service_metrics() {
         metrics.record_context_validation_failure(reason);
+    }
+}
+
+pub fn record_admission_rejection(reason: AdmissionRejectionReason) {
+    if let Some(metrics) = service_metrics() {
+        metrics.record_admission_rejection(reason);
+    }
+}
+
+pub fn record_bundle_reload() {
+    if let Some(metrics) = service_metrics() {
+        metrics.record_bundle_reload();
+    }
+}
+
+pub fn record_bundle_failure(reason: BundleFailureReason) {
+    if let Some(metrics) = service_metrics() {
+        metrics.record_bundle_failure(reason);
     }
 }
 
@@ -628,6 +740,93 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn authorization_batch_size_classes_cover_all_boundaries() {
+        for (size, expected) in [
+            (0, "0"),
+            (1, "1"),
+            (2, "2-4"),
+            (4, "2-4"),
+            (5, "5-8"),
+            (8, "5-8"),
+            (9, "9-32"),
+            (32, "9-32"),
+            (33, "33-128"),
+            (128, "33-128"),
+            (129, "129-512"),
+            (512, "129-512"),
+            (513, "513+"),
+            (usize::MAX, "513+"),
+        ] {
+            assert_eq!(AcceptedAuthorizationBatch::new(size).size_class(), expected);
+        }
+    }
+
+    #[test]
+    fn authorization_metrics_expose_batch_size_and_correlated_latency() {
+        let mut registry = Registry::default();
+        let metrics = AuthorizationMetrics::new(&mut registry);
+        metrics.observe(AcceptedAuthorizationBatch::new(33), 0.025);
+
+        let body = String::from_utf8(encode_registry_text(&registry).unwrap()).unwrap();
+        for metric in [
+            "authorization_batch_size",
+            "authorization_request_duration_seconds",
+        ] {
+            let help = body
+                .lines()
+                .find(|line| line.starts_with(&format!("# HELP {metric} ")))
+                .unwrap();
+            assert!(help.contains("admission-rejected requests"));
+            assert!(help.contains("over-limit batches are excluded"));
+        }
+        assert!(body.contains("# TYPE authorization_batch_size histogram"));
+        for boundary in ["0.0", "1.0", "4.0", "8.0", "32.0", "128.0", "512.0"] {
+            assert!(body.lines().any(|line| {
+                line.starts_with("authorization_batch_size_bucket{")
+                    && line.contains(&format!("le=\"{boundary}\""))
+            }));
+        }
+        assert!(body.contains("authorization_batch_size_sum 33.0"));
+        assert!(body.contains("authorization_batch_size_count 1"));
+        assert!(body.lines().any(|line| {
+            line.starts_with("authorization_request_duration_seconds_count{")
+                && line.contains("batch_size_class=\"33-128\"")
+                && line.ends_with(" 1")
+        }));
+    }
+
+    #[test]
+    fn admission_rejection_metric_has_only_fixed_reason_values() {
+        let mut registry = Registry::default();
+        let metrics = ServiceMetrics::new(&mut registry);
+        let reasons = [
+            AdmissionRejectionReason::ClientIpUnresolved,
+            AdmissionRejectionReason::ClientIpNotAllowed,
+            AdmissionRejectionReason::AccessTokenMissing,
+            AdmissionRejectionReason::AccessTokenMalformed,
+            AdmissionRejectionReason::AccessTokenInvalid,
+        ];
+        for reason in reasons {
+            metrics.record_admission_rejection(reason);
+        }
+
+        let body = String::from_utf8(encode_registry_text(&registry).unwrap()).unwrap();
+        for reason in reasons {
+            assert!(
+                body.contains(&format!("reason=\"{}\"", reason.as_str())),
+                "missing {}",
+                reason.as_str()
+            );
+        }
+        assert_eq!(
+            body.lines()
+                .filter(|line| line.starts_with("admission_rejections_total{"))
+                .count(),
+            reasons.len()
+        );
+    }
 
     fn evaluation_stats() -> EvaluationStats {
         EvaluationStats {
