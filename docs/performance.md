@@ -55,7 +55,8 @@ Authorization is covered in both configurations that matter for interpreting obs
 
 Admission-control microbenchmarks cover direct peer resolution, trusted forwarding, the conditional disabled check,
 wildcard allowlists, ACL hits and misses, and access-token digest hits and misses. Configuration parsing and token
-digest construction remain outside the measured regions.
+digest construction remain outside those request-path measurements. Allowlist parsing has its own small benchmark
+target, so the reusable workflow can fan it out independently from ACL hit and miss checks.
 
 The batch sizes 8, 32, and 128 are intentional upper-bound probes for the fixed `5-8`, `9-32`, and `33-128`
 metrics classes. Keep those sizes stable when comparing revisions: moving a probe inside a class would make an
@@ -72,6 +73,11 @@ set small.
 For a trusted proxy, `X-Forwarded-For` is parsed as a stream of address tokens. Resolution retains only the first
 address and the rightmost untrusted address, matching the trust-boundary rules without allocating a temporary address
 vector. Direct-peer and wildcard-allowlist paths remain allocation-free.
+
+Legacy label parsing and policy-store updates are separate, fanned-out benchmark targets. Updates parse and strictly
+validate their JSON once: the validated `LabelSet` supplies the metadata count and runtime labelers, and runtime
+construction reuses the regex programs compiled during validation. This avoids the previous repeated JSON validation
+and regex compilation while retaining strict shared behavior for legacy and bundle loads.
 
 Bundle refresh and upload are control-plane operations. Compressed bodies are bounded while streaming and reserve at
 most the bounded declared `Content-Length`; uploads reject an oversized declared length before polling the body.
@@ -92,6 +98,11 @@ Run an individual comparison locally with the Gungraun runner matching the repos
 cargo install gungraun-runner --version 0.19.4 --locked
 cargo bench --bench authorize_batch_brief_128_callgrind
 cargo bench --bench authorize_batch_metrics_128_callgrind
+cargo bench --bench labels_parse_callgrind
+cargo bench --bench labels_policy_store_callgrind
+cargo bench --bench middleware_ip_allowlist_parse_callgrind
+cargo bench --bench middleware_ip_allowlist_hit_callgrind
+cargo bench --bench middleware_ip_allowlist_miss_callgrind
 ```
 
 Gungraun compares against the prior local result for the same target. Run it once before and once after a change without

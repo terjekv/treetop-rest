@@ -20,9 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Reduced admission hot-path work by hashing Bearer candidates once and parsing trusted forwarding chains without a
-  temporary address allocation. Bundle loads now reuse validated artifact counts, preallocate bounded compressed
-  bodies, and adopt rotated HTTP validators for unchanged archives.
+- Reduced admission hot-path work by hashing Bearer candidates once, parsing trusted forwarding chains without a
+  temporary address allocation, and isolating allowlist parsing from request-path benchmarks. Legacy label updates now
+  parse once and reuse compiled regex programs. Bundle loads reuse validated artifact counts, preallocate bounded
+  compressed bodies, and adopt rotated HTTP validators for unchanged archives.
 - Legacy label loading now uses the shared `treetop-bundle` parser and intentionally rejects unknown fields, empty
   values or pattern lists, duplicate names or destinations, invalid Cedar entity types, and invalid regular
   expressions. Labels must also match an active schema's entity and attribute types. Bundle loads always apply strict

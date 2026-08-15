@@ -149,8 +149,8 @@ impl<T: MetadataParser> Metadata<T> {
         })
     }
 
-    /// Construct metadata for content already validated as part of a complete bundle.
-    fn from_validated_bundle(
+    /// Construct metadata for content already validated by the caller.
+    fn from_validated_content(
         content: String,
         source: Option<Endpoint>,
         refresh_frequency: Option<u32>,
@@ -577,7 +577,12 @@ impl PolicyStore {
         if !self.schema.content.is_empty() {
             label_set.validate_schema_json_str(&self.schema.content)?;
         }
-        let metadata = Metadata::<OfLabels>::new(labels.to_string(), source, refresh_frequency)?;
+        let metadata = Metadata::<OfLabels>::from_validated_content(
+            labels.to_string(),
+            source,
+            refresh_frequency,
+            label_set.rules().len(),
+        );
         let labelers = label_set.to_labelers();
         let dsl = self.policies.content.clone();
         let schema = self.current_schema()?;
@@ -597,14 +602,14 @@ impl PolicyStore {
         refresh_frequency: Option<u32>,
     ) -> Result<PreparedBundle, ServiceError> {
         let engine = Arc::new(validated.prepare_engine()?);
-        let policies = Metadata::<OfPolicies>::from_validated_bundle(
+        let policies = Metadata::<OfPolicies>::from_validated_content(
             validated.policies().to_string(),
             source.clone(),
             refresh_frequency,
             validated.policy_ids().len(),
         );
         let labels_json = validated.labels_json()?;
-        let labels = Metadata::<OfLabels>::from_validated_bundle(
+        let labels = Metadata::<OfLabels>::from_validated_content(
             labels_json,
             source.clone(),
             refresh_frequency,
@@ -616,14 +621,14 @@ impl PolicyStore {
                     serde_json::Value::Object(namespaces) => namespaces.len(),
                     _ => 1,
                 });
-                Metadata::<OfSchema>::from_validated_bundle(
+                Metadata::<OfSchema>::from_validated_content(
                     schema_json,
                     source.clone(),
                     refresh_frequency,
                     entries,
                 )
             }
-            None => Metadata::<OfSchema>::from_validated_bundle(
+            None => Metadata::<OfSchema>::from_validated_content(
                 String::new(),
                 source.clone(),
                 refresh_frequency,

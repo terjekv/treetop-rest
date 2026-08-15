@@ -2,10 +2,14 @@ use gungraun::{library_benchmark, library_benchmark_group, main};
 use std::str::FromStr;
 use treetop_rest::config::ClientAllowlist;
 
-#[library_benchmark]
-fn allowlist_ipv4_hit() {
+fn setup() -> (ClientAllowlist, std::net::IpAddr) {
     let allowlist = ClientAllowlist::from_str("10.0.0.0/24").unwrap();
     let ip = "10.0.0.42".parse().unwrap();
+    (allowlist, ip)
+}
+
+#[library_benchmark(setup = setup)]
+fn allowlist_ipv4_hit((allowlist, ip): (ClientAllowlist, std::net::IpAddr)) {
     let _ = allowlist.allows(ip);
 }
 

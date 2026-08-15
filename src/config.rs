@@ -243,22 +243,20 @@ impl ClientAllowlist {
             return Ok(Self::Any);
         }
 
-        let entries: Vec<_> = trimmed.split(',').map(str::trim).collect();
-        if entries.iter().any(|entry| entry.is_empty()) {
-            return Err(ServiceError::ValidationError(
-                "TREETOP_CLIENT_ALLOWLIST contains an empty entry".into(),
-            ));
+        let mut nets = Vec::with_capacity(trimmed.bytes().filter(|byte| *byte == b',').count() + 1);
+        for entry in trimmed.split(',').map(str::trim) {
+            if entry.is_empty() {
+                return Err(ServiceError::ValidationError(
+                    "TREETOP_CLIENT_ALLOWLIST contains an empty entry".into(),
+                ));
+            }
+            if entry == "*" {
+                return Err(ServiceError::ValidationError(
+                    "TREETOP_CLIENT_ALLOWLIST cannot mix '*' with addresses or networks".into(),
+                ));
+            }
+            nets.push(Self::parse_net(entry)?);
         }
-        if entries.contains(&"*") {
-            return Err(ServiceError::ValidationError(
-                "TREETOP_CLIENT_ALLOWLIST cannot mix '*' with addresses or networks".into(),
-            ));
-        }
-
-        let nets = entries
-            .into_iter()
-            .map(Self::parse_net)
-            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self::Nets(nets.into()))
     }

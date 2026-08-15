@@ -37,7 +37,7 @@ tracing-subscriber = { version = "0.3.23", features = [
     "serde_json",
 ] }
 treetop-core = { version = "0.0.21", features = ["observability"] }
-treetop-bundle = "=0.0.2"
+treetop-bundle = "=0.0.3"
 prometheus-client = { version = "0.25.0", features = ["prometheus_protobuf", "protobuf-protox"] }
 url = { version = "2.5.8", features = ["serde"] }
 utoipa = { version = "5.5.0", features = ["actix_extras", "chrono", "yaml"] }
@@ -109,7 +109,11 @@ name = "authorize_batch_metrics_128_callgrind"
 harness = false
 
 [[bench]]
-name = "labels_callgrind"
+name = "labels_parse_callgrind"
+harness = false
+
+[[bench]]
+name = "labels_policy_store_callgrind"
 harness = false
 
 [[bench]]
@@ -126,6 +130,10 @@ harness = false
 
 [[bench]]
 name = "middleware_ip_allowlist_miss_callgrind"
+harness = false
+
+[[bench]]
+name = "middleware_ip_allowlist_parse_callgrind"
 harness = false
 
 [[bench]]
