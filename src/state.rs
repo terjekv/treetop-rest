@@ -148,6 +148,36 @@ impl<T: MetadataParser> Metadata<T> {
             _marker: PhantomData,
         })
     }
+
+    /// Construct metadata for content already validated as part of a complete bundle.
+    fn from_validated_bundle(
+        content: String,
+        source: Option<Endpoint>,
+        refresh_frequency: Option<u32>,
+        entries: usize,
+    ) -> Self {
+        let sha256 = T::make_hash(&content);
+        let size = T::content_size(&content);
+        if let Some(source) = source.as_ref() {
+            debug!(
+                update = "Metadata",
+                source = source.to_string(),
+                sha256 = sha256,
+                size = size,
+                entries = entries
+            );
+        }
+        Self {
+            timestamp: Utc::now(),
+            sha256,
+            size,
+            source,
+            refresh_frequency,
+            entries,
+            content,
+            _marker: PhantomData,
+        }
+    }
 }
 
 /// Parse labels from JSON and return them as a vector of labelers.
@@ -567,23 +597,38 @@ impl PolicyStore {
         refresh_frequency: Option<u32>,
     ) -> Result<PreparedBundle, ServiceError> {
         let engine = Arc::new(validated.prepare_engine()?);
-        let policies = Metadata::<OfPolicies>::new(
+        let policies = Metadata::<OfPolicies>::from_validated_bundle(
             validated.policies().to_string(),
             source.clone(),
             refresh_frequency,
-        )?;
+            validated.policy_ids().len(),
+        );
         let labels_json = validated.labels_json()?;
-        let labels = Metadata::<OfLabels>::new(labels_json, source.clone(), refresh_frequency)?;
+        let labels = Metadata::<OfLabels>::from_validated_bundle(
+            labels_json,
+            source.clone(),
+            refresh_frequency,
+            validated.labels().rules().len(),
+        );
         let schema = match validated.schema_json_string()? {
             Some(schema_json) => {
-                Metadata::<OfSchema>::new(schema_json, source.clone(), refresh_frequency)?
+                let entries = validated.schema_json().map_or(0, |schema| match schema {
+                    serde_json::Value::Object(namespaces) => namespaces.len(),
+                    _ => 1,
+                });
+                Metadata::<OfSchema>::from_validated_bundle(
+                    schema_json,
+                    source.clone(),
+                    refresh_frequency,
+                    entries,
+                )
             }
-            None => {
-                let mut metadata = Metadata::<OfSchema>::new(String::new(), None, None)?;
-                metadata.source = source.clone();
-                metadata.refresh_frequency = refresh_frequency;
-                metadata
-            }
+            None => Metadata::<OfSchema>::from_validated_bundle(
+                String::new(),
+                source.clone(),
+                refresh_frequency,
+                0,
+            ),
         };
         let signature = validated.verified_signature();
         Ok(PreparedBundle {

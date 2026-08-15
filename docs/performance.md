@@ -57,6 +57,35 @@ Admission-control microbenchmarks cover direct peer resolution, trusted forwardi
 wildcard allowlists, ACL hits and misses, and access-token digest hits and misses. Configuration parsing and token
 digest construction remain outside the measured regions.
 
+The batch sizes 8, 32, and 128 are intentional upper-bound probes for the fixed `5-8`, `9-32`, and `33-128`
+metrics classes. Keep those sizes stable when comparing revisions: moving a probe inside a class would make an
+instruction-count change harder to correlate with the production batch-range telemetry.
+
+## Admission and bundle-loading costs
+
+Disabled admission control is removed from the request service by Actix's `Condition`; it does not add a per-request
+configuration branch. When access tokens are enabled, configuration validates and hashes each token once. A request
+validates its Bearer header once, hashes the candidate once, and compares it with every configured digest in constant
+time. The linear scan deliberately avoids an early-exit timing signal, so deployments should keep the configured token
+set small.
+
+For a trusted proxy, `X-Forwarded-For` is parsed as a stream of address tokens. Resolution retains only the first
+address and the rightmost untrusted address, matching the trust-boundary rules without allocating a temporary address
+vector. Direct-peer and wildcard-allowlist paths remain allocation-free.
+
+Bundle refresh and upload are control-plane operations. Compressed bodies are bounded while streaming and reserve at
+most the bounded declared `Content-Length`; uploads reject an oversized declared length before polling the body.
+Archive decoding, signature and semantic validation, metadata construction, label preparation, and engine
+construction all happen
+before the `PolicyStore` write lock is acquired. Metadata construction reuses the validated bundle's policy, schema,
+and label counts instead of reparsing those artifacts. The write-locked section only clears the two bounded policy-list
+caches and swaps the prepared engine and metadata, so authorization readers see either the complete old state or the
+complete new state.
+
+The fetcher retains only ETag and Last-Modified validator strings rather than cloning every response header. If an
+origin rotates a validator while serving byte-identical content, REST adopts the new validator without rebuilding the
+engine, preventing the unchanged archive from being downloaded on every later refresh.
+
 Run an individual comparison locally with the Gungraun runner matching the repository dependency:
 
 ```bash

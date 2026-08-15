@@ -854,7 +854,20 @@ pub async fn upload_bundle(
         return Err(ServiceError::UnsupportedBundleMediaType);
     }
 
-    let mut bytes = Vec::new();
+    let declared_size = req
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok());
+    if declared_size.is_some_and(|size| size > runtime.max_compressed_bytes) {
+        metrics::record_bundle_failure(metrics::BundleFailureReason::SizeLimit);
+        return Err(ServiceError::BundleTooLarge(format!(
+            "compressed bundle exceeds {} bytes",
+            runtime.max_compressed_bytes
+        )));
+    }
+
+    let mut bytes = Vec::with_capacity(declared_size.unwrap_or_default());
     while let Some(chunk) = payload.next().await {
         let chunk = chunk.map_err(|error| ServiceError::InvalidBundle(error.to_string()))?;
         if bytes.len().saturating_add(chunk.len()) > runtime.max_compressed_bytes {

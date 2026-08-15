@@ -1,4 +1,4 @@
-use actix_web::{App, http::StatusCode, test, web};
+use actix_web::{App, HttpMessage, http::StatusCode, test, web};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use clap::Parser;
 use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
@@ -112,6 +112,9 @@ async fn bundle_upload_applies_complete_state_and_metadata() {
     assert_eq!(body["bundle"]["signed"], false);
     let store = store.read().unwrap();
     assert!(store.policies.content.contains("dns.read"));
+    assert_eq!(store.policies.entries, 1);
+    assert_eq!(store.labels.entries, 0);
+    assert_eq!(store.schema.entries, 0);
     assert!(store.bundle.is_some());
 }
 
@@ -308,7 +311,37 @@ async fn bundle_upload_enforces_actual_compressed_size_limit() {
     )
     .await;
 
-    let response = test::call_service(&app, bundle_request(vec![0; 5])).await;
+    let mut request = bundle_request(vec![0; 5]);
+    request.headers_mut().remove("content-length");
+    assert!(request.headers().get("content-length").is_none());
+    let response = test::call_service(&app, request).await;
+
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[actix_web::test]
+async fn bundle_upload_rejects_oversized_declared_length_before_reading_body() {
+    let store = upload_store();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .app_data(web::Data::new(BundleRuntimeConfig {
+                signature_policy: SignaturePolicy::AllowUnsigned,
+                trust_store: Arc::new(TrustStore::new()),
+                max_compressed_bytes: 4,
+                max_uncompressed_bytes: 1024,
+            }))
+            .route("/api/v1/bundle", web::post().to(handlers::upload_bundle)),
+    )
+    .await;
+
+    let request = test::TestRequest::post()
+        .uri("/api/v1/bundle")
+        .insert_header(("content-type", "application/gzip"))
+        .insert_header(("content-length", "5"))
+        .insert_header(("X-Upload-Token", "test-token"))
+        .to_request();
+    let response = test::call_service(&app, request).await;
 
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }

@@ -351,10 +351,8 @@ impl AccessTokens {
     }
 
     pub fn matches(&self, token: &str) -> bool {
-        if !valid_bearer_token(token) {
-            return false;
-        }
-
+        // Configured tokens and Authorization header values are validated at their
+        // respective boundaries. Hash only once on the request hot path.
         let candidate = hash_token(token);
         let mut matched = Choice::from(0);
         for configured in self.digests.iter() {

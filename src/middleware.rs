@@ -221,30 +221,28 @@ fn resolve_client_ip(
         return Ok(Some(peer));
     }
 
-    let forwarded = collect_forwarded_for(req.headers())?;
-    if forwarded.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(forwarded
-        .iter()
-        .rev()
-        .find(|ip| !ip_in_nets(**ip, trusted_proxies))
-        .copied()
-        .or_else(|| forwarded.first().copied()))
+    forwarded_client_ip(req.headers(), trusted_proxies)
 }
 
-fn collect_forwarded_for(headers: &HeaderMap) -> Result<Vec<IpAddr>, ClientIpError> {
-    let mut forwarded = Vec::new();
+fn forwarded_client_ip(
+    headers: &HeaderMap,
+    trusted_proxies: &[IpNet],
+) -> Result<Option<IpAddr>, ClientIpError> {
+    let mut first = None;
+    let mut rightmost_untrusted = None;
     for value in headers.get_all("x-forwarded-for") {
         let value = value
             .to_str()
             .map_err(|_| ClientIpError::MalformedForwardedFor)?;
         for token in value.split(',') {
-            forwarded.push(parse_ip_token(token).ok_or(ClientIpError::MalformedForwardedFor)?);
+            let ip = parse_ip_token(token).ok_or(ClientIpError::MalformedForwardedFor)?;
+            first.get_or_insert(ip);
+            if !ip_in_nets(ip, trusted_proxies) {
+                rightmost_untrusted = Some(ip);
+            }
         }
     }
-    Ok(forwarded)
+    Ok(rightmost_untrusted.or(first))
 }
 
 fn ip_in_nets(ip: IpAddr, nets: &[IpNet]) -> bool {

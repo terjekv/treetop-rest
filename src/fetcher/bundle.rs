@@ -96,10 +96,8 @@ impl BundleFetcher {
             ))
             .into());
         }
-        if response
-            .content_length()
-            .is_some_and(|length| length > self.limits.max_compressed_bytes() as u64)
-        {
+        let content_length = response.content_length();
+        if content_length.is_some_and(|length| length > self.limits.max_compressed_bytes() as u64) {
             metrics::record_bundle_failure(BundleFailureReason::SizeLimit);
             return Err(BundleError::SizeLimit {
                 kind: "compressed",
@@ -108,9 +106,18 @@ impl BundleFetcher {
             .into());
         }
 
-        let response_headers = response.headers().clone();
+        let response_etag = response
+            .headers()
+            .get(header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(ToString::to_string);
+        let response_last_modified = response
+            .headers()
+            .get(header::LAST_MODIFIED)
+            .and_then(|value| value.to_str().ok())
+            .map(ToString::to_string);
         let mut stream = response.bytes_stream();
-        let mut bytes = Vec::new();
+        let mut bytes = Vec::with_capacity(content_length.unwrap_or_default() as usize);
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.inspect_err(|_| {
                 metrics::record_bundle_failure(BundleFailureReason::Fetch);
@@ -127,6 +134,10 @@ impl BundleFetcher {
         }
         let archive_sha256 = hex_sha256(&bytes);
         if self.archive_sha256.as_deref() == Some(&archive_sha256) {
+            // Adopt rotated validators even when the representation is unchanged;
+            // otherwise every refresh could redownload the same archive.
+            self.etag = response_etag;
+            self.last_modified = response_last_modified;
             debug!(message = "bundle body unchanged", url = self.url.as_str());
             return Ok(());
         }
@@ -155,14 +166,8 @@ impl BundleFetcher {
             })?;
             store.mark_remote_source_loaded(RemoteSourceKind::Bundle);
         }
-        self.etag = response_headers
-            .get(header::ETAG)
-            .and_then(|value| value.to_str().ok())
-            .map(ToString::to_string);
-        self.last_modified = response_headers
-            .get(header::LAST_MODIFIED)
-            .and_then(|value| value.to_str().ok())
-            .map(ToString::to_string);
+        self.etag = response_etag;
+        self.last_modified = response_last_modified;
         self.archive_sha256 = Some(archive_sha256);
         metrics::record_bundle_reload();
         info!(
@@ -193,10 +198,14 @@ pub(crate) fn reason_for_bundle_error(error: &BundleError) -> BundleFailureReaso
 }
 
 fn hex_sha256(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let digest = Sha256::digest(bytes);
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
 }
 
 #[cfg(test)]
@@ -317,10 +326,12 @@ role = "ordinary"
             etag: "\"bundle-v1\"".to_string(),
         }));
         let request_etags = Arc::new(Mutex::new(Vec::new()));
-        let (url, server) = spawn_bundle_server(state, request_etags.clone());
+        let (url, server) = spawn_bundle_server(state.clone(), request_etags.clone());
         let store = Arc::new(RwLock::new(PolicyStore::new().unwrap()));
         let mut fetcher = fetcher(store.clone(), url, ArchiveLimits::default());
 
+        fetcher.check_and_update().await.unwrap();
+        state.write().unwrap().etag = "\"bundle-v1-rotated\"".to_string();
         fetcher.check_and_update().await.unwrap();
         fetcher.check_and_update().await.unwrap();
 
@@ -331,7 +342,11 @@ role = "ordinary"
         }
         assert_eq!(
             request_etags.lock().unwrap().as_slice(),
-            &[None, Some("\"bundle-v1\"".to_string())]
+            &[
+                None,
+                Some("\"bundle-v1\"".to_string()),
+                Some("\"bundle-v1-rotated\"".to_string())
+            ]
         );
         server.stop(false).await;
     }
