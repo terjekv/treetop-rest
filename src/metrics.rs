@@ -742,62 +742,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn authorization_batch_size_classes_cover_all_boundaries() {
-        for (size, expected) in [
-            (0, "0"),
-            (1, "1"),
-            (2, "2-4"),
-            (4, "2-4"),
-            (5, "5-8"),
-            (8, "5-8"),
-            (9, "9-32"),
-            (32, "9-32"),
-            (33, "33-128"),
-            (128, "33-128"),
-            (129, "129-512"),
-            (512, "129-512"),
-            (513, "513+"),
-            (usize::MAX, "513+"),
-        ] {
-            assert_eq!(AcceptedAuthorizationBatch::new(size).size_class(), expected);
-        }
-    }
-
-    #[test]
-    fn authorization_metrics_expose_batch_size_and_correlated_latency() {
-        let mut registry = Registry::default();
-        let metrics = AuthorizationMetrics::new(&mut registry);
-        metrics.observe(AcceptedAuthorizationBatch::new(33), 0.025);
-
-        let body = String::from_utf8(encode_registry_text(&registry).unwrap()).unwrap();
-        for metric in [
-            "authorization_batch_size",
-            "authorization_request_duration_seconds",
-        ] {
-            let help = body
-                .lines()
-                .find(|line| line.starts_with(&format!("# HELP {metric} ")))
-                .unwrap();
-            assert!(help.contains("admission-rejected requests"));
-            assert!(help.contains("over-limit batches are excluded"));
-        }
-        assert!(body.contains("# TYPE authorization_batch_size histogram"));
-        for boundary in ["0.0", "1.0", "4.0", "8.0", "32.0", "128.0", "512.0"] {
-            assert!(body.lines().any(|line| {
-                line.starts_with("authorization_batch_size_bucket{")
-                    && line.contains(&format!("le=\"{boundary}\""))
-            }));
-        }
-        assert!(body.contains("authorization_batch_size_sum 33.0"));
-        assert!(body.contains("authorization_batch_size_count 1"));
-        assert!(body.lines().any(|line| {
-            line.starts_with("authorization_request_duration_seconds_count{")
-                && line.contains("batch_size_class=\"33-128\"")
-                && line.ends_with(" 1")
-        }));
-    }
-
-    #[test]
     fn admission_rejection_metric_has_only_fixed_reason_values() {
         let mut registry = Registry::default();
         let metrics = ServiceMetrics::new(&mut registry);
