@@ -19,7 +19,7 @@ use crate::{
     config::SchemaValidationMode,
     errors::ServiceError,
     metrics,
-    models::{BundleMetadata, Endpoint, RequestContextStatus, UserPolicies},
+    models::{BundleMetadata, Endpoint, PoliciesMetadata, RequestContextStatus, UserPolicies},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -282,6 +282,24 @@ pub struct PreparedBundle {
     labelers: Vec<Arc<dyn Labeler>>,
     request_context_status: RequestContextStatus,
     bundle: BundleMetadata,
+}
+
+impl PreparedBundle {
+    /// Build the upload response outside the store write lock.
+    pub(crate) fn metadata(
+        &self,
+        allow_upload: bool,
+        schema_validation_mode: SchemaValidationMode,
+    ) -> PoliciesMetadata {
+        PoliciesMetadata {
+            allow_upload,
+            schema_validation_mode: schema_validation_mode.to_string(),
+            policies: self.policies.clone(),
+            labels: self.labels.clone(),
+            schema: self.schema.clone(),
+            bundle: Some(self.bundle.clone()),
+        }
+    }
 }
 
 impl Default for PolicyStore {

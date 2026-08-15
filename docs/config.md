@@ -58,7 +58,8 @@ The server uses **command-line flags** and **environment variables**. There is *
 value is set.
 - If `--schema-url` is provided, the server polls every 60 seconds unless `--schema-refresh` is set.
 - `--bundle-url` is mutually exclusive with policy, label, and schema URLs. Bundle mode validates policies, schema, and
-  labels together and atomically replaces the active state only after every check succeeds.
+  labels together and atomically replaces the active state only after every check succeeds. Its refresh frequency must
+  be greater than zero.
 - `allow-unsigned` accepts unsigned bundles, but any signature that is present must verify against a configured trusted
   key. `required` rejects unsigned bundles and fails startup unless at least one trusted key is configured. Invalid key
   files and conflicting duplicate key IDs also fail startup. Trusted keys are loaded once and require a restart to

@@ -843,10 +843,11 @@ pub async fn upload_bundle(
     runtime: web::Data<BundleRuntimeConfig>,
 ) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
     // Authentication is deliberately checked before the request body is polled.
-    {
+    let (allow_upload, schema_validation_mode) = {
         let guard = store.read()?;
         check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
-    }
+        (guard.allow_upload, guard.schema_validation_mode)
+    };
     if !matches!(
         req.content_type(),
         "application/gzip" | "application/x-gzip"
@@ -881,30 +882,48 @@ pub async fn upload_bundle(
     }
 
     let limits = ArchiveLimits::new(runtime.max_compressed_bytes, runtime.max_uncompressed_bytes)?;
-    let archive = BundleArchive::from_bytes(bytes);
-    let validated = archive
-        .validate(runtime.signature_policy, &runtime.trust_store, limits)
-        .map_err(|error| {
-            metrics::record_bundle_failure(crate::fetcher::reason_for_bundle_error(&error));
-            ServiceError::from(error)
-        })?;
-    let prepared =
-        crate::state::PolicyStore::prepare_bundle(&validated, None, None).inspect_err(|_| {
-            metrics::record_bundle_failure(metrics::BundleFailureReason::Validation);
-        })?;
+    let signature_policy = runtime.signature_policy;
+    let trust_store = runtime.trust_store.clone();
+    let (prepared, mut response, bundle_id, signing_key_id) = web::block(move || {
+        let archive = BundleArchive::from_bytes(bytes);
+        let validated = archive
+            .validate(signature_policy, &trust_store, limits)
+            .map_err(|error| {
+                metrics::record_bundle_failure(crate::fetcher::reason_for_bundle_error(&error));
+                ServiceError::from(error)
+            })?;
+        let bundle_id = validated.bundle_id().to_owned();
+        let signing_key_id = validated
+            .verified_signature()
+            .key_id()
+            .map(ToOwned::to_owned);
+        let prepared = crate::state::PolicyStore::prepare_bundle(&validated, None, None)
+            .inspect_err(|_| {
+                metrics::record_bundle_failure(metrics::BundleFailureReason::Validation);
+            })?;
+        let response = prepared.metadata(allow_upload, schema_validation_mode);
+        Ok::<_, ServiceError>((prepared, response, bundle_id, signing_key_id))
+    })
+    .await
+    .map_err(|error| {
+        ServiceError::EvaluationError(format!("bundle preparation task failed: {error}"))
+    })??;
 
     let mut guard = store.write()?;
     check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
+    response.allow_upload = guard.allow_upload;
+    response.schema_validation_mode = guard.schema_validation_mode.to_string();
     guard.apply_prepared_bundle(prepared).inspect_err(|_| {
         metrics::record_bundle_failure(metrics::BundleFailureReason::Store);
     })?;
+    drop(guard);
     metrics::record_bundle_reload();
     debug!(
         message = "uploaded bundle applied",
-        bundle_id = validated.bundle_id(),
-        key_id = validated.verified_signature().key_id()
+        bundle_id,
+        key_id = signing_key_id.as_deref()
     );
-    Ok(web::Json((&*guard).into()))
+    Ok(web::Json(response))
 }
 
 #[utoipa::path(

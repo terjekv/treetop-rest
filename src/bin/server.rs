@@ -122,11 +122,17 @@ async fn main() -> std::io::Result<()> {
         BundleFetcher::new(
             store.clone(),
             bundle_url,
-            config.bundle_refresh as u64,
+            config.bundle_refresh,
             limits,
             bundle_runtime.signature_policy,
             bundle_runtime.trust_store.clone(),
         )
+        .map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("invalid bundle fetch configuration: {error}"),
+            )
+        })?
         .spawn();
     }
 

@@ -8,6 +8,7 @@ use std::time::Duration;
 use tracing::{debug, error, info};
 use treetop_bundle::{ArchiveLimits, BundleArchive, BundleError, SignaturePolicy, TrustStore};
 
+use crate::errors::ServiceError;
 use crate::metrics::{self, BundleFailureReason};
 use crate::models::Endpoint;
 use crate::state::{PolicyStore, RemoteSourceKind};
@@ -17,7 +18,7 @@ pub struct BundleFetcher {
     client: Client,
     store: Arc<RwLock<PolicyStore>>,
     url: Endpoint,
-    refresh_secs: u64,
+    refresh_secs: u32,
     limits: ArchiveLimits,
     signature_policy: SignaturePolicy,
     trust_store: Arc<TrustStore>,
@@ -30,12 +31,17 @@ impl BundleFetcher {
     pub fn new(
         store: Arc<RwLock<PolicyStore>>,
         url: Endpoint,
-        refresh_secs: u64,
+        refresh_secs: u32,
         limits: ArchiveLimits,
         signature_policy: SignaturePolicy,
         trust_store: Arc<TrustStore>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ServiceError> {
+        if refresh_secs == 0 {
+            return Err(ServiceError::ValidationError(
+                "bundle refresh frequency must be greater than zero".to_string(),
+            ));
+        }
+        Ok(Self {
             client: Client::new(),
             store,
             url,
@@ -46,7 +52,7 @@ impl BundleFetcher {
             etag: None,
             last_modified: None,
             archive_sha256: None,
-        }
+        })
     }
 
     pub fn spawn(mut self) {
@@ -55,7 +61,7 @@ impl BundleFetcher {
             store.configure_remote_source(
                 RemoteSourceKind::Bundle,
                 self.url.clone(),
-                self.refresh_secs as u32,
+                self.refresh_secs,
             );
         }
         tokio::spawn(async move {
@@ -67,7 +73,7 @@ impl BundleFetcher {
                         error = %error
                     );
                 }
-                tokio::time::sleep(Duration::from_secs(self.refresh_secs)).await;
+                tokio::time::sleep(Duration::from_secs(u64::from(self.refresh_secs))).await;
             }
         });
     }
@@ -142,20 +148,32 @@ impl BundleFetcher {
             return Ok(());
         }
 
-        let archive = BundleArchive::from_bytes(bytes);
-        let validated = archive
-            .validate(self.signature_policy, &self.trust_store, self.limits)
-            .inspect_err(|error| {
-                metrics::record_bundle_failure(reason_for_bundle_error(error));
-            })?;
-        let prepared = PolicyStore::prepare_bundle(
-            &validated,
-            Some(self.url.clone()),
-            Some(self.refresh_secs as u32),
-        )
-        .inspect_err(|_| {
-            metrics::record_bundle_failure(BundleFailureReason::Validation);
-        })?;
+        let signature_policy = self.signature_policy;
+        let trust_store = self.trust_store.clone();
+        let limits = self.limits;
+        let source = self.url.clone();
+        let refresh_frequency = self.refresh_secs;
+        let (prepared, bundle_id, signing_key_id) = tokio::task::spawn_blocking(move || {
+            let archive = BundleArchive::from_bytes(bytes);
+            let validated = archive
+                .validate(signature_policy, &trust_store, limits)
+                .inspect_err(|error| {
+                    metrics::record_bundle_failure(reason_for_bundle_error(error));
+                })?;
+            let bundle_id = validated.bundle_id().to_owned();
+            let signing_key_id = validated
+                .verified_signature()
+                .key_id()
+                .map(ToOwned::to_owned);
+            let prepared =
+                PolicyStore::prepare_bundle(&validated, Some(source), Some(refresh_frequency))
+                    .inspect_err(|_| {
+                        metrics::record_bundle_failure(BundleFailureReason::Validation);
+                    })?;
+            Ok::<_, ServiceError>((prepared, bundle_id, signing_key_id))
+        })
+        .await
+        .map_err(|error| io::Error::other(format!("bundle preparation task failed: {error}")))??;
         {
             let mut store = self.store.write().map_err(|error| {
                 metrics::record_bundle_failure(BundleFailureReason::Store);
@@ -172,8 +190,8 @@ impl BundleFetcher {
         metrics::record_bundle_reload();
         info!(
             message = "verified bundle applied",
-            bundle_id = validated.bundle_id(),
-            key_id = validated.verified_signature().key_id()
+            bundle_id,
+            key_id = signing_key_id.as_deref()
         );
         Ok(())
     }
@@ -317,6 +335,26 @@ role = "ordinary"
             SignaturePolicy::AllowUnsigned,
             Arc::new(TrustStore::new()),
         )
+        .unwrap()
+    }
+
+    #[test]
+    fn rejects_zero_refresh_frequency() {
+        let store = Arc::new(RwLock::new(PolicyStore::new().unwrap()));
+        let url = "https://example.com/bundle.tar.gz".parse().unwrap();
+
+        let error = BundleFetcher::new(
+            store,
+            url,
+            0,
+            ArchiveLimits::default(),
+            SignaturePolicy::AllowUnsigned,
+            Arc::new(TrustStore::new()),
+        )
+        .err()
+        .unwrap();
+
+        assert!(error.to_string().contains("greater than zero"));
     }
 
     #[actix_web::test]

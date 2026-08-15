@@ -201,6 +201,11 @@ impl Config {
                 "bundle size limits must be greater than zero".to_string(),
             ));
         }
+        if self.bundle_url.is_some() && self.bundle_refresh == 0 {
+            return Err(ServiceError::ValidationError(
+                "bundle refresh frequency must be greater than zero".to_string(),
+            ));
+        }
         let keys = self
             .bundle_trusted_keys
             .iter()
@@ -578,6 +583,21 @@ mod tests {
             let error = AdmissionConfig::parse(None, None, Some(value)).unwrap_err();
             assert!(!error.to_string().contains(value));
         }
+    }
+
+    #[test]
+    fn rejects_zero_bundle_refresh_when_remote_bundle_mode_is_enabled() {
+        let config = Config::try_parse_from([
+            "treetop-server",
+            "--bundle-url",
+            "https://example.com/bundle.tar.gz",
+            "--bundle-refresh",
+            "0",
+        ])
+        .unwrap();
+
+        let error = config.bundle_runtime_config().unwrap_err();
+        assert!(error.to_string().contains("greater than zero"));
     }
 
     #[test]

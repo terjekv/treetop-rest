@@ -340,7 +340,9 @@ Example response:
     - `labels`
     - `schema`
     - `bundle`: format and bundle IDs, archive hash and size, module/signature details, source, refresh interval, and
-      load timestamp. This field is absent after an independent component update.
+      load timestamp. Its presence means the active policy state was loaded atomically from a bundle; `signed` reports
+      whether that bundle carried a verified signature, and `signing_key_id` identifies the trusted verification key.
+      This field is absent after an independent component update.
   - `parallel_configuration`: current Actix/Rayon worker settings.
   - `request_limits`: currently enforced context limits.
   - `request_context`: runtime context mode:
@@ -359,28 +361,40 @@ Example response:
       "timestamp": "2025-12-19T00:14:38.577289000Z",
       "sha256": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
       "size": 2049,
-      "source": { "url": "https://example.com/policies.cedar" },
+      "source": { "url": "https://example.com/production.tar.gz" },
       "refresh_frequency": 300,
       "entries": 42,
       "content": "...DSL content..."
     },
     "labels": {
-      "timestamp": "2025-12-19T00:10:00.123456000Z",
+      "timestamp": "2025-12-19T00:14:38.577289000Z",
       "sha256": "a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0",
       "size": 512,
-      "source": { "url": "https://example.com/labels.json" },
-      "refresh_frequency": 600,
+      "source": { "url": "https://example.com/production.tar.gz" },
+      "refresh_frequency": 300,
       "entries": 10,
       "content": "...JSON content..."
     },
     "schema": {
-      "timestamp": "2025-12-19T00:12:00.000000000Z",
+      "timestamp": "2025-12-19T00:14:38.577289000Z",
       "sha256": "bbf3d4d65ab0c11f8fa73f8cf54eb7bbd7d8bfcc8ca0d26f5cab098507ad6f6d",
       "size": 411,
-      "source": null,
-      "refresh_frequency": null,
+      "source": { "url": "https://example.com/production.tar.gz" },
+      "refresh_frequency": 300,
       "entries": 1,
       "content": "{...schema json...}"
+    },
+    "bundle": {
+      "format_version": 1,
+      "bundle_id": "9dca3dfe1c7e976b9a5c713a7f82529c78d92691a4e419142fdde92f50f033f4",
+      "archive_sha256": "d88ccdddbca3e4d305f705348e80b0de3c326c9384b9a7c25942f0254f54342a",
+      "compressed_size": 16384,
+      "module_count": 3,
+      "signed": true,
+      "signing_key_id": "f62d00af62c26edc920ddf22c11f57f84e511490d8d753cebfccbd5215956124",
+      "source": { "url": "https://example.com/production.tar.gz" },
+      "refresh_frequency": 300,
+      "loaded_at": "2025-12-19T00:14:38.577289000Z"
     }
   },
   "parallel_configuration": {
@@ -454,6 +468,16 @@ break the bundle's atomic policy/schema/label state.
 ### POST /api/v1/bundle
 
 - Purpose: verify and atomically replace the complete policy, schema, and label state from a Treetop `.tar.gz` bundle.
+- Creation: use the
+  [`treetop-bundle` CLI](https://github.com/treetop-policy-engine/treetop-bundle/blob/v0.0.3/README.md#commands) to validate,
+  build, and optionally sign compatible archives:
+
+  ```bash
+  treetop-bundle build --manifest treetop-bundle.toml --output bundle.tar.gz
+  treetop-bundle build --manifest treetop-bundle.toml --output signed-bundle.tar.gz \
+    --signing-key private.pem
+  ```
+
 - Headers: `Authorization: Bearer <access-token>` when global token admission is configured,
   `X-Upload-Token: <upload-token>`, and `Content-Type: application/gzip` or `application/x-gzip`.
 - Signature behavior: the configured bundle signature policy is applied identically to fetched and uploaded bundles.

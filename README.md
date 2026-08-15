@@ -42,7 +42,8 @@ The server supports the following environment variables:
   (default: `permissive`).
 - `TREETOP_BUNDLE_URL`: An optional URL for a complete `.tar.gz` policy bundle. It is mutually exclusive with the
   policy, labels, and schema URLs.
-- `TREETOP_BUNDLE_UPDATE_FREQUENCY`: Bundle polling frequency in seconds (default: `60`).
+- `TREETOP_BUNDLE_UPDATE_FREQUENCY`: Bundle polling frequency in seconds (default: `60`; must be greater than zero
+  when `TREETOP_BUNDLE_URL` is set).
 - `TREETOP_MAX_BUNDLE_COMPRESSED_BYTES`: Maximum compressed bundle size (default: `10485760`).
 - `TREETOP_MAX_BUNDLE_UNCOMPRESSED_BYTES`: Maximum total uncompressed bundle size (default: `52428800`).
 - `TREETOP_BUNDLE_TRUSTED_KEYS`: Comma-separated Ed25519 SPKI PEM public-key paths.
