@@ -34,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   relied on the old default must set `TREETOP_CLIENT_ALLOWLIST=127.0.0.1,::1` before upgrading. Allowlist and trusted
   proxy settings are now environment-only, and configured ACL and Bearer controls must both pass.
 
+### Fixed
+
+- Protected routes are classified by Actix's routing-normalized path, preventing percent-encoded `/api/v1/**` and
+  `/metrics` paths from bypassing admission controls.
+- Bundle uploads no longer erase configured remote-source readiness state, schema-free bundles are rejected in strict
+  schema mode, and upload bodies obey the lower of the global request limit and compressed-bundle limit.
+- Trusted-proxy parsing now runs in benchmark setup rather than contaminating the measured client-IP resolution path.
+
 ### Removed
 
 - Removed `--client-allowlist`, `--trust-ip-headers`, and `TREETOP_TRUST_IP_HEADERS`. Use

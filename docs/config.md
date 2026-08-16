@@ -35,7 +35,7 @@ The server uses **command-line flags** and **environment variables**. There is *
 | `--labels-refresh` | `TREETOP_LABELS_UPDATE_FREQUENCY` | _(none → 60s)_ | Poll interval for `TREETOP_LABELS_URL`. |
 | `--schema-url` | `TREETOP_SCHEMA_URL` | _(none)_ | URL to fetch Cedar schema from (JSON). |
 | `--schema-refresh` | `TREETOP_SCHEMA_UPDATE_FREQUENCY` | _(none → 60s)_ | Poll interval for `TREETOP_SCHEMA_URL`. |
-| `--schema-validation-mode` | `TREETOP_SCHEMA_VALIDATION_MODE` | `permissive` | Schema enforcement mode (`permissive` or `strict`) for policy/schema reloads. |
+| `--schema-validation-mode` | `TREETOP_SCHEMA_VALIDATION_MODE` | `permissive` | Schema enforcement mode (`permissive` or `strict`) for policy/schema and bundle reloads. |
 | `--bundle-url` | `TREETOP_BUNDLE_URL` | _(none)_ | URL to fetch a complete `.tar.gz` policy bundle from. |
 | `--bundle-refresh` | `TREETOP_BUNDLE_UPDATE_FREQUENCY` | `60` | Poll interval for `TREETOP_BUNDLE_URL`, in seconds. |
 | `--max-bundle-compressed-bytes` | `TREETOP_MAX_BUNDLE_COMPRESSED_BYTES` | `10485760` | Maximum compressed bundle size. |
@@ -60,6 +60,8 @@ value is set.
 - `--bundle-url` is mutually exclusive with policy, label, and schema URLs. Bundle mode validates policies, schema, and
   labels together and atomically replaces the active state only after every check succeeds. Its refresh frequency must
   be greater than zero.
+- Strict schema mode rejects every fetched or uploaded bundle that does not include a schema.
+- Bundle uploads obey the lower of `--max-request-size` and `--max-bundle-compressed-bytes`.
 - `allow-unsigned` accepts unsigned bundles, but any signature that is present must verify against a configured trusted
   key. `required` rejects unsigned bundles and fails startup unless at least one trusted key is configured. Invalid key
   files and conflicting duplicate key IDs also fail startup. Trusted keys are loaded once and require a restart to

@@ -42,6 +42,7 @@ impl From<BundleSignaturePolicy> for SignaturePolicy {
 pub struct BundleRuntimeConfig {
     pub signature_policy: SignaturePolicy,
     pub trust_store: Arc<TrustStore>,
+    pub max_request_bytes: usize,
     pub max_compressed_bytes: usize,
     pub max_uncompressed_bytes: usize,
 }
@@ -223,6 +224,7 @@ impl Config {
         Ok(BundleRuntimeConfig {
             signature_policy: self.bundle_signature_policy.into(),
             trust_store: Arc::new(trust_store),
+            max_request_bytes: self.max_request_size,
             max_compressed_bytes: self.max_bundle_compressed_bytes,
             max_uncompressed_bytes: self.max_bundle_uncompressed_bytes,
         })

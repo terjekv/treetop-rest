@@ -266,12 +266,34 @@ pub(crate) enum RemoteSourceKind {
     Bundle,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 struct RemoteLoadStatus {
-    policies: bool,
-    labels: bool,
-    schema: bool,
-    bundle: bool,
+    policies: RemoteSourceStatus,
+    labels: RemoteSourceStatus,
+    schema: RemoteSourceStatus,
+    bundle: RemoteSourceStatus,
+}
+
+#[derive(Debug, Default, Clone)]
+struct RemoteSourceStatus {
+    configuration: Option<(Endpoint, u32)>,
+    loaded: bool,
+}
+
+impl RemoteSourceStatus {
+    fn configure(&mut self, source: Endpoint, refresh_frequency: u32) {
+        self.configuration = Some((source, refresh_frequency));
+        self.loaded = false;
+    }
+
+    fn mark_loaded(&mut self) -> Option<(Endpoint, u32)> {
+        self.loaded = true;
+        self.configuration.clone()
+    }
+
+    fn ready(&self, metadata_has_source: bool) -> bool {
+        !(self.configuration.is_some() || metadata_has_source) || self.loaded
+    }
 }
 
 pub struct PreparedBundle {
@@ -369,23 +391,31 @@ impl PolicyStore {
     ) {
         match kind {
             RemoteSourceKind::Policies => {
-                self.policies.source = Some(source);
+                self.policies.source = Some(source.clone());
                 self.policies.refresh_frequency = Some(refresh_frequency);
-                self.remote_loads.policies = false;
+                self.remote_loads
+                    .policies
+                    .configure(source, refresh_frequency);
             }
             RemoteSourceKind::Labels => {
-                self.labels.source = Some(source);
+                self.labels.source = Some(source.clone());
                 self.labels.refresh_frequency = Some(refresh_frequency);
-                self.remote_loads.labels = false;
+                self.remote_loads
+                    .labels
+                    .configure(source, refresh_frequency);
             }
             RemoteSourceKind::Schema => {
-                self.schema.source = Some(source);
+                self.schema.source = Some(source.clone());
                 self.schema.refresh_frequency = Some(refresh_frequency);
-                self.remote_loads.schema = false;
+                self.remote_loads
+                    .schema
+                    .configure(source, refresh_frequency);
             }
             RemoteSourceKind::Bundle => {
                 self.bundle_url_mode = true;
-                self.remote_loads.bundle = false;
+                self.remote_loads
+                    .bundle
+                    .configure(source, refresh_frequency);
             }
         }
     }
@@ -393,10 +423,28 @@ impl PolicyStore {
     /// Record a remote response that was successful, validated, and applied.
     pub(crate) fn mark_remote_source_loaded(&mut self, kind: RemoteSourceKind) {
         match kind {
-            RemoteSourceKind::Policies => self.remote_loads.policies = true,
-            RemoteSourceKind::Labels => self.remote_loads.labels = true,
-            RemoteSourceKind::Schema => self.remote_loads.schema = true,
-            RemoteSourceKind::Bundle => self.remote_loads.bundle = true,
+            RemoteSourceKind::Policies => {
+                if let Some((source, refresh_frequency)) = self.remote_loads.policies.mark_loaded()
+                {
+                    self.policies.source = Some(source);
+                    self.policies.refresh_frequency = Some(refresh_frequency);
+                }
+            }
+            RemoteSourceKind::Labels => {
+                if let Some((source, refresh_frequency)) = self.remote_loads.labels.mark_loaded() {
+                    self.labels.source = Some(source);
+                    self.labels.refresh_frequency = Some(refresh_frequency);
+                }
+            }
+            RemoteSourceKind::Schema => {
+                if let Some((source, refresh_frequency)) = self.remote_loads.schema.mark_loaded() {
+                    self.schema.source = Some(source);
+                    self.schema.refresh_frequency = Some(refresh_frequency);
+                }
+            }
+            RemoteSourceKind::Bundle => {
+                let _ = self.remote_loads.bundle.mark_loaded();
+            }
         }
     }
 
@@ -406,11 +454,13 @@ impl PolicyStore {
     /// serving the last-known-good value when a later refresh fails.
     pub(crate) fn configured_sources_loaded(&self) -> bool {
         if self.bundle_url_mode {
-            self.remote_loads.bundle
+            self.remote_loads.bundle.ready(true)
         } else {
-            (self.policies.source.is_none() || self.remote_loads.policies)
-                && (self.labels.source.is_none() || self.remote_loads.labels)
-                && (self.schema.source.is_none() || self.remote_loads.schema)
+            self.remote_loads
+                .policies
+                .ready(self.policies.source.is_some())
+                && self.remote_loads.labels.ready(self.labels.source.is_some())
+                && self.remote_loads.schema.ready(self.schema.source.is_some())
         }
     }
 
@@ -682,6 +732,13 @@ impl PolicyStore {
 
     /// Atomically publish a previously prepared bundle candidate.
     pub fn apply_prepared_bundle(&mut self, prepared: PreparedBundle) -> Result<(), ServiceError> {
+        if self.schema_validation_mode == SchemaValidationMode::Strict
+            && prepared.schema.content.is_empty()
+        {
+            return Err(ServiceError::SchemaValidationError(
+                "strict schema validation requires every bundle to include a schema".to_string(),
+            ));
+        }
         self.clear_list_policies_cache()?;
         self.engine = prepared.engine;
         self.policies = prepared.policies;
@@ -820,6 +877,30 @@ mod tests {
     use crate::models::Endpoint;
     use serde_json::Value;
     use std::str::FromStr;
+
+    fn schema_free_prepared_bundle() -> PreparedBundle {
+        let policies = "permit (principal, action, resource);";
+        PreparedBundle {
+            engine: Arc::new(PolicyEngine::new_from_str(policies).unwrap()),
+            policies: Metadata::<OfPolicies>::new(policies.to_string(), None, None).unwrap(),
+            labels: Metadata::<OfLabels>::new(String::new(), None, None).unwrap(),
+            schema: Metadata::<OfSchema>::new(String::new(), None, None).unwrap(),
+            labelers: Vec::new(),
+            request_context_status: RequestContextStatus::no_schema(),
+            bundle: BundleMetadata {
+                format_version: 1,
+                bundle_id: "bundle-id".to_string(),
+                archive_sha256: "archive-sha256".to_string(),
+                compressed_size: 1,
+                module_count: 1,
+                signed: false,
+                signing_key_id: None,
+                source: None,
+                refresh_frequency: None,
+                loaded_at: Utc::now(),
+            },
+        }
+    }
 
     const CONTEXT_POLICY_DSL: &str = r#"
 permit (
@@ -1055,6 +1136,43 @@ forbid (
 
         store.configure_remote_source(RemoteSourceKind::Policies, endpoint, 120);
         assert!(!store.configured_sources_loaded());
+    }
+
+    #[test]
+    fn bundle_upload_does_not_erase_configured_remote_readiness() {
+        let mut store = PolicyStore::new().unwrap();
+        let endpoint = Endpoint::from_str("https://example.com/policies").unwrap();
+        store.configure_remote_source(RemoteSourceKind::Policies, endpoint, 60);
+
+        store
+            .apply_prepared_bundle(schema_free_prepared_bundle())
+            .unwrap();
+
+        assert!(store.policies.source.is_none());
+        assert!(!store.configured_sources_loaded());
+        store.mark_remote_source_loaded(RemoteSourceKind::Policies);
+        assert!(store.configured_sources_loaded());
+        assert_eq!(
+            store.policies.source.as_ref().map(Endpoint::as_str),
+            Some("https://example.com/policies")
+        );
+        assert_eq!(store.policies.refresh_frequency, Some(60));
+    }
+
+    #[test]
+    fn strict_mode_rejects_schema_free_prepared_bundle_without_replacing_state() {
+        let mut store = PolicyStore::new().unwrap();
+        store.set_schema_validation_mode(SchemaValidationMode::Strict);
+        let previous_engine = Arc::clone(&store.engine);
+
+        let error = store
+            .apply_prepared_bundle(schema_free_prepared_bundle())
+            .unwrap_err();
+
+        assert!(matches!(error, ServiceError::SchemaValidationError(_)));
+        assert!(Arc::ptr_eq(&store.engine, &previous_engine));
+        assert!(store.policies.content.is_empty());
+        assert!(store.bundle.is_none());
     }
 
     #[test]

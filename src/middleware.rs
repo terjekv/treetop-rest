@@ -78,7 +78,7 @@ where
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        if !is_protected_path(req.path()) {
+        if !is_protected_request(&req) {
             return call_service(&self.service, req);
         }
 
@@ -173,6 +173,10 @@ fn reject<B: 'static>(
     }
     let response = req.into_response(response).map_into_right_body();
     Box::pin(async move { Ok(response) })
+}
+
+fn is_protected_request(req: &ServiceRequest) -> bool {
+    is_protected_path(req.match_info().as_str())
 }
 
 pub fn is_protected_path(path: &str) -> bool {

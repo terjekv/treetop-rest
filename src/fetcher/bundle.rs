@@ -179,8 +179,13 @@ impl BundleFetcher {
                 metrics::record_bundle_failure(BundleFailureReason::Store);
                 format!("policy store lock poisoned: {error}")
             })?;
-            store.apply_prepared_bundle(prepared).inspect_err(|_| {
-                metrics::record_bundle_failure(BundleFailureReason::Store);
+            store.apply_prepared_bundle(prepared).inspect_err(|error| {
+                let reason = if matches!(error, ServiceError::SchemaValidationError(_)) {
+                    BundleFailureReason::Validation
+                } else {
+                    BundleFailureReason::Store
+                };
+                metrics::record_bundle_failure(reason);
             })?;
             store.mark_remote_source_loaded(RemoteSourceKind::Bundle);
         }

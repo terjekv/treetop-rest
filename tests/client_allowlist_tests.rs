@@ -207,6 +207,37 @@ async fn metrics_is_protected() {
 }
 
 #[actix_web::test]
+async fn percent_encoded_protected_routes_cannot_bypass_admission() {
+    let config = AdmissionConfig::parse(None, Some(ALLOWED_TOKEN), None).unwrap();
+    let app = test::init_service(
+        App::new()
+            .wrap(AccessControlMiddleware::new(config))
+            .route("/api/v1/test", web::get().to(ok_handler))
+            .route("/metrics", web::get().to(ok_handler)),
+    )
+    .await;
+
+    for path in ["/%61pi/v1/test", "/%6Detrics"] {
+        let denied = test::TestRequest::get().uri(path).to_request();
+        assert_eq!(
+            test::call_service(&app, denied).await.status(),
+            StatusCode::UNAUTHORIZED,
+            "{path}"
+        );
+
+        let allowed = test::TestRequest::get()
+            .uri(path)
+            .insert_header((header::AUTHORIZATION, format!("Bearer {ALLOWED_TOKEN}")))
+            .to_request();
+        assert_eq!(
+            test::call_service(&app, allowed).await.status(),
+            StatusCode::OK,
+            "{path}"
+        );
+    }
+}
+
+#[actix_web::test]
 async fn trusted_proxy_chain_is_walked_from_the_peer() {
     let config =
         AdmissionConfig::parse(Some("198.51.100.0/24"), None, Some("203.0.113.0/24")).unwrap();

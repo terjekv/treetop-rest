@@ -484,9 +484,11 @@ break the bundle's atomic policy/schema/label state.
   Under `allow-unsigned`, unsigned bundles are accepted but any signature present must be trusted and valid. Under
   `required`, unsigned bundles are rejected.
 - Atomicity: archive decoding, signature verification, policy/schema/label validation, and engine construction occur
-  before the active store is replaced. A rejected bundle leaves the last-known-good state unchanged.
+  before the active store is replaced. Strict schema mode requires the bundle to include a schema. A rejected bundle
+  leaves the last-known-good state unchanged.
 - Responses: `200` with updated `PoliciesMetadata`; `400` for invalid content or signatures; `413` for the compressed
-  size limit; `415` for unsupported media types; and the existing `403` response for admission or upload failures.
+  bundle or global request-size limit, whichever is lower; `415` for unsupported media types; and the existing `403`
+  response for admission or upload failures.
 
 ```bash
 curl -X POST http://localhost:9999/api/v1/bundle \

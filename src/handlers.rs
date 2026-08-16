@@ -831,7 +831,7 @@ pub async fn upload_policies(
         (status = 200, description = "Bundle verified and atomically applied", body = PoliciesMetadata),
         (status = 400, description = "Invalid archive, signature, policy, schema, or labels", body = ErrorResponse),
         (status = 403, description = "Client admission failed, uploads are disabled, or the upload token is invalid", body = ErrorResponse),
-        (status = 413, description = "Compressed bundle exceeds the configured limit", body = ErrorResponse),
+        (status = 413, description = "Compressed bundle exceeds the bundle or global request-size limit", body = ErrorResponse),
         (status = 415, description = "Unsupported media type", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     ),
@@ -855,27 +855,28 @@ pub async fn upload_bundle(
         return Err(ServiceError::UnsupportedBundleMediaType);
     }
 
+    let upload_limit = runtime.max_compressed_bytes.min(runtime.max_request_bytes);
     let declared_size = req
         .headers()
         .get(header::CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<usize>().ok());
-    if declared_size.is_some_and(|size| size > runtime.max_compressed_bytes) {
+    if declared_size.is_some_and(|size| size > upload_limit) {
         metrics::record_bundle_failure(metrics::BundleFailureReason::SizeLimit);
         return Err(ServiceError::BundleTooLarge(format!(
             "compressed bundle exceeds {} bytes",
-            runtime.max_compressed_bytes
+            upload_limit
         )));
     }
 
     let mut bytes = Vec::with_capacity(declared_size.unwrap_or_default());
     while let Some(chunk) = payload.next().await {
         let chunk = chunk.map_err(|error| ServiceError::InvalidBundle(error.to_string()))?;
-        if bytes.len().saturating_add(chunk.len()) > runtime.max_compressed_bytes {
+        if bytes.len().saturating_add(chunk.len()) > upload_limit {
             metrics::record_bundle_failure(metrics::BundleFailureReason::SizeLimit);
             return Err(ServiceError::BundleTooLarge(format!(
                 "compressed bundle exceeds {} bytes",
-                runtime.max_compressed_bytes
+                upload_limit
             )));
         }
         bytes.extend_from_slice(&chunk);
@@ -913,8 +914,13 @@ pub async fn upload_bundle(
     check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
     response.allow_upload = guard.allow_upload;
     response.schema_validation_mode = guard.schema_validation_mode.to_string();
-    guard.apply_prepared_bundle(prepared).inspect_err(|_| {
-        metrics::record_bundle_failure(metrics::BundleFailureReason::Store);
+    guard.apply_prepared_bundle(prepared).inspect_err(|error| {
+        let reason = if matches!(error, ServiceError::SchemaValidationError(_)) {
+            metrics::BundleFailureReason::Validation
+        } else {
+            metrics::BundleFailureReason::Store
+        };
+        metrics::record_bundle_failure(reason);
     })?;
     drop(guard);
     metrics::record_bundle_reload();

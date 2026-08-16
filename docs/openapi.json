@@ -178,7 +178,7 @@
             }
           },
           "413": {
-            "description": "Compressed bundle exceeds the configured limit",
+            "description": "Compressed bundle exceeds the bundle or global request-size limit",
             "content": {
               "application/json": {
                 "schema": {

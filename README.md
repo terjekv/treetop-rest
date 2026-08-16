@@ -38,8 +38,8 @@ The server supports the following environment variables:
 - `TREETOP_SCHEMA_URL`: An optional URL for fetching a Cedar schema (default: `None`).
 - `TREETOP_SCHEMA_UPDATE_FREQUENCY`: The frequency (in seconds) at which to update the schema from the
   `TREETOP_SCHEMA_URL` (default: `60`).
-- `TREETOP_SCHEMA_VALIDATION_MODE`: Schema mode for policy/schema reloads: `permissive` or `strict`
-  (default: `permissive`).
+- `TREETOP_SCHEMA_VALIDATION_MODE`: Schema mode for policy/schema and bundle reloads: `permissive` or `strict`
+  (default: `permissive`). Strict mode requires every bundle to include a schema.
 - `TREETOP_BUNDLE_URL`: An optional URL for a complete `.tar.gz` policy bundle. It is mutually exclusive with the
   policy, labels, and schema URLs.
 - `TREETOP_BUNDLE_UPDATE_FREQUENCY`: Bundle polling frequency in seconds (default: `60`; must be greater than zero
@@ -59,7 +59,8 @@ The server supports the following environment variables:
 - `TREETOP_MAX_CONTEXT_DEPTH`: Maximum request context nesting depth (default: `8`).
 - `TREETOP_MAX_CONTEXT_KEYS`: Maximum number of top-level request context keys (default: `64`).
 - `TREETOP_MAX_BATCH_SIZE`: Maximum number of authorization checks accepted in one request (default: `1024`).
-- `TREETOP_MAX_REQUEST_SIZE`: Maximum request body size in bytes (default: `10485760` = 10 MB).
+- `TREETOP_MAX_REQUEST_SIZE`: Maximum request body size in bytes (default: `10485760` = 10 MB), including bundle
+  uploads even when the compressed-bundle limit is higher.
 
 ### Admission controls
 

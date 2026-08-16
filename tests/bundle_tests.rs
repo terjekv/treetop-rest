@@ -119,6 +119,32 @@ async fn bundle_upload_applies_complete_state_and_metadata() {
 }
 
 #[actix_web::test]
+async fn strict_mode_rejects_bundle_without_schema() {
+    let fixture = BundleFixture::new();
+    let store = upload_store();
+    store
+        .write()
+        .unwrap()
+        .set_schema_validation_mode(treetop_rest::config::SchemaValidationMode::Strict);
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store.clone()))
+            .app_data(web::Data::new(runtime(SignaturePolicy::AllowUnsigned)))
+            .route("/api/v1/bundle", web::post().to(handlers::upload_bundle)),
+    )
+    .await;
+
+    let response = test::call_service(&app, bundle_request(fixture.archive())).await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = test::read_body_json(response).await;
+    assert_eq!(body["code"], "schema_validation_error");
+    let store = store.read().unwrap();
+    assert!(store.policies.content.is_empty());
+    assert!(store.bundle.is_none());
+}
+
+#[actix_web::test]
 async fn invalid_bundle_upload_preserves_last_known_good_state() {
     let store = upload_store();
     store
@@ -304,6 +330,7 @@ async fn bundle_upload_enforces_actual_compressed_size_limit() {
             .app_data(web::Data::new(BundleRuntimeConfig {
                 signature_policy: SignaturePolicy::AllowUnsigned,
                 trust_store: Arc::new(TrustStore::new()),
+                max_request_bytes: usize::MAX,
                 max_compressed_bytes: 4,
                 max_uncompressed_bytes: 1024,
             }))
@@ -328,6 +355,7 @@ async fn bundle_upload_rejects_oversized_declared_length_before_reading_body() {
             .app_data(web::Data::new(BundleRuntimeConfig {
                 signature_policy: SignaturePolicy::AllowUnsigned,
                 trust_store: Arc::new(TrustStore::new()),
+                max_request_bytes: usize::MAX,
                 max_compressed_bytes: 4,
                 max_uncompressed_bytes: 1024,
             }))
@@ -346,6 +374,32 @@ async fn bundle_upload_rejects_oversized_declared_length_before_reading_body() {
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
 
+#[actix_web::test]
+async fn bundle_upload_enforces_global_request_size_limit() {
+    let fixture = BundleFixture::new();
+    let archive = fixture.archive();
+    let store = upload_store();
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(store))
+            .app_data(web::Data::new(BundleRuntimeConfig {
+                signature_policy: SignaturePolicy::AllowUnsigned,
+                trust_store: Arc::new(TrustStore::new()),
+                max_request_bytes: archive.len() - 1,
+                max_compressed_bytes: archive.len() + 1,
+                max_uncompressed_bytes: 50 * 1024 * 1024,
+            }))
+            .route("/api/v1/bundle", web::post().to(handlers::upload_bundle)),
+    )
+    .await;
+
+    let mut request = bundle_request(archive);
+    request.headers_mut().remove("content-length");
+    let response = test::call_service(&app, request).await;
+
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
 fn upload_store() -> Arc<RwLock<PolicyStore>> {
     let mut store = PolicyStore::new().unwrap();
     store.allow_upload = true;
@@ -357,6 +411,7 @@ fn runtime(signature_policy: SignaturePolicy) -> BundleRuntimeConfig {
     BundleRuntimeConfig {
         signature_policy,
         trust_store: Arc::new(TrustStore::new()),
+        max_request_bytes: 10 * 1024 * 1024,
         max_compressed_bytes: 10 * 1024 * 1024,
         max_uncompressed_bytes: 50 * 1024 * 1024,
     }
@@ -369,6 +424,7 @@ fn runtime_with_keys<const N: usize>(
     BundleRuntimeConfig {
         signature_policy,
         trust_store: Arc::new(TrustStore::from_keys(trusted_keys).unwrap()),
+        max_request_bytes: 10 * 1024 * 1024,
         max_compressed_bytes: 10 * 1024 * 1024,
         max_uncompressed_bytes: 50 * 1024 * 1024,
     }
