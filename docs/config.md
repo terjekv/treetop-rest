@@ -2,6 +2,8 @@
 
 This document describes configuration for `treetop-server`.
 
+See the [security guide](security.md) for deployment trust boundaries, hardening, and credential rotation.
+
 ## Overview
 
 The server uses command-line flags and environment variables. Admission controls are environment-only. It does not use
@@ -66,6 +68,9 @@ value is set.
   key. `required` rejects unsigned bundles and fails startup unless at least one trusted key is configured. Invalid key
   files and conflicting duplicate key IDs also fail startup. Trusted keys are loaded once and require a restart to
   change.
+- `--bundle-trusted-key` and `TREETOP_BUNDLE_TRUSTED_KEYS` accept public verification keys only. The server has no
+  private signing-key or signing-key-password setting and never loads that material. Keep private keys and passphrases
+  on the bundle-build system and use the `treetop-bundle` CLI to sign archives before REST fetches or receives them.
 - Legacy label documents use the same strict parser as bundles. When a schema is active, label kinds and input/output
   attribute types must be compatible with it, independent of the policy/schema permissive fallback mode.
 - The context limit settings apply to the optional `context` object accepted by `POST /api/v1/authorize`.

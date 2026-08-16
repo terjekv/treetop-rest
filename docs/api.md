@@ -3,6 +3,8 @@
 This document describes the HTTP interface exposed by the Treetop REST server for
 policy management and evaluation.
 
+See the [security guide](security.md) for deployment trust boundaries and production hardening.
+
 ## Base URL and formats
 
 - Default base URL: `http://localhost:9999`
@@ -469,7 +471,7 @@ break the bundle's atomic policy/schema/label state.
 
 - Purpose: verify and atomically replace the complete policy, schema, and label state from a Treetop `.tar.gz` bundle.
 - Creation: use the
-  [`treetop-bundle` CLI](https://github.com/treetop-policy-engine/treetop-bundle/blob/v0.0.3/README.md#commands) to validate,
+  [`treetop-bundle` CLI](https://github.com/treetop-policy-engine/treetop-bundle/blob/v0.0.4/README.md#commands) to validate,
   build, and optionally sign compatible archives:
 
   ```bash
@@ -477,6 +479,14 @@ break the bundle's atomic policy/schema/label state.
   treetop-bundle build --manifest treetop-bundle.toml --output signed-bundle.tar.gz \
     --signing-key private.pem
   ```
+
+  Private signing keys are build-time material: keep them and their passphrases on the system running
+  `treetop-bundle`, and never upload or configure them in Treetop REST. The REST service loads only trusted Ed25519 SPKI
+  public keys for verification. `treetop-bundle` 0.0.4 supports password-encrypted PKCS#8 private keys through
+  `--signing-key-password-file` or `TREETOP_BUNDLE_SIGNING_KEY_PASSWORD`; see its
+  [signing-key documentation](https://github.com/treetop-policy-engine/treetop-bundle/blob/v0.0.4/README.md#signing-keys).
+  REST does not enable encrypted-private-key loading because it never handles private keys; this does not affect its
+  ability to verify bundles produced with encrypted signing keys.
 
 - Headers: `Authorization: Bearer <access-token>` when global token admission is configured,
   `X-Upload-Token: <upload-token>`, and `Content-Type: application/gzip` or `application/x-gzip`.
