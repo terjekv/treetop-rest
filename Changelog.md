@@ -17,9 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added independent environment-only IP/CIDR and opaque Bearer-token admission controls for `/api/v1/**` and
   `/metrics`, explicit trusted-proxy chain walking for `X-Forwarded-For`, fixed-reason rejection metrics, and OpenAPI
   Bearer security metadata.
+- Added an operator security guide covering network and proxy trust, access and upload credentials, remote sources,
+  signed bundles, resource limits, information exposure, hardened deployment, rotation, and compromise response.
 
 ### Changed
 
+- Updated `treetop-bundle` to 0.0.4 and refreshed every outdated direct Rust dependency (`uuid`, `base64`, and
+  `ed25519-dalek`) to its latest stable release. REST disables the bundle crate's encrypted-private-key feature because
+  the service verifies bundles with public keys and never loads signing keys.
 - Reduced admission hot-path work by hashing Bearer candidates once, parsing trusted forwarding chains without a
   temporary address allocation, and isolating allowlist parsing from request-path benchmarks. Legacy label updates now
   parse once and reuse compiled regex programs. Bundle loads reuse validated artifact counts, preallocate bounded

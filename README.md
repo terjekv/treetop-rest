@@ -11,6 +11,8 @@ matrix syntax, and release binaries are documented there.
 See [docs/api.md](docs/api.md) for the HTTP API reference. A running server exposes
 the generated OpenAPI document at `/openapi.json` and Swagger UI at `/swagger-ui/`.
 The generated specification is also checked in at [docs/openapi.json](docs/openapi.json).
+See [docs/security.md](docs/security.md) for the security model, trust boundaries, production hardening, credential and
+signing-key rotation, and compromise response.
 
 Tagged server images are published at
 `ghcr.io/treetop-policy-engine/treetop-rest:<version>`. Personal GHCR and Docker Hub namespaces
@@ -49,6 +51,9 @@ The server supports the following environment variables:
 - `TREETOP_BUNDLE_TRUSTED_KEYS`: Comma-separated Ed25519 SPKI PEM public-key paths.
 - `TREETOP_BUNDLE_SIGNATURE_POLICY`: `allow-unsigned` or `required` (default: `allow-unsigned`). A signed bundle must
   always match a trusted key.
+- Treetop REST loads only public verification keys. Keep private signing keys and their passphrases on the system that
+  runs `treetop-bundle`; never upload or configure them in the REST service. See [bundle signing and
+  verification](docs/api.md#post-apiv1bundle).
 - `TREETOP_CLIENT_ALLOWLIST`: Environment-only comma-separated IPv4/IPv6 addresses and CIDRs. Unset, blank, or `*`
   allows every client (default: open).
 - `TREETOP_ACCESS_TOKENS`: Environment-only comma-separated opaque Bearer tokens accepted by protected endpoints.
