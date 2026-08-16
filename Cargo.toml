@@ -117,6 +117,10 @@ name = "labels_policy_store_callgrind"
 harness = false
 
 [[bench]]
+name = "bundle_prepare_schema_mode_callgrind"
+harness = false
+
+[[bench]]
 name = "middleware_ip_trusted_header_callgrind"
 harness = false
 
@@ -150,6 +154,10 @@ harness = false
 
 [[bench]]
 name = "middleware_access_token_miss_callgrind"
+harness = false
+
+[[bench]]
+name = "middleware_access_protected_path_callgrind"
 harness = false
 
 [[bench]]

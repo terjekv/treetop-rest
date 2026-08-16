@@ -153,6 +153,13 @@ impl BundleFetcher {
         let limits = self.limits;
         let source = self.url.clone();
         let refresh_frequency = self.refresh_secs;
+        let schema_validation_mode = {
+            let store = self.store.read().map_err(|error| {
+                metrics::record_bundle_failure(BundleFailureReason::Store);
+                format!("policy store lock poisoned: {error}")
+            })?;
+            store.schema_validation_mode
+        };
         let (prepared, bundle_id, signing_key_id) = tokio::task::spawn_blocking(move || {
             let archive = BundleArchive::from_bytes(bytes);
             let validated = archive
@@ -165,11 +172,15 @@ impl BundleFetcher {
                 .verified_signature()
                 .key_id()
                 .map(ToOwned::to_owned);
-            let prepared =
-                PolicyStore::prepare_bundle(&validated, Some(source), Some(refresh_frequency))
-                    .inspect_err(|_| {
-                        metrics::record_bundle_failure(BundleFailureReason::Validation);
-                    })?;
+            let prepared = PolicyStore::prepare_bundle(
+                &validated,
+                Some(source),
+                Some(refresh_frequency),
+                schema_validation_mode,
+            )
+            .inspect_err(|_| {
+                metrics::record_bundle_failure(BundleFailureReason::Validation);
+            })?;
             Ok::<_, ServiceError>((prepared, bundle_id, signing_key_id))
         })
         .await
@@ -425,6 +436,34 @@ role = "ordinary"
             assert_eq!(store.bundle.as_ref().unwrap().bundle_id, original_id);
             assert!(store.configured_sources_loaded());
         }
+        server.stop(false).await;
+    }
+
+    #[actix_web::test]
+    async fn strict_mode_rejects_schema_free_remote_bundle() {
+        let state = Arc::new(RwLock::new(ResponseState {
+            body: bundle_bytes(),
+            etag: "\"schema-free\"".to_string(),
+        }));
+        let (url, server) = spawn_bundle_server(state, Arc::new(Mutex::new(Vec::new())));
+        let store = Arc::new(RwLock::new(PolicyStore::new().unwrap()));
+        store
+            .write()
+            .unwrap()
+            .set_schema_validation_mode(crate::config::SchemaValidationMode::Strict);
+        let mut fetcher = fetcher(store.clone(), url, ArchiveLimits::default());
+
+        let error = fetcher.check_and_update().await.unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("every bundle to include a schema")
+        );
+        let store = store.read().unwrap();
+        assert!(store.bundle.is_none());
+        assert!(!store.configured_sources_loaded());
+        drop(store);
         server.stop(false).await;
     }
 

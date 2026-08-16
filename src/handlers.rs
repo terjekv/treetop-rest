@@ -898,10 +898,15 @@ pub async fn upload_bundle(
             .verified_signature()
             .key_id()
             .map(ToOwned::to_owned);
-        let prepared = crate::state::PolicyStore::prepare_bundle(&validated, None, None)
-            .inspect_err(|_| {
-                metrics::record_bundle_failure(metrics::BundleFailureReason::Validation);
-            })?;
+        let prepared = crate::state::PolicyStore::prepare_bundle(
+            &validated,
+            None,
+            None,
+            schema_validation_mode,
+        )
+        .inspect_err(|_| {
+            metrics::record_bundle_failure(metrics::BundleFailureReason::Validation);
+        })?;
         let response = prepared.metadata(allow_upload, schema_validation_mode);
         Ok::<_, ServiceError>((prepared, response, bundle_id, signing_key_id))
     })

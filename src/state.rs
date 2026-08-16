@@ -514,6 +514,18 @@ impl PolicyStore {
         Ok(())
     }
 
+    fn ensure_bundle_schema_present(
+        schema_validation_mode: SchemaValidationMode,
+        schema_present: bool,
+    ) -> Result<(), ServiceError> {
+        if schema_validation_mode == SchemaValidationMode::Strict && !schema_present {
+            return Err(ServiceError::SchemaValidationError(
+                "strict schema validation requires every bundle to include a schema".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     fn runtime_schema_for_dsl(
         &self,
         dsl: &str,
@@ -668,7 +680,12 @@ impl PolicyStore {
         validated: &ValidatedBundle,
         source: Option<Endpoint>,
         refresh_frequency: Option<u32>,
+        schema_validation_mode: SchemaValidationMode,
     ) -> Result<PreparedBundle, ServiceError> {
+        Self::ensure_bundle_schema_present(
+            schema_validation_mode,
+            validated.schema_json().is_some(),
+        )?;
         let engine = Arc::new(validated.prepare_engine()?);
         let policies = Metadata::<OfPolicies>::from_validated_content(
             validated.policies().to_string(),
@@ -732,13 +749,10 @@ impl PolicyStore {
 
     /// Atomically publish a previously prepared bundle candidate.
     pub fn apply_prepared_bundle(&mut self, prepared: PreparedBundle) -> Result<(), ServiceError> {
-        if self.schema_validation_mode == SchemaValidationMode::Strict
-            && prepared.schema.content.is_empty()
-        {
-            return Err(ServiceError::SchemaValidationError(
-                "strict schema validation requires every bundle to include a schema".to_string(),
-            ));
-        }
+        Self::ensure_bundle_schema_present(
+            self.schema_validation_mode,
+            !prepared.schema.content.is_empty(),
+        )?;
         self.clear_list_policies_cache()?;
         self.engine = prepared.engine;
         self.policies = prepared.policies;

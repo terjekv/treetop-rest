@@ -38,9 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Protected routes are classified by Actix's routing-normalized path, preventing percent-encoded `/api/v1/**` and
   `/metrics` paths from bypassing admission controls.
-- Bundle uploads no longer erase configured remote-source readiness state, schema-free bundles are rejected in strict
-  schema mode, and upload bodies obey the lower of the global request limit and compressed-bundle limit.
-- Trusted-proxy parsing now runs in benchmark setup rather than contaminating the measured client-IP resolution path.
+- Bundle uploads no longer erase configured remote-source readiness state, schema-free bundles are rejected before
+  Cedar engine construction in strict schema mode, and upload bodies obey the lower of the global request limit and
+  compressed-bundle limit.
+- Admission benchmarks now cover canonical and percent-encoded protected routes. Trusted-proxy parsing runs in setup
+  rather than contaminating the measured client-IP resolution path.
 
 ### Removed
 
