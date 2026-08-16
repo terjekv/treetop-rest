@@ -38,6 +38,7 @@ fn build_store() -> Arc<RwLock<PolicyStore>> {
 
 type BoxedApp = BoxService<HttpRequest, ServiceResponse<BoxBody>, actix_web::Error>;
 type BenchCtx = (BoxedApp, HttpRequest);
+type BenchResult = (BoxedApp, ServiceResponse<BoxBody>);
 
 fn setup_list_light() -> BenchCtx {
     init_metrics_once();
@@ -61,9 +62,12 @@ fn setup_list_light() -> BenchCtx {
     (app, req)
 }
 
-#[library_benchmark(setup = setup_list_light)]
-fn e2e_list_policies_light((app, req): BenchCtx) {
-    let _ = futures::executor::block_on(test::call_service(&app, req));
+fn teardown(_: BenchResult) {}
+
+#[library_benchmark(setup = setup_list_light, teardown = teardown)]
+fn e2e_list_policies_light((app, req): BenchCtx) -> BenchResult {
+    let response = futures::executor::block_on(test::call_service(&app, req));
+    (app, response)
 }
 
 library_benchmark_group!(

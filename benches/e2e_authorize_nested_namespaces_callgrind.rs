@@ -51,6 +51,7 @@ fn build_request() -> AuthorizeRequest {
 
 type BoxedApp = BoxService<HttpRequest, ServiceResponse<BoxBody>, actix_web::Error>;
 type BenchCtx = (BoxedApp, HttpRequest);
+type BenchResult = (BoxedApp, ServiceResponse<BoxBody>);
 
 fn setup_nested() -> BenchCtx {
     init_metrics_once();
@@ -74,9 +75,12 @@ fn setup_nested() -> BenchCtx {
     (app, req)
 }
 
-#[library_benchmark(setup = setup_nested)]
-fn e2e_authorize_nested_namespaces((app, req): BenchCtx) {
-    let _ = futures::executor::block_on(test::call_service(&app, req));
+fn teardown(_: BenchResult) {}
+
+#[library_benchmark(setup = setup_nested, teardown = teardown)]
+fn e2e_authorize_nested_namespaces((app, req): BenchCtx) -> BenchResult {
+    let response = futures::executor::block_on(test::call_service(&app, req));
+    (app, response)
 }
 
 library_benchmark_group!(

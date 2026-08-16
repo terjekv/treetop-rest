@@ -121,6 +121,10 @@ name = "bundle_prepare_schema_mode_callgrind"
 harness = false
 
 [[bench]]
+name = "bundle_lifecycle_callgrind"
+harness = false
+
+[[bench]]
 name = "middleware_ip_trusted_header_callgrind"
 harness = false
 
@@ -178,6 +182,14 @@ harness = false
 
 [[bench]]
 name = "policy_store_set_dsl_with_source_callgrind"
+harness = false
+
+[[bench]]
+name = "policy_store_schema_reload_callgrind"
+harness = false
+
+[[bench]]
+name = "policy_store_list_cache_callgrind"
 harness = false
 
 [[bench]]

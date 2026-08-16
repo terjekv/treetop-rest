@@ -11,6 +11,7 @@ const TOKEN: &str = "benchmark-token";
 
 type BoxedApp = BoxService<HttpRequest, ServiceResponse<EitherBody<BoxBody>>, Error>;
 type BenchCtx = (BoxedApp, HttpRequest);
+type BenchResult = (BoxedApp, ServiceResponse<EitherBody<BoxBody>>);
 
 fn setup(path: &str) -> BenchCtx {
     let config = AdmissionConfig::parse(None, Some(TOKEN), None).unwrap();
@@ -36,14 +37,18 @@ fn setup_percent_encoded() -> BenchCtx {
     setup("/%61pi/v1/test")
 }
 
-#[library_benchmark(setup = setup_canonical)]
-fn canonical_protected_path((app, req): BenchCtx) {
-    let _ = futures::executor::block_on(test::call_service(&app, req));
+fn teardown(_: BenchResult) {}
+
+#[library_benchmark(setup = setup_canonical, teardown = teardown)]
+fn canonical_protected_path((app, req): BenchCtx) -> BenchResult {
+    let response = futures::executor::block_on(test::call_service(&app, req));
+    (app, response)
 }
 
-#[library_benchmark(setup = setup_percent_encoded)]
-fn percent_encoded_protected_path((app, req): BenchCtx) {
-    let _ = futures::executor::block_on(test::call_service(&app, req));
+#[library_benchmark(setup = setup_percent_encoded, teardown = teardown)]
+fn percent_encoded_protected_path((app, req): BenchCtx) -> BenchResult {
+    let response = futures::executor::block_on(test::call_service(&app, req));
+    (app, response)
 }
 
 library_benchmark_group!(

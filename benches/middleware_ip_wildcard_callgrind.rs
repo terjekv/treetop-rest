@@ -1,14 +1,20 @@
 use gungraun::{library_benchmark, library_benchmark_group, main};
+use std::hint::black_box;
 use std::net::IpAddr;
 use treetop_rest::config::ClientAllowlist;
 
-fn setup() -> (ClientAllowlist, IpAddr) {
+type BenchCtx = (ClientAllowlist, IpAddr);
+
+fn setup() -> BenchCtx {
     (ClientAllowlist::Any, "203.0.113.42".parse().unwrap())
 }
 
-#[library_benchmark(setup = setup)]
-fn allowlist_wildcard((allowlist, ip): (ClientAllowlist, IpAddr)) {
-    let _ = allowlist.allows(ip);
+fn teardown(_: BenchCtx) {}
+
+#[library_benchmark(setup = setup, teardown = teardown)]
+fn allowlist_wildcard((allowlist, ip): BenchCtx) -> BenchCtx {
+    black_box(allowlist.allows(ip));
+    (allowlist, ip)
 }
 
 library_benchmark_group!(name = middleware_ip_wildcard; benchmarks = allowlist_wildcard);

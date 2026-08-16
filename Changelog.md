@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compressed bodies, adopt rotated HTTP validators for unchanged archives, and run archive verification, engine
   construction, and upload-response preparation outside async workers and the policy-store write lock. Bundle URL
   mode now rejects a zero-second polling interval instead of starting a tight fetch loop.
+- Expanded deterministic performance gates for signed and unsigned bundle validation, atomic bundle application,
+  schema reloads, and policy-list cache hits and misses. Benchmark fixtures and heavyweight teardown now run outside
+  authorization, bundle, schema, cache, and client-IP measurement regions, and an integration test enforces automatic
+  Callgrind target discovery.
 - Legacy label loading now uses the shared `treetop-bundle` parser and intentionally rejects unknown fields, empty
   values or pattern lists, duplicate names or destinations, invalid Cedar entity types, and invalid regular
   expressions. Labels must also match an active schema's entity and attribute types. Bundle loads always apply strict
@@ -41,8 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bundle uploads no longer erase configured remote-source readiness state, schema-free bundles are rejected before
   Cedar engine construction in strict schema mode, and upload bodies obey the lower of the global request limit and
   compressed-bundle limit.
-- Admission benchmarks now cover canonical and percent-encoded protected routes. Trusted-proxy parsing runs in setup
-  rather than contaminating the measured client-IP resolution path.
+- Admission benchmarks now cover canonical and percent-encoded protected routes. Trusted-proxy and direct-peer
+  request construction run in setup rather than contaminating the measured client-IP resolution paths.
 
 ### Removed
 

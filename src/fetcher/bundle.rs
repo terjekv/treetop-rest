@@ -460,10 +460,11 @@ role = "ordinary"
                 .to_string()
                 .contains("every bundle to include a schema")
         );
-        let store = store.read().unwrap();
-        assert!(store.bundle.is_none());
-        assert!(!store.configured_sources_loaded());
-        drop(store);
+        {
+            let store = store.read().unwrap();
+            assert!(store.bundle.is_none());
+            assert!(!store.configured_sources_loaded());
+        }
         server.stop(false).await;
     }
 

@@ -10,9 +10,12 @@ fn setup_store_with_policies() -> PolicyStore {
     store
 }
 
-#[library_benchmark(setup = setup_store_with_policies)]
-fn policy_store_set_labels(mut store: PolicyStore) {
+fn teardown_store(_: PolicyStore) {}
+
+#[library_benchmark(setup = setup_store_with_policies, teardown = teardown_store)]
+fn policy_store_set_labels(mut store: PolicyStore) -> PolicyStore {
     store.set_labels(LABELS_JSON, None, None).unwrap();
+    store
 }
 
 library_benchmark_group!(

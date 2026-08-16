@@ -1,6 +1,7 @@
 use actix_web::{dev::ServiceRequest, test::TestRequest};
 use gungraun::{library_benchmark, library_benchmark_group, main};
 use ipnet::IpNet;
+use std::hint::black_box;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use treetop_rest::middleware::resolve_client_ip_for_bench;
@@ -17,9 +18,12 @@ fn setup() -> BenchCtx {
     (req, trusted)
 }
 
-#[library_benchmark(setup = setup)]
-fn extract_ip_trusted_header((req, trusted): BenchCtx) {
-    let _ = resolve_client_ip_for_bench(&req, &trusted);
+fn teardown(_: BenchCtx) {}
+
+#[library_benchmark(setup = setup, teardown = teardown)]
+fn extract_ip_trusted_header((req, trusted): BenchCtx) -> BenchCtx {
+    black_box(resolve_client_ip_for_bench(&req, &trusted));
+    (req, trusted)
 }
 
 library_benchmark_group!(name = middleware_ip_trusted_header; benchmarks = extract_ip_trusted_header);

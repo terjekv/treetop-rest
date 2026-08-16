@@ -1,11 +1,17 @@
 mod authorize_batch;
 
-use authorize_batch::common::bench_brief;
+use authorize_batch::common::{BatchContext, setup_batch, teardown_batch};
 use gungraun::{library_benchmark, library_benchmark_group, main};
+use treetop_rest::models::AuthorizeDecisionBrief;
 
-#[library_benchmark]
-fn authorize_brief_32() {
-    bench_brief(32);
+fn setup() -> BatchContext {
+    setup_batch(32)
+}
+
+#[library_benchmark(setup = setup, teardown = teardown_batch)]
+fn authorize_brief_32(context: BatchContext) -> BatchContext {
+    context.evaluate(AuthorizeDecisionBrief::from);
+    context
 }
 
 library_benchmark_group!(name = authorize_batch_brief_32; benchmarks = authorize_brief_32);

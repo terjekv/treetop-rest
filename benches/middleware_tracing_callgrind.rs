@@ -18,6 +18,7 @@ fn init_metrics() {
 
 type BoxedService = BoxService<ServiceRequest, ServiceResponse<BoxBody>, Error>;
 type BenchCtx = (BoxedService, ServiceRequest);
+type BenchResult = (BoxedService, ServiceResponse<BoxBody>);
 
 fn setup_tracing() -> BenchCtx {
     init_metrics();
@@ -33,9 +34,12 @@ fn setup_tracing() -> BenchCtx {
     (service, req)
 }
 
-#[library_benchmark(setup = setup_tracing)]
-fn tracing_middleware_call((service, req): BenchCtx) {
-    let _ = block_on(service.call(req));
+fn teardown(_: BenchResult) {}
+
+#[library_benchmark(setup = setup_tracing, teardown = teardown)]
+fn tracing_middleware_call((service, req): BenchCtx) -> BenchResult {
+    let response = block_on(service.call(req)).unwrap();
+    (service, response)
 }
 
 library_benchmark_group!(name = middleware_tracing; benchmarks = tracing_middleware_call);

@@ -11,9 +11,12 @@ fn setup_store_with_source() -> (PolicyStore, Endpoint) {
     (store, endpoint)
 }
 
-#[library_benchmark(setup = setup_store_with_source)]
-fn policy_store_set_dsl_with_source((mut store, endpoint): (PolicyStore, Endpoint)) {
+fn teardown_store(_: PolicyStore) {}
+
+#[library_benchmark(setup = setup_store_with_source, teardown = teardown_store)]
+fn policy_store_set_dsl_with_source((mut store, endpoint): (PolicyStore, Endpoint)) -> PolicyStore {
     store.set_dsl(DSL_DNS, Some(endpoint), Some(60)).unwrap();
+    store
 }
 
 library_benchmark_group!(name = policy_store_set_dsl_with_source_group; benchmarks = policy_store_set_dsl_with_source);

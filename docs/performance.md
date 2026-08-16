@@ -45,7 +45,10 @@ Percentiles from separate histograms must not be added or subtracted.
 
 The pull-request performance workflow discovers every `benches/*_callgrind.rs` target and compares its instruction
 count with the base commit. Unlike the wall-clock characterization, these Gungraun/Callgrind results are deterministic
-enough to enforce the workflow's regression threshold.
+enough to enforce the workflow's regression threshold. `tests/benchmark_layout.rs` keeps that discovery contract from
+silently drifting: top-level Rust benchmark files must use the `_callgrind` suffix, exactly match explicit Cargo bench
+targets, set `harness = false`, and declare teardown outside the measured region. Shared helpers belong in
+subdirectories below `benches/`.
 
 Authorization is covered in both configurations that matter for interpreting observability cost:
 
@@ -53,10 +56,15 @@ Authorization is covered in both configurations that matter for interpreting obs
 - `authorize_batch_metrics_128_callgrind` runs the same workload after installing the production Prometheus sink. Its
   setup is outside the measured region, while metric recording for every decision remains inside it.
 
+All six brief and detailed batch targets build their policy engine, requests, and serial `ParallelConfig` in Gungraun
+setup. Heavy fixture destruction runs in teardown. The measured region therefore contains batch evaluation and result
+materialization, rather than Cedar parsing or request construction.
+
 Admission-control microbenchmarks cover direct peer resolution, trusted forwarding, the conditional disabled check,
-wildcard allowlists, ACL hits and misses, and access-token digest hits and misses. Configuration parsing and token
-digest construction remain outside those request-path measurements. Allowlist parsing has its own small benchmark
-target, so the reusable workflow can fan it out independently from ACL hit and miss checks.
+wildcard allowlists, ACL hits and misses, access-token digest hits and misses, and canonical versus percent-encoded
+protected routes. Configuration parsing, request construction, peer-address parsing, and token digest construction
+remain outside those request-path measurements. Allowlist parsing has its own small benchmark target, so the reusable
+workflow can fan it out independently from ACL hit and miss checks.
 
 The batch sizes 8, 32, and 128 are intentional upper-bound probes for the fixed `5-8`, `9-32`, and `33-128`
 metrics classes. Keep those sizes stable when comparing revisions: moving a probe inside a class would make an
@@ -79,14 +87,23 @@ validate their JSON once: the validated `LabelSet` supplies the metadata count a
 construction reuses the regex programs compiled during validation. This avoids the previous repeated JSON validation
 and regex compilation while retaining strict shared behavior for legacy and bundle loads.
 
+`policy_store_schema_reload_callgrind` measures a compatible schema refresh against an existing policy, label set, and
+schema-backed engine. `policy_store_list_cache_callgrind` separately measures raw and JSON cache misses and hits over a
+100-policy store. Policy construction, cache priming, and store destruction are outside those measured regions.
+
 Bundle refresh and upload are control-plane operations. Compressed bodies are bounded while streaming and reserve at
 most the bounded declared `Content-Length`; uploads reject an oversized declared length before polling the body.
 Archive decoding, signature and semantic validation, metadata construction, label preparation, and engine
-construction all happen
-before the `PolicyStore` write lock is acquired. Metadata construction reuses the validated bundle's policy, schema,
-and label counts instead of reparsing those artifacts. The write-locked section only clears the two bounded policy-list
-caches and swaps the prepared engine and metadata, so authorization readers see either the complete old state or the
-complete new state.
+construction all happen before the `PolicyStore` write lock is acquired. Metadata construction reuses the validated
+bundle's policy, schema, and label counts instead of reparsing those artifacts. The write-locked section only clears
+the two bounded policy-list caches and swaps the prepared engine and metadata, so authorization readers see either the
+complete old state or the complete new state.
+
+`bundle_lifecycle_callgrind` independently measures unsigned validation, required Ed25519 signature verification, and
+the short write-locked application of a prepared bundle into a store with populated list caches.
+`bundle_prepare_schema_mode_callgrind` isolates permissive preparation and the strict schema-presence rejection. Bundle
+creation, key loading, trust-store construction, archive preparation, and heavyweight result destruction run outside
+the applicable measured region.
 
 The fetcher retains only ETag and Last-Modified validator strings rather than cloning every response header. If an
 origin rotates a validator while serving byte-identical content, REST adopts the new validator without rebuilding the
@@ -98,11 +115,17 @@ Run an individual comparison locally with the Gungraun runner matching the repos
 cargo install gungraun-runner --version 0.19.4 --locked
 cargo bench --bench authorize_batch_brief_128_callgrind
 cargo bench --bench authorize_batch_metrics_128_callgrind
+cargo bench --bench bundle_prepare_schema_mode_callgrind
+cargo bench --bench bundle_lifecycle_callgrind
 cargo bench --bench labels_parse_callgrind
 cargo bench --bench labels_policy_store_callgrind
+cargo bench --bench policy_store_schema_reload_callgrind
+cargo bench --bench policy_store_list_cache_callgrind
+cargo bench --bench middleware_ip_peer_addr_callgrind
 cargo bench --bench middleware_ip_allowlist_parse_callgrind
 cargo bench --bench middleware_ip_allowlist_hit_callgrind
 cargo bench --bench middleware_ip_allowlist_miss_callgrind
+cargo bench --bench middleware_access_protected_path_callgrind
 ```
 
 Gungraun compares against the prior local result for the same target. Run it once before and once after a change without

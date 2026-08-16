@@ -164,6 +164,12 @@ machine-dependent; it has no latency pass/fail threshold.
 - **Typed response contract**: Full authorization responses deserialize through the server-owned
   detailed response model and retain client-provided request identifiers.
 
+#### Benchmark Layout Tests (`tests/benchmark_layout.rs`)
+
+- **Automatic discovery contract**: Every top-level `benches/*.rs` executable uses the `_callgrind` suffix and has an
+  exactly matching explicit Cargo target with `harness = false`; benchmark helpers remain in nested directories, and
+  every target moves fixture and result destruction into Gungraun teardown.
+
 ## Running Tests
 
 ### Fuzz Tests

@@ -55,6 +55,7 @@ fn build_request() -> AuthorizeRequest {
 
 type BoxedApp = BoxService<HttpRequest, ServiceResponse<BoxBody>, actix_web::Error>;
 type BenchCtx = (BoxedApp, HttpRequest);
+type BenchResult = (BoxedApp, ServiceResponse<BoxBody>);
 
 fn setup_groups() -> BenchCtx {
     init_metrics_once();
@@ -78,9 +79,12 @@ fn setup_groups() -> BenchCtx {
     (app, req)
 }
 
-#[library_benchmark(setup = setup_groups)]
-fn e2e_authorize_groups((app, req): BenchCtx) {
-    let _ = futures::executor::block_on(test::call_service(&app, req));
+fn teardown(_: BenchResult) {}
+
+#[library_benchmark(setup = setup_groups, teardown = teardown)]
+fn e2e_authorize_groups((app, req): BenchCtx) -> BenchResult {
+    let response = futures::executor::block_on(test::call_service(&app, req));
+    (app, response)
 }
 
 library_benchmark_group!(name = e2e_authorize_groups_group; benchmarks = e2e_authorize_groups);
