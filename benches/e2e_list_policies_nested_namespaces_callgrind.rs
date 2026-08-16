@@ -4,11 +4,9 @@ use actix_web::body::BoxBody;
 use actix_web::dev::ServiceResponse;
 use actix_web::{App, test, web};
 use gungraun::{library_benchmark, library_benchmark_group, main};
-use std::str::FromStr;
 use std::sync::{Arc, Once, RwLock};
-use treetop_rest::config::ClientAllowlist;
 use treetop_rest::handlers;
-use treetop_rest::middleware::{ClientAllowlistMiddleware, TracingMiddleware};
+use treetop_rest::middleware::TracingMiddleware;
 use treetop_rest::state::PolicyStore;
 
 const DSL: &str = r#"
@@ -40,16 +38,14 @@ fn build_store() -> Arc<RwLock<PolicyStore>> {
 
 type BoxedApp = BoxService<HttpRequest, ServiceResponse<BoxBody>, actix_web::Error>;
 type BenchCtx = (BoxedApp, HttpRequest);
+type BenchResult = (BoxedApp, ServiceResponse<BoxBody>);
 
 fn setup_list_nested() -> BenchCtx {
     init_metrics_once();
     let store = build_store();
-    let allowlist = ClientAllowlist::from_str("*").unwrap();
-
     let app = futures::executor::block_on(test::init_service(
         App::new()
-            .wrap(ClientAllowlistMiddleware::new_with_trust(allowlist, true))
-            .wrap(TracingMiddleware::new_with_trust(true))
+            .wrap(TracingMiddleware::new())
             .app_data(web::Data::new(store))
             .route(
                 "/api/v1/policies/{user}",
@@ -66,9 +62,12 @@ fn setup_list_nested() -> BenchCtx {
     (app, req)
 }
 
-#[library_benchmark(setup = setup_list_nested)]
-fn e2e_list_policies_nested_namespaces((app, req): BenchCtx) {
-    let _ = futures::executor::block_on(test::call_service(&app, req));
+fn teardown(_: BenchResult) {}
+
+#[library_benchmark(setup = setup_list_nested, teardown = teardown)]
+fn e2e_list_policies_nested_namespaces((app, req): BenchCtx) -> BenchResult {
+    let response = futures::executor::block_on(test::call_service(&app, req));
+    (app, response)
 }
 
 library_benchmark_group!(

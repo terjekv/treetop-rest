@@ -1,13 +1,29 @@
-use actix_web::test::TestRequest;
+use actix_web::{dev::ServiceRequest, test::TestRequest};
 use gungraun::{library_benchmark, library_benchmark_group, main};
-use treetop_rest::middleware::extract_client_ip_for_bench;
+use ipnet::IpNet;
+use std::hint::black_box;
+use std::net::SocketAddr;
+use std::str::FromStr;
+use treetop_rest::middleware::resolve_client_ip_for_bench;
 
-#[library_benchmark]
-fn extract_ip_trusted_header() {
+type BenchCtx = (ServiceRequest, [IpNet; 1]);
+
+fn setup() -> BenchCtx {
+    let peer: SocketAddr = "192.0.2.10:443".parse().unwrap();
     let req = TestRequest::get()
+        .peer_addr(peer)
         .insert_header(("x-forwarded-for", "10.0.0.42"))
         .to_srv_request();
-    let _ = extract_client_ip_for_bench(&req, true);
+    let trusted = [IpNet::from_str("192.0.2.0/24").unwrap()];
+    (req, trusted)
+}
+
+fn teardown(_: BenchCtx) {}
+
+#[library_benchmark(setup = setup, teardown = teardown)]
+fn extract_ip_trusted_header((req, trusted): BenchCtx) -> BenchCtx {
+    black_box(resolve_client_ip_for_bench(&req, &trusted));
+    (req, trusted)
 }
 
 library_benchmark_group!(name = middleware_ip_trusted_header; benchmarks = extract_ip_trusted_header);

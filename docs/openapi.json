@@ -59,6 +59,34 @@
               }
             }
           },
+          "401": {
+            "description": "Missing, malformed, or invalid Bearer token",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Bearer authentication challenge"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Client IP is not allowed or cannot be resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Internal server error",
             "content": {
@@ -69,7 +97,126 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "access_token": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/v1/bundle": {
+      "post": {
+        "tags": [
+          "Treetop REST API"
+        ],
+        "operationId": "upload_bundle",
+        "requestBody": {
+          "description": "A gzip-compressed Treetop bundle archive",
+          "content": {
+            "application/gzip": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "application/x-gzip": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Bundle verified and atomically applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoliciesMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid archive, signature, policy, schema, or labels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, or invalid Bearer token",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Bearer authentication challenge"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Client admission failed, uploads are disabled, or the upload token is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Compressed bundle exceeds the bundle or global request-size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access_token": [],
+            "upload_token": []
+          },
+          {
+            "upload_token": []
+          }
+        ]
       }
     },
     "/api/v1/health": {
@@ -88,8 +235,42 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, malformed, or invalid Bearer token",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Bearer authentication challenge"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Client IP is not allowed or cannot be resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {
+            "access_token": []
+          },
+          {}
+        ]
       }
     },
     "/api/v1/policies": {
@@ -135,6 +316,34 @@
               }
             }
           },
+          "401": {
+            "description": "Missing, malformed, or invalid Bearer token",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Bearer authentication challenge"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Client IP is not allowed or cannot be resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Internal server error",
             "content": {
@@ -145,7 +354,13 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "access_token": []
+          },
+          {}
+        ]
       },
       "post": {
         "tags": [
@@ -189,8 +404,36 @@
               }
             }
           },
+          "401": {
+            "description": "Missing, malformed, or invalid Bearer token",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Bearer authentication challenge"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "403": {
-            "description": "Uploads are disabled or the upload token is invalid",
+            "description": "Client admission failed, uploads are disabled, or the upload token is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Independent uploads are disabled while bundle URL mode is active",
             "content": {
               "application/json": {
                 "schema": {
@@ -211,6 +454,10 @@
           }
         },
         "security": [
+          {
+            "access_token": [],
+            "upload_token": []
+          },
           {
             "upload_token": []
           }
@@ -293,6 +540,34 @@
               }
             }
           },
+          "401": {
+            "description": "Missing, malformed, or invalid Bearer token",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Bearer authentication challenge"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Client IP is not allowed or cannot be resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Internal server error",
             "content": {
@@ -303,7 +578,13 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "access_token": []
+          },
+          {}
+        ]
       }
     },
     "/api/v1/schema": {
@@ -349,6 +630,34 @@
               }
             }
           },
+          "401": {
+            "description": "Missing, malformed, or invalid Bearer token",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Bearer authentication challenge"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Client IP is not allowed or cannot be resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Internal server error",
             "content": {
@@ -359,7 +668,13 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "access_token": []
+          },
+          {}
+        ]
       },
       "post": {
         "tags": [
@@ -403,8 +718,36 @@
               }
             }
           },
+          "401": {
+            "description": "Missing, malformed, or invalid Bearer token",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Bearer authentication challenge"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "403": {
-            "description": "Uploads are disabled or the upload token is invalid",
+            "description": "Client admission failed, uploads are disabled, or the upload token is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Independent uploads are disabled while bundle URL mode is active",
             "content": {
               "application/json": {
                 "schema": {
@@ -425,6 +768,10 @@
           }
         },
         "security": [
+          {
+            "access_token": [],
+            "upload_token": []
+          },
           {
             "upload_token": []
           }
@@ -458,6 +805,34 @@
               }
             }
           },
+          "401": {
+            "description": "Missing, malformed, or invalid Bearer token",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Bearer authentication challenge"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Client IP is not allowed or cannot be resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Internal server error",
             "content": {
@@ -468,7 +843,13 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "access_token": []
+          },
+          {}
+        ]
       }
     },
     "/api/v1/version": {
@@ -487,8 +868,42 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, malformed, or invalid Bearer token",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Bearer authentication challenge"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Client IP is not allowed or cannot be resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {
+            "access_token": []
+          },
+          {}
+        ]
       }
     },
     "/livez": {
@@ -519,7 +934,7 @@
         "operationId": "metrics",
         "responses": {
           "200": {
-            "description": "OpenMetrics text, including authorization batch-size metrics, or Prometheus protobuf with native histograms when requested by Accept",
+            "description": "OpenMetrics text, including authorization batch-size metrics, or Prometheus protobuf containing HTTP, authorization, and policy-evaluation native histograms when requested by Accept",
             "content": {
               "application/openmetrics-text": {
                 "schema": {
@@ -532,8 +947,42 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing, malformed, or invalid Bearer token",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Bearer authentication challenge"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Client IP is not allowed or cannot be resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {
+            "access_token": []
+          },
+          {}
+        ]
       }
     },
     "/openapi.json": {
@@ -905,6 +1354,71 @@
           }
         ],
         "description": "Result of a single batch evaluation - either success or failure"
+      },
+      "BundleMetadata": {
+        "type": "object",
+        "description": "Metadata for the complete bundle that produced the active policy state.",
+        "required": [
+          "format_version",
+          "bundle_id",
+          "archive_sha256",
+          "compressed_size",
+          "module_count",
+          "signed",
+          "loaded_at"
+        ],
+        "properties": {
+          "archive_sha256": {
+            "type": "string"
+          },
+          "bundle_id": {
+            "type": "string"
+          },
+          "compressed_size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "format_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "loaded_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "module_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "refresh_frequency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "signed": {
+            "type": "boolean"
+          },
+          "signing_key_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Endpoint"
+              }
+            ]
+          }
+        }
       },
       "Core": {
         "type": "object",
@@ -1287,6 +1801,16 @@
           "allow_upload": {
             "type": "boolean"
           },
+          "bundle": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BundleMetadata"
+              }
+            ]
+          },
           "labels": {
             "$ref": "#/components/schemas/Metadata_OfLabels"
           },
@@ -1666,6 +2190,11 @@
       }
     },
     "securitySchemes": {
+      "access_token": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Opaque operator-provided Bearer token. Required for /api/v1/** and /metrics only when TREETOP_ACCESS_TOKENS is configured."
+      },
       "upload_token": {
         "type": "apiKey",
         "in": "header",

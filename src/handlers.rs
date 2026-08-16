@@ -1,4 +1,5 @@
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, http::header, web};
+use futures_util::StreamExt;
 use prometheus_client::registry::Registry;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -10,14 +11,19 @@ use url::form_urlencoded;
 use utoipa::{
     Modify, OpenApi, PartialSchema, ToSchema,
     openapi::{
-        RefOr,
+        Content, Ref, RefOr,
+        header::HeaderBuilder,
+        path::Operation,
+        response::ResponseBuilder,
         schema::{AnyOfBuilder, ObjectBuilder, Schema},
-        security::{ApiKey, ApiKeyValue, SecurityScheme},
+        security::{
+            ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme,
+        },
     },
 };
 
 use crate::build_info::build_info;
-use crate::config::SchemaValidationMode;
+use crate::config::{BundleRuntimeConfig, SchemaValidationMode};
 use crate::errors::{ErrorResponse, ServiceError};
 use crate::metrics;
 use crate::models::{
@@ -28,11 +34,13 @@ use crate::models::{
 };
 use crate::parallel::ParallelConfig;
 use crate::state::SharedPolicyStore;
+use treetop_bundle::{ArchiveLimits, BundleArchive};
 
 /// Canonical HTTP path for the generated OpenAPI document.
 pub const OPENAPI_JSON_PATH: &str = "/openapi.json";
 const LEGACY_OPENAPI_JSON_PATH: &str = "/api-docs/openapi.json";
 const UPLOAD_TOKEN_SECURITY_SCHEME: &str = "upload_token";
+const ACCESS_TOKEN_SECURITY_SCHEME: &str = "access_token";
 
 fn parse_query_params(req: &HttpRequest) -> (Vec<String>, Vec<String>, Option<String>) {
     let mut groups = Vec::new();
@@ -144,6 +152,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         .route("/api/v1/authorize", web::post().to(authorize))
         .route("/api/v1/policies", web::get().to(get_policies))
         .route("/api/v1/policies", web::post().to(upload_policies))
+        .route("/api/v1/bundle", web::post().to(upload_bundle))
         .route("/api/v1/schema", web::get().to(get_schema))
         .route("/api/v1/schema", web::post().to(upload_schema))
         .route("/api/v1/policies/{user}", web::get().to(list_policies))
@@ -159,6 +168,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         authorize,
         get_policies,
         upload_policies,
+        upload_bundle,
         get_schema,
         upload_schema,
         list_policies,
@@ -170,25 +180,118 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         metrics,
         openapi_json,
     ),
-    modifiers(&UploadTokenSecurity),
+    modifiers(&AdmissionSecurity),
 )]
 pub struct ApiDoc;
 
-struct UploadTokenSecurity;
+struct AdmissionSecurity;
 
-impl Modify for UploadTokenSecurity {
+impl Modify for AdmissionSecurity {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
-        openapi
-            .components
-            .get_or_insert_default()
-            .add_security_scheme(
-                UPLOAD_TOKEN_SECURITY_SCHEME,
-                SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
-                    "X-Upload-Token",
-                    "Token printed at startup when uploads are enabled",
-                ))),
-            );
+        let components = openapi.components.get_or_insert_default();
+        components.add_security_scheme(
+            UPLOAD_TOKEN_SECURITY_SCHEME,
+            SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
+                "X-Upload-Token",
+                "Token printed at startup when uploads are enabled",
+            ))),
+        );
+        components.add_security_scheme(
+            ACCESS_TOKEN_SECURITY_SCHEME,
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .description(Some(
+                        "Opaque operator-provided Bearer token. Required for /api/v1/** and /metrics only when TREETOP_ACCESS_TOKENS is configured.",
+                    ))
+                    .build(),
+            ),
+        );
+
+        for (path, path_item) in &mut openapi.paths.paths {
+            if !crate::middleware::is_protected_path(path) {
+                continue;
+            }
+
+            for operation in operations_mut(path_item) {
+                add_admission_responses(operation);
+                operation.security = Some(
+                    if matches!(
+                        operation.operation_id.as_deref(),
+                        Some("upload_policies" | "upload_schema" | "upload_bundle")
+                    ) {
+                        let upload = SecurityRequirement::new(
+                            UPLOAD_TOKEN_SECURITY_SCHEME,
+                            Vec::<String>::new(),
+                        );
+                        vec![
+                            upload
+                                .clone()
+                                .add(ACCESS_TOKEN_SECURITY_SCHEME, Vec::<String>::new()),
+                            upload,
+                        ]
+                    } else {
+                        vec![
+                            SecurityRequirement::new(
+                                ACCESS_TOKEN_SECURITY_SCHEME,
+                                Vec::<String>::new(),
+                            ),
+                            SecurityRequirement::default(),
+                        ]
+                    },
+                );
+            }
+        }
     }
+}
+
+fn operations_mut(
+    path_item: &mut utoipa::openapi::path::PathItem,
+) -> impl Iterator<Item = &mut Operation> {
+    [
+        &mut path_item.get,
+        &mut path_item.put,
+        &mut path_item.post,
+        &mut path_item.delete,
+        &mut path_item.options,
+        &mut path_item.head,
+        &mut path_item.patch,
+        &mut path_item.trace,
+    ]
+    .into_iter()
+    .filter_map(Option::as_mut)
+}
+
+fn add_admission_responses(operation: &mut Operation) {
+    let error_content = || Content::new(Some(Ref::from_schema_name("ErrorResponse")));
+    operation
+        .responses
+        .responses
+        .entry("401".to_owned())
+        .or_insert_with(|| {
+            ResponseBuilder::new()
+                .description("Missing, malformed, or invalid Bearer token")
+                .header(
+                    "WWW-Authenticate",
+                    HeaderBuilder::new()
+                        .description(Some("Bearer authentication challenge"))
+                        .build(),
+                )
+                .content("application/json", error_content())
+                .build()
+                .into()
+        });
+    operation
+        .responses
+        .responses
+        .entry("403".to_owned())
+        .or_insert_with(|| {
+            ResponseBuilder::new()
+                .description("Client IP is not allowed or cannot be resolved")
+                .content("application/json", error_content())
+                .build()
+                .into()
+        });
 }
 
 static OPENAPI_DOCUMENT: LazyLock<utoipa::openapi::OpenApi> = LazyLock::new(ApiDoc::openapi);
@@ -669,7 +772,8 @@ pub async fn get_policies(
         responses(
             (status = 200, description = "Policies uploaded successfully", body = PoliciesMetadata),
             (status = 400, description = "Bad request", body = ErrorResponse),
-            (status = 403, description = "Uploads are disabled or the upload token is invalid", body = ErrorResponse),
+            (status = 403, description = "Client admission failed, uploads are disabled, or the upload token is invalid", body = ErrorResponse),
+            (status = 409, description = "Independent uploads are disabled while bundle URL mode is active", body = ErrorResponse),
             (status = 500, description = "Internal server error", body = ErrorResponse)
         ),
     )]
@@ -682,6 +786,9 @@ pub async fn upload_policies(
     {
         let guard = store.read()?;
         check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
+        if guard.bundle_url_mode {
+            return Err(ServiceError::BundleModeConflict);
+        }
     }
 
     let content_type = req.content_type();
@@ -699,16 +806,135 @@ pub async fn upload_policies(
     let mut guard = store.write()?;
     // Recheck under the write lock so configuration cannot change between parsing and applying.
     check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
+    if guard.bundle_url_mode {
+        return Err(ServiceError::BundleModeConflict);
+    }
 
     guard.set_dsl(&dsl_string, None, None)?;
 
-    Ok(web::Json(PoliciesMetadata {
-        allow_upload: guard.allow_upload,
-        schema_validation_mode: guard.schema_validation_mode.to_string(),
-        policies: guard.policies.clone(),
-        labels: guard.labels.clone(),
-        schema: guard.schema.clone(),
-    }))
+    Ok(web::Json((&*guard).into()))
+}
+
+#[utoipa::path(
+    post,
+    tag = "Treetop REST API",
+    path = "/api/v1/bundle",
+    request_body(
+        description = "A gzip-compressed Treetop bundle archive",
+        content(
+            (String = "application/gzip"),
+            (String = "application/x-gzip")
+        )
+    ),
+    security(("upload_token" = [])),
+    responses(
+        (status = 200, description = "Bundle verified and atomically applied", body = PoliciesMetadata),
+        (status = 400, description = "Invalid archive, signature, policy, schema, or labels", body = ErrorResponse),
+        (status = 403, description = "Client admission failed, uploads are disabled, or the upload token is invalid", body = ErrorResponse),
+        (status = 413, description = "Compressed bundle exceeds the bundle or global request-size limit", body = ErrorResponse),
+        (status = 415, description = "Unsupported media type", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+)]
+pub async fn upload_bundle(
+    req: HttpRequest,
+    mut payload: web::Payload,
+    store: web::Data<SharedPolicyStore>,
+    runtime: web::Data<BundleRuntimeConfig>,
+) -> Result<web::Json<PoliciesMetadata>, ServiceError> {
+    // Authentication is deliberately checked before the request body is polled.
+    let (allow_upload, schema_validation_mode) = {
+        let guard = store.read()?;
+        check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
+        (guard.allow_upload, guard.schema_validation_mode)
+    };
+    if !matches!(
+        req.content_type(),
+        "application/gzip" | "application/x-gzip"
+    ) {
+        return Err(ServiceError::UnsupportedBundleMediaType);
+    }
+
+    let upload_limit = runtime.max_compressed_bytes.min(runtime.max_request_bytes);
+    let declared_size = req
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok());
+    if declared_size.is_some_and(|size| size > upload_limit) {
+        metrics::record_bundle_failure(metrics::BundleFailureReason::SizeLimit);
+        return Err(ServiceError::BundleTooLarge(format!(
+            "compressed bundle exceeds {} bytes",
+            upload_limit
+        )));
+    }
+
+    let mut bytes = Vec::with_capacity(declared_size.unwrap_or_default());
+    while let Some(chunk) = payload.next().await {
+        let chunk = chunk.map_err(|error| ServiceError::InvalidBundle(error.to_string()))?;
+        if bytes.len().saturating_add(chunk.len()) > upload_limit {
+            metrics::record_bundle_failure(metrics::BundleFailureReason::SizeLimit);
+            return Err(ServiceError::BundleTooLarge(format!(
+                "compressed bundle exceeds {} bytes",
+                upload_limit
+            )));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+
+    let limits = ArchiveLimits::new(runtime.max_compressed_bytes, runtime.max_uncompressed_bytes)?;
+    let signature_policy = runtime.signature_policy;
+    let trust_store = runtime.trust_store.clone();
+    let (prepared, mut response, bundle_id, signing_key_id) = web::block(move || {
+        let archive = BundleArchive::from_bytes(bytes);
+        let validated = archive
+            .validate(signature_policy, &trust_store, limits)
+            .map_err(|error| {
+                metrics::record_bundle_failure(crate::fetcher::reason_for_bundle_error(&error));
+                ServiceError::from(error)
+            })?;
+        let bundle_id = validated.bundle_id().to_owned();
+        let signing_key_id = validated
+            .verified_signature()
+            .key_id()
+            .map(ToOwned::to_owned);
+        let prepared = crate::state::PolicyStore::prepare_bundle(
+            &validated,
+            None,
+            None,
+            schema_validation_mode,
+        )
+        .inspect_err(|_| {
+            metrics::record_bundle_failure(metrics::BundleFailureReason::Validation);
+        })?;
+        let response = prepared.metadata(allow_upload, schema_validation_mode);
+        Ok::<_, ServiceError>((prepared, response, bundle_id, signing_key_id))
+    })
+    .await
+    .map_err(|error| {
+        ServiceError::EvaluationError(format!("bundle preparation task failed: {error}"))
+    })??;
+
+    let mut guard = store.write()?;
+    check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
+    response.allow_upload = guard.allow_upload;
+    response.schema_validation_mode = guard.schema_validation_mode.to_string();
+    guard.apply_prepared_bundle(prepared).inspect_err(|error| {
+        let reason = if matches!(error, ServiceError::SchemaValidationError(_)) {
+            metrics::BundleFailureReason::Validation
+        } else {
+            metrics::BundleFailureReason::Store
+        };
+        metrics::record_bundle_failure(reason);
+    })?;
+    drop(guard);
+    metrics::record_bundle_reload();
+    debug!(
+        message = "uploaded bundle applied",
+        bundle_id,
+        key_id = signing_key_id.as_deref()
+    );
+    Ok(web::Json(response))
 }
 
 #[utoipa::path(
@@ -760,7 +986,8 @@ pub async fn get_schema(
         responses(
             (status = 200, description = "Schema uploaded successfully", body = PoliciesMetadata),
             (status = 400, description = "Bad request", body = ErrorResponse),
-            (status = 403, description = "Uploads are disabled or the upload token is invalid", body = ErrorResponse),
+            (status = 403, description = "Client admission failed, uploads are disabled, or the upload token is invalid", body = ErrorResponse),
+            (status = 409, description = "Independent uploads are disabled while bundle URL mode is active", body = ErrorResponse),
             (status = 500, description = "Internal server error", body = ErrorResponse)
         ),
     )]
@@ -773,6 +1000,9 @@ pub async fn upload_schema(
     {
         let guard = store.read()?;
         check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
+        if guard.bundle_url_mode {
+            return Err(ServiceError::BundleModeConflict);
+        }
     }
 
     let content_type = req.content_type();
@@ -793,15 +1023,12 @@ pub async fn upload_schema(
     let mut guard = store.write()?;
     // Recheck under the write lock so configuration cannot change between parsing and applying.
     check_upload_auth(&req, guard.allow_upload, guard.upload_token.as_deref())?;
+    if guard.bundle_url_mode {
+        return Err(ServiceError::BundleModeConflict);
+    }
     guard.set_schema(&schema_string, None, None)?;
 
-    Ok(web::Json(PoliciesMetadata {
-        allow_upload: guard.allow_upload,
-        schema_validation_mode: guard.schema_validation_mode.to_string(),
-        policies: guard.policies.clone(),
-        labels: guard.labels.clone(),
-        schema: guard.schema.clone(),
-    }))
+    Ok(web::Json((&*guard).into()))
 }
 
 #[utoipa::path(
@@ -893,7 +1120,7 @@ pub async fn get_status(
     tag = "Treetop REST API",
     path = "/metrics",
     responses(
-        (status = 200, description = "OpenMetrics text, including authorization batch-size metrics, or Prometheus protobuf with native histograms when requested by Accept", content(
+        (status = 200, description = "OpenMetrics text, including authorization batch-size metrics, or Prometheus protobuf containing HTTP, authorization, and policy-evaluation native histograms when requested by Accept", content(
             (String = "application/openmetrics-text"),
             (String = "application/vnd.google.protobuf")
         )),

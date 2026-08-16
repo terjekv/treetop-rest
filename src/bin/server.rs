@@ -1,13 +1,16 @@
-use actix_web::{App, HttpServer};
+use actix_web::{App, HttpServer, middleware::Condition};
 use clap::Parser;
 use std::sync::{Arc, RwLock};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
+use treetop_bundle::ArchiveLimits;
 use treetop_rest::build_info::build_info;
-use treetop_rest::config::Config;
-use treetop_rest::fetcher::{LabelFetchAdapter, PolicyFetchAdapter, SchemaFetchAdapter};
+use treetop_rest::config::{AdmissionConfig, Config};
+use treetop_rest::fetcher::{
+    BundleFetcher, LabelFetchAdapter, PolicyFetchAdapter, SchemaFetchAdapter,
+};
 use treetop_rest::handlers::{AuthorizeRuntimeConfig, OPENAPI_JSON_PATH};
-use treetop_rest::middleware::{ClientAllowlistMiddleware, TracingMiddleware};
+use treetop_rest::middleware::{AccessControlMiddleware, TracingMiddleware};
 use treetop_rest::state::PolicyStore;
 
 use utoipa_swagger_ui::{Config as SwaggerUiConfig, SwaggerUi};
@@ -35,6 +38,26 @@ async fn main() -> std::io::Result<()> {
         );
         return Ok(());
     }
+
+    let bundle_runtime = config.bundle_runtime_config().map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid bundle configuration: {error}"),
+        )
+    })?;
+
+    let admission = AdmissionConfig::from_env().map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid admission configuration: {error}"),
+        )
+    })?;
+    info!(
+        message = "Admission controls configured",
+        acl_enabled = admission.has_acl(),
+        access_token_count = admission.access_tokens.len(),
+        trusted_proxy_count = admission.trusted_proxies.len(),
+    );
 
     let parallel_config = treetop_rest::parallel::init_parallelism(
         config.workers,
@@ -90,6 +113,29 @@ async fn main() -> std::io::Result<()> {
         SchemaFetchAdapter::new(store.clone()).spawn(surl, freq);
     }
 
+    if let Some(bundle_url) = config.bundle_url.clone() {
+        let limits = ArchiveLimits::new(
+            bundle_runtime.max_compressed_bytes,
+            bundle_runtime.max_uncompressed_bytes,
+        )
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+        BundleFetcher::new(
+            store.clone(),
+            bundle_url,
+            config.bundle_refresh,
+            limits,
+            bundle_runtime.signature_policy,
+            bundle_runtime.trust_store.clone(),
+        )
+        .map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("invalid bundle fetch configuration: {error}"),
+            )
+        })?
+        .spawn();
+    }
+
     let authorize_runtime = AuthorizeRuntimeConfig {
         max_batch_size: config.max_batch_size,
         max_context_bytes: config.max_context_bytes,
@@ -97,23 +143,23 @@ async fn main() -> std::io::Result<()> {
         max_context_keys: config.max_context_keys,
     };
 
-    let client_allowlist = config.client_allowlist.clone();
-    let trust_ip_headers = config.trust_ip_headers;
     let max_request_size = config.max_request_size;
+    let admission_enabled = admission.enabled();
 
     HttpServer::new(move || {
         App::new()
-            .wrap(ClientAllowlistMiddleware::new_with_trust(
-                client_allowlist.clone(),
-                trust_ip_headers,
+            .wrap(TracingMiddleware::new())
+            .wrap(Condition::new(
+                admission_enabled,
+                AccessControlMiddleware::new(admission.clone()),
             ))
-            .wrap(TracingMiddleware::new_with_trust(trust_ip_headers))
             .service(swagger_ui())
             .app_data(actix_web::web::JsonConfig::default().limit(max_request_size))
             .app_data(actix_web::web::PayloadConfig::default().limit(max_request_size))
             .app_data(actix_web::web::Data::new(store.clone()))
             .app_data(actix_web::web::Data::new(parallel_config))
             .app_data(actix_web::web::Data::new(authorize_runtime))
+            .app_data(actix_web::web::Data::new(bundle_runtime.clone()))
             .app_data(actix_web::web::Data::new(metrics_registry.clone()))
             .configure(treetop_rest::handlers::init)
     })

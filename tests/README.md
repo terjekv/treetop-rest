@@ -84,14 +84,26 @@ End-to-end tests using the actual test data files (`testdata/`):
 - SHA256 hash validation
 - Content size tracking
 
-#### Client Allowlist Tests (`tests/client_allowlist_tests.rs`)
+#### Admission Control Tests (`tests/client_allowlist_tests.rs`)
 
-Tests for IP/CIDR whitelist and proxy header trust configuration:
+Tests for independent IP/CIDR and opaque Bearer-token admission controls:
 
-- **IPv4 whitelisting**: Allowing requests from whitelisted CIDR ranges
-- **IPv4 rejection**: Rejecting requests from non-whitelisted addresses
-- **IPv6 support**: Allowing whitelisted IPv6 addresses
-- **Trust header toggle**: Ignoring spoofed proxy headers when trust is disabled
+- **Four modes**: Open, ACL-only, token-only, and combined ACL-plus-token behavior
+- **Route boundaries**: Public probes and API documentation, protected API and metrics routes
+- **Bearer failures**: Missing, malformed, duplicated, and invalid headers with the same challenge
+- **Proxy security**: IPv4/IPv6 trusted-chain walking, spoof resistance, and malformed-chain rejection
+- **Upload composition**: Global Bearer and generated upload credentials are both required
+
+#### Bundle Tests (`tests/bundle_tests.rs`)
+
+Tests for complete policy-bundle loading:
+
+- **Atomic replacement**: Valid uploads replace policy, schema, labels, caches, and bundle metadata together
+- **Rollback**: Invalid bundles preserve the previous active state
+- **Shared labels**: Legacy label loading uses the bundle crate's strict parser
+- **Admission and media types**: Upload authorization runs before body parsing and gzip types are enforced
+- **Mode conflicts**: Component uploads are rejected while a remote bundle source is configured
+- **Startup trust**: Required signatures need at least one valid trusted key
 
 #### Metrics Tests (`tests/metrics_tests.rs`)
 
@@ -151,6 +163,12 @@ machine-dependent; it has no latency pass/fail threshold.
 
 - **Typed response contract**: Full authorization responses deserialize through the server-owned
   detailed response model and retain client-provided request identifiers.
+
+#### Benchmark Layout Tests (`tests/benchmark_layout.rs`)
+
+- **Automatic discovery contract**: Every top-level `benches/*.rs` executable uses the `_callgrind` suffix and has an
+  exactly matching explicit Cargo target with `harness = false`; benchmark helpers remain in nested directories, and
+  every target moves fixture and result destruction into Gungraun teardown.
 
 ## Running Tests
 

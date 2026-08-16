@@ -1,11 +1,17 @@
 mod authorize_batch;
 
-use authorize_batch::common::bench_detailed;
+use authorize_batch::common::{BatchContext, setup_batch, teardown_batch};
 use gungraun::{library_benchmark, library_benchmark_group, main};
+use treetop_rest::models::AuthorizeDecisionDetailed;
 
-#[library_benchmark]
-fn authorize_detailed_128() {
-    bench_detailed(128);
+fn setup() -> BatchContext {
+    setup_batch(128)
+}
+
+#[library_benchmark(setup = setup, teardown = teardown_batch)]
+fn authorize_detailed_128(context: BatchContext) -> BatchContext {
+    context.evaluate(AuthorizeDecisionDetailed::from);
+    context
 }
 
 library_benchmark_group!(

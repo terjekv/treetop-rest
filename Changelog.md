@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added optional polling and authenticated upload of deterministic `.tar.gz` Treetop policy bundles, with bounded
+  streaming, conditional requests, atomic policy/schema/label replacement, last-known-good readiness behavior, and
+  bundle identity and signature details in status metadata.
+- Added Ed25519 bundle trust configuration, optional or required signature policies, multi-key rotation support, and
+  bounded bundle reload success and failure metrics.
+- Added independent environment-only IP/CIDR and opaque Bearer-token admission controls for `/api/v1/**` and
+  `/metrics`, explicit trusted-proxy chain walking for `X-Forwarded-For`, fixed-reason rejection metrics, and OpenAPI
+  Bearer security metadata.
+
+### Changed
+
+- Reduced admission hot-path work by hashing Bearer candidates once, parsing trusted forwarding chains without a
+  temporary address allocation, and isolating allowlist parsing from request-path benchmarks. Legacy label updates now
+  parse once and reuse compiled regex programs. Bundle loads reuse validated artifact counts, preallocate bounded
+  compressed bodies, adopt rotated HTTP validators for unchanged archives, and run archive verification, engine
+  construction, and upload-response preparation outside async workers and the policy-store write lock. Bundle URL
+  mode now rejects a zero-second polling interval instead of starting a tight fetch loop.
+- Expanded deterministic performance gates for signed and unsigned bundle validation, atomic bundle application,
+  schema reloads, and policy-list cache hits and misses. Benchmark fixtures and heavyweight teardown now run outside
+  authorization, bundle, schema, cache, and client-IP measurement regions, and an integration test enforces automatic
+  Callgrind target discovery.
+- Legacy label loading now uses the shared `treetop-bundle` parser and intentionally rejects unknown fields, empty
+  values or pattern lists, duplicate names or destinations, invalid Cedar entity types, and invalid regular
+  expressions. Labels must also match an active schema's entity and attribute types. Bundle loads always apply strict
+  aggregate schema validation when a schema is present.
+- **Breaking security change:** The client allowlist now defaults to open instead of loopback-only. Deployments that
+  relied on the old default must set `TREETOP_CLIENT_ALLOWLIST=127.0.0.1,::1` before upgrading. Allowlist and trusted
+  proxy settings are now environment-only, and configured ACL and Bearer controls must both pass.
+
+### Fixed
+
+- Protected routes are classified by Actix's routing-normalized path, preventing percent-encoded `/api/v1/**` and
+  `/metrics` paths from bypassing admission controls.
+- Bundle uploads no longer erase configured remote-source readiness state, schema-free bundles are rejected before
+  Cedar engine construction in strict schema mode, and upload bodies obey the lower of the global request limit and
+  compressed-bundle limit.
+- Admission benchmarks now cover canonical and percent-encoded protected routes. Trusted-proxy and direct-peer
+  request construction run in setup rather than contaminating the measured client-IP resolution paths.
+
+### Removed
+
+- Removed `--client-allowlist`, `--trust-ip-headers`, and `TREETOP_TRUST_IP_HEADERS`. Use
+  `TREETOP_CLIENT_ALLOWLIST` and explicit `TREETOP_TRUSTED_PROXIES` networks instead.
+
+### Security
+
+- Signed bundles are accepted only when their Ed25519 signature matches a configured SPKI public key; malformed,
+  invalid, or untrusted signatures are never downgraded to unsigned content. Private signing material is not loaded by
+  the REST service.
+- Access tokens are validated at startup, retained only as unique SHA-256 digests, compared without early-exit digest
+  equality, never logged, and rejected through a credential-independent `401` response. Operators must use TLS outside
+  loopback and may rotate tokens by overlapping old and new values across restarts.
+
 ## [0.0.12] - 2026-08-14
 
 ### Added

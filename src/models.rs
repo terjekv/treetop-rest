@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use treetop_core::{AttrValue, Decision, PermitPolicy, PolicyVersion, Request};
@@ -211,6 +212,26 @@ pub struct PoliciesMetadata {
     pub policies: Metadata<OfPolicies>,
     pub labels: Metadata<OfLabels>,
     pub schema: Metadata<OfSchema>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<BundleMetadata>,
+}
+
+/// Metadata for the complete bundle that produced the active policy state.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BundleMetadata {
+    pub format_version: u32,
+    pub bundle_id: String,
+    pub archive_sha256: String,
+    pub compressed_size: usize,
+    pub module_count: usize,
+    pub signed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing_key_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<Endpoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_frequency: Option<u32>,
+    pub loaded_at: DateTime<Utc>,
 }
 
 impl<T> From<T> for PoliciesMetadata
@@ -225,6 +246,7 @@ where
             policies: store.policies.clone(),
             labels: store.labels.clone(),
             schema: store.schema.clone(),
+            bundle: store.bundle.clone(),
         }
     }
 }

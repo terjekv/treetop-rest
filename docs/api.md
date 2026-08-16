@@ -12,13 +12,22 @@ policy management and evaluation.
 - Schema upload requests accept `application/json` containing either a `schema`
   string field or a raw Cedar schema document, or `text/plain` containing Cedar
   schema JSON.
+- Bundle uploads accept `application/gzip` or `application/x-gzip`.
 
 ## Authentication
 
-- There is (currently) no authentication for GET endpoints.
-- Uploads to `/api/v1/policies` and `/api/v1/schema` require `TREETOP_ALLOW_UPLOAD=true`
-  to be set on server start and the header `X-Upload-Token: <token>` matching the
-  server-generated upload token. This token is printed in the server logs on startup.
+- `/api/v1/**` and `/metrics` require `Authorization: Bearer <token>` when the server has
+  `TREETOP_ACCESS_TOKENS` configured. Missing and rejected credentials receive the same `401 Unauthorized` JSON error
+  and `WWW-Authenticate: Bearer` response header.
+- A configured client allowlist applies independently to the same routes. A disallowed or unresolved client address
+  receives `403 Forbidden`. When both controls are configured, the ACL is evaluated first and both controls must pass.
+- `/livez`, `/readyz`, `/openapi.json`, `/api-docs/openapi.json`, and `/swagger-ui/**` are public.
+- Uploads to `/api/v1/policies`, `/api/v1/schema`, and `/api/v1/bundle` additionally require
+  `TREETOP_ALLOW_UPLOAD=true` and the
+  `X-Upload-Token: <token>` header matching the server-generated upload token. When Bearer admission is enabled, uploads
+  require both credentials.
+- Send Bearer credentials only over HTTPS outside loopback. Access tokens are static operator-provided credentials;
+  they have no identity, scope, expiry, or management API.
 
 ## Errors
 
@@ -33,20 +42,18 @@ numbers when the underlying parser reports them.
 - Purpose: Kubernetes-style liveness probe. A successful response means the HTTP
   worker is alive; the probe deliberately does not depend on remote configuration.
 - Response: `ok` as plain text with HTTP 200.
-- This operational endpoint bypasses the client IP allowlist so an orchestrator can
-  probe it from outside the API allowlist.
+- This operational endpoint bypasses all admission controls.
 
 ### GET /readyz
 
 - Purpose: Kubernetes-style readiness probe. A successful response means the policy
-  store is available and every configured remote policy, labels, and schema source
-  has completed at least one valid load.
+  store is available and every configured remote policy, labels, schema, or bundle
+  source has completed at least one valid load.
 - Response: `ok` as plain text with HTTP 200 when ready, or `not ready` with HTTP 503.
 - The check does not make network requests. After an initial successful load, a later
   remote fetch failure continues serving the last-known-good configuration and does
   not make the service unready.
-- This operational endpoint bypasses the client IP allowlist so an orchestrator can
-  probe it from outside the API allowlist.
+- This operational endpoint bypasses all admission controls.
 
 ### GET /openapi.json
 
@@ -67,7 +74,7 @@ numbers when the underlying parser reports them.
   `Content-Type: application/openmetrics-text; version=1.0.0; charset=utf-8`.
 - Native histogram response: length-delimited Prometheus `MetricFamily` protobuf when the `Accept` header requests
   `application/vnd.google.protobuf`, `proto=io.prometheus.client.MetricFamily`, and `encoding=delimited`.
-- This operational endpoint is subject to the configured client IP allowlist.
+- This operational endpoint is subject to the configured client allowlist and Bearer-token controls.
 
 The server exposes classic and native representations of its latency histograms. The metric sample names and label keys
 used before this migration are retained:
@@ -83,10 +90,13 @@ used before this migration are retained:
 | `policy_evals_denied_total` | `action` | Denied Core decisions. |
 | `policy_eval_duration_seconds` | `action` | Total Treetop Core evaluation time per decision. |
 | `policy_eval_phase_duration_seconds` | `action`, `phase` | One Core phase per decision. |
+| `bundle_reloads_total` | none | Successfully verified and atomically applied bundles. |
+| `bundle_reload_failures_total` | `reason` | Failed bundle loads using a bounded reason set. |
 | `policy_reloads_total` | none | Successful Core policy reloads. |
 | `schema_reloads_total` | none | Successful schema reloads. |
 | `schema_validation_failures_total` | `reason` | Schema validation failures. |
 | `context_validation_failures_total` | `reason` | Request-context validation failures. |
+| `admission_rejections_total` | `reason` | Admission-control rejections from a fixed, bounded reason set. |
 | `treetop_build_info` | `app_version`, `core_version`, `cedar_version` | Build identity gauge fixed at 1. |
 
 HTTP `path` uses the registered route template, such as `/api/v1/policies/{user}`, rather than the raw user value.
@@ -185,6 +195,7 @@ content negotiation selects protobuf. A direct protobuf request is:
 
 ```bash
 curl -H 'Accept: application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily; encoding=delimited' \
+  -H "Authorization: Bearer <access-token>" \
   http://localhost:9999/metrics --output metrics.pb
 ```
 
@@ -322,12 +333,16 @@ Example response:
 
 - Purpose: server status plus metadata for currently loaded policies, labels, and schema.
 - Response shape:
-  - `policy_configuration`: policy, label, and schema metadata, including:
+  - `policy_configuration`: policy, label, schema, and optional bundle metadata, including:
     - `allow_upload`
     - `schema_validation_mode`
     - `policies`
     - `labels`
     - `schema`
+    - `bundle`: format and bundle IDs, archive hash and size, module/signature details, source, refresh interval, and
+      load timestamp. Its presence means the active policy state was loaded atomically from a bundle; `signed` reports
+      whether that bundle carried a verified signature, and `signing_key_id` identifies the trusted verification key.
+      This field is absent after an independent component update.
   - `parallel_configuration`: current Actix/Rayon worker settings.
   - `request_limits`: currently enforced context limits.
   - `request_context`: runtime context mode:
@@ -346,28 +361,40 @@ Example response:
       "timestamp": "2025-12-19T00:14:38.577289000Z",
       "sha256": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
       "size": 2049,
-      "source": { "url": "https://example.com/policies.cedar" },
+      "source": { "url": "https://example.com/production.tar.gz" },
       "refresh_frequency": 300,
       "entries": 42,
       "content": "...DSL content..."
     },
     "labels": {
-      "timestamp": "2025-12-19T00:10:00.123456000Z",
+      "timestamp": "2025-12-19T00:14:38.577289000Z",
       "sha256": "a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0",
       "size": 512,
-      "source": { "url": "https://example.com/labels.json" },
-      "refresh_frequency": 600,
+      "source": { "url": "https://example.com/production.tar.gz" },
+      "refresh_frequency": 300,
       "entries": 10,
       "content": "...JSON content..."
     },
     "schema": {
-      "timestamp": "2025-12-19T00:12:00.000000000Z",
+      "timestamp": "2025-12-19T00:14:38.577289000Z",
       "sha256": "bbf3d4d65ab0c11f8fa73f8cf54eb7bbd7d8bfcc8ca0d26f5cab098507ad6f6d",
       "size": 411,
-      "source": null,
-      "refresh_frequency": null,
+      "source": { "url": "https://example.com/production.tar.gz" },
+      "refresh_frequency": 300,
       "entries": 1,
       "content": "{...schema json...}"
+    },
+    "bundle": {
+      "format_version": 1,
+      "bundle_id": "9dca3dfe1c7e976b9a5c713a7f82529c78d92691a4e419142fdde92f50f033f4",
+      "archive_sha256": "d88ccdddbca3e4d305f705348e80b0de3c326c9384b9a7c25942f0254f54342a",
+      "compressed_size": 16384,
+      "module_count": 3,
+      "signed": true,
+      "signing_key_id": "f62d00af62c26edc920ddf22c11f57f84e511490d8d753cebfccbd5215956124",
+      "source": { "url": "https://example.com/production.tar.gz" },
+      "refresh_frequency": 300,
+      "loaded_at": "2025-12-19T00:14:38.577289000Z"
     }
   },
   "parallel_configuration": {
@@ -403,8 +430,8 @@ Example response:
 ### POST /api/v1/policies
 
 - Purpose: upload or replace the policy set (if allowed).
-- Headers: `X-Upload-Token` when upload token is configured and `Content-Type`
-  as described above.
+- Headers: `Authorization: Bearer <access-token>` when global token admission is configured,
+  `X-Upload-Token: <upload-token>`, and `Content-Type` as described above.
 
 #### Upload examples
 
@@ -412,8 +439,9 @@ JSON:
 
 ```bash
 curl -X POST http://localhost:9999/api/v1/policies \
+  -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
-  -H "X-Upload-Token: <token>" \
+  -H "X-Upload-Token: <upload-token>" \
   --data-binary @policies.json
 ```
 
@@ -423,8 +451,9 @@ Cedar DSL:
 
 ```bash
 curl -X POST http://localhost:9999/api/v1/policies \
+  -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: text/plain" \
-  -H "X-Upload-Token: <token>" \
+  -H "X-Upload-Token: <upload-token>" \
   --data-binary @policies.cedar
 ```
 
@@ -432,6 +461,42 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
 
 - Response: `PoliciesMetadata` reflecting the newly loaded policies and labels. As per the
   status endpoint (minus `allow_upload`).
+
+When remote bundle mode is active, independent policy and schema uploads return `409 Conflict` because they would
+break the bundle's atomic policy/schema/label state.
+
+### POST /api/v1/bundle
+
+- Purpose: verify and atomically replace the complete policy, schema, and label state from a Treetop `.tar.gz` bundle.
+- Creation: use the
+  [`treetop-bundle` CLI](https://github.com/treetop-policy-engine/treetop-bundle/blob/v0.0.3/README.md#commands) to validate,
+  build, and optionally sign compatible archives:
+
+  ```bash
+  treetop-bundle build --manifest treetop-bundle.toml --output bundle.tar.gz
+  treetop-bundle build --manifest treetop-bundle.toml --output signed-bundle.tar.gz \
+    --signing-key private.pem
+  ```
+
+- Headers: `Authorization: Bearer <access-token>` when global token admission is configured,
+  `X-Upload-Token: <upload-token>`, and `Content-Type: application/gzip` or `application/x-gzip`.
+- Signature behavior: the configured bundle signature policy is applied identically to fetched and uploaded bundles.
+  Under `allow-unsigned`, unsigned bundles are accepted but any signature present must be trusted and valid. Under
+  `required`, unsigned bundles are rejected.
+- Atomicity: archive decoding, signature verification, policy/schema/label validation, and engine construction occur
+  before the active store is replaced. Strict schema mode checks that the bundle includes a schema before constructing
+  a Cedar engine. A rejected bundle leaves the last-known-good state unchanged.
+- Responses: `200` with updated `PoliciesMetadata`; `400` for invalid content or signatures; `413` for the compressed
+  bundle or global request-size limit, whichever is lower; `415` for unsupported media types; and the existing `403`
+  response for admission or upload failures.
+
+```bash
+curl -X POST http://localhost:9999/api/v1/bundle \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/gzip" \
+  -H "X-Upload-Token: <upload-token>" \
+  --data-binary @bundle.tar.gz
+```
 
 ### GET /api/v1/schema
 
@@ -444,8 +509,8 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
 ### POST /api/v1/schema
 
 - Purpose: upload or replace the Cedar schema (if allowed).
-- Headers: `X-Upload-Token` when upload token is configured and `Content-Type`
-  as described above.
+- Headers: `Authorization: Bearer <access-token>` when global token admission is configured,
+  `X-Upload-Token: <upload-token>`, and `Content-Type` as described above.
 - Request body: a JSON object with a `schema` string, a raw Cedar schema JSON
   document, or the Cedar schema JSON as `text/plain`.
 - Response: `PoliciesMetadata` with updated schema metadata.
@@ -483,6 +548,7 @@ See the [Cedar policy language documentation](https://docs.cedarpolicy.com/polic
 
 ```bash
 curl -X POST http://localhost:9999/api/v1/authorize \
+  -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "requests": [

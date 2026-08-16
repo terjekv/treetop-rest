@@ -3,8 +3,9 @@ use prometheus_client::registry::Registry;
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock, RwLock};
 use treetop_core::{Action, Principal, Request, Resource, User};
+use treetop_rest::config::AdmissionConfig;
 use treetop_rest::handlers;
-use treetop_rest::middleware::TracingMiddleware;
+use treetop_rest::middleware::{AccessControlMiddleware, TracingMiddleware};
 use treetop_rest::models::AuthorizeRequest;
 use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
@@ -596,13 +597,13 @@ async fn test_metrics_has_histogram_buckets() {
 #[actix_web::test]
 async fn test_http_metrics_include_client_ip_label() {
     let store = create_test_store();
-    // Build an app that trusts IP headers so x-forwarded-for is used
+    // Resolve the forwarded client once in access control and share it with tracing.
     let registry = get_metrics_registry();
+    let admission = AdmissionConfig::parse(Some("203.0.113.10"), None, Some("127.0.0.1")).unwrap();
     let app = test::init_service(
         App::new()
-            .wrap(treetop_rest::middleware::TracingMiddleware::new_with_trust(
-                true,
-            ))
+            .wrap(TracingMiddleware::new())
+            .wrap(AccessControlMiddleware::new(admission))
             .app_data(web::Data::new(store))
             .app_data(web::Data::new(registry.clone()))
             .configure(handlers::init),
@@ -612,13 +613,18 @@ async fn test_http_metrics_include_client_ip_label() {
     // Send a request with a specific client IP
     let req = test::TestRequest::get()
         .uri("/api/v1/health")
+        .peer_addr("127.0.0.1:1234".parse().unwrap())
         .insert_header(("x-forwarded-for", "203.0.113.10"))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
 
     // Fetch metrics and verify the client_ip label is present with our value
-    let req = test::TestRequest::get().uri("/metrics").to_request();
+    let req = test::TestRequest::get()
+        .uri("/metrics")
+        .peer_addr("127.0.0.1:1234".parse().unwrap())
+        .insert_header(("x-forwarded-for", "203.0.113.10"))
+        .to_request();
     let resp = test::call_service(&app, req).await;
     let body = test::read_body(resp).await;
     let body_str = std::str::from_utf8(&body).unwrap();
@@ -630,7 +636,7 @@ async fn test_http_metrics_include_client_ip_label() {
     });
     assert!(
         has_client_ip,
-        "HTTP metrics should include client_ip label with the forwarded IP"
+        "HTTP metrics should include client_ip label with the forwarded IP: {body_str}"
     );
 }
 

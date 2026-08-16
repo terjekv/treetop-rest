@@ -5,6 +5,7 @@ use std::{
     fmt::{Display, Formatter, Result as FmtResult},
     sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard},
 };
+use treetop_bundle::BundleError;
 use treetop_core::PolicyError;
 use utoipa::ToSchema;
 
@@ -19,12 +20,18 @@ pub enum ServiceError {
     UploadNotAllowed,
     InvalidUploadToken,
     UploadTokenNotSet,
+    ClientNotAllowed,
+    InvalidAccessToken,
     CompileError(String),
     SchemaValidationError(String),
     ContextValidationError(String),
     EvaluationError(String),
     ListPoliciesError(String),
     ValidationError(String),
+    InvalidBundle(String),
+    BundleTooLarge(String),
+    UnsupportedBundleMediaType,
+    BundleModeConflict,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -54,7 +61,21 @@ impl Display for ServiceError {
             ServiceError::UploadNotAllowed => write!(f, "Policy upload is not allowed"),
             ServiceError::InvalidUploadToken => write!(f, "Invalid upload token provided"),
             ServiceError::UploadTokenNotSet => write!(f, "Upload token is not set"),
+            ServiceError::ClientNotAllowed => write!(f, "Client is not allowed"),
+            ServiceError::InvalidAccessToken => write!(f, "Invalid or missing access token"),
             ServiceError::ValidationError(msg) => write!(f, "Validation error: {msg}"),
+            ServiceError::InvalidBundle(msg) => write!(f, "Invalid bundle: {msg}"),
+            ServiceError::BundleTooLarge(msg) => write!(f, "Bundle too large: {msg}"),
+            ServiceError::UnsupportedBundleMediaType => {
+                write!(
+                    f,
+                    "Bundle uploads require application/gzip or application/x-gzip"
+                )
+            }
+            ServiceError::BundleModeConflict => write!(
+                f,
+                "Individual policy and schema uploads are disabled in bundle URL mode"
+            ),
             ServiceError::SchemaValidationError(msg) => {
                 write!(f, "Schema validation error: {msg}")
             }
@@ -78,9 +99,15 @@ impl ResponseError for ServiceError {
             | ServiceError::CompileError(_)
             | ServiceError::SchemaValidationError(_)
             | ServiceError::ContextValidationError(_) => StatusCode::BAD_REQUEST,
+            ServiceError::InvalidBundle(_) => StatusCode::BAD_REQUEST,
+            ServiceError::BundleTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
+            ServiceError::UnsupportedBundleMediaType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ServiceError::BundleModeConflict => StatusCode::CONFLICT,
             ServiceError::UploadNotAllowed
             | ServiceError::InvalidUploadToken
-            | ServiceError::UploadTokenNotSet => StatusCode::FORBIDDEN,
+            | ServiceError::UploadTokenNotSet
+            | ServiceError::ClientNotAllowed => StatusCode::FORBIDDEN,
+            ServiceError::InvalidAccessToken => StatusCode::UNAUTHORIZED,
         }
     }
 
@@ -104,12 +131,18 @@ impl ServiceError {
             ServiceError::UploadNotAllowed => "upload_not_allowed",
             ServiceError::InvalidUploadToken => "invalid_upload_token",
             ServiceError::UploadTokenNotSet => "upload_token_not_set",
+            ServiceError::ClientNotAllowed => "client_not_allowed",
+            ServiceError::InvalidAccessToken => "invalid_access_token",
             ServiceError::CompileError(_) => "compile_error",
             ServiceError::SchemaValidationError(_) => "schema_validation_error",
             ServiceError::ContextValidationError(_) => "context_validation_error",
             ServiceError::EvaluationError(_) => "evaluation_error",
             ServiceError::ListPoliciesError(_) => "list_policies_error",
             ServiceError::ValidationError(_) => "validation_error",
+            ServiceError::InvalidBundle(_) => "invalid_bundle",
+            ServiceError::BundleTooLarge(_) => "bundle_too_large",
+            ServiceError::UnsupportedBundleMediaType => "unsupported_bundle_media_type",
+            ServiceError::BundleModeConflict => "bundle_mode_conflict",
         }
     }
 
@@ -140,6 +173,22 @@ impl From<PolicyError> for ServiceError {
             }
             PolicyError::ContextError(msg) => ServiceError::ContextValidationError(msg),
             err => ServiceError::EvaluationError(err.to_string()),
+        }
+    }
+}
+
+impl From<BundleError> for ServiceError {
+    fn from(error: BundleError) -> Self {
+        match error {
+            BundleError::SizeLimit { .. } => ServiceError::BundleTooLarge(error.to_string()),
+            BundleError::Validation(diagnostics) => ServiceError::InvalidBundle(
+                diagnostics
+                    .into_iter()
+                    .map(|diagnostic| diagnostic.message)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            ),
+            _ => ServiceError::InvalidBundle(error.to_string()),
         }
     }
 }

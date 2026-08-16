@@ -1,8 +1,9 @@
+use std::hint::black_box;
 use std::str::FromStr;
 use std::sync::Arc;
 use treetop_core::{Action, Principal, Request, Resource, User};
 use treetop_rest::handlers::evaluate_batch_requests_for_bench;
-use treetop_rest::models::{AuthRequest, AuthorizeDecisionBrief, AuthorizeDecisionDetailed};
+use treetop_rest::models::AuthRequest;
 use treetop_rest::parallel::ParallelConfig;
 use treetop_rest::state::PolicyStore;
 
@@ -55,26 +56,33 @@ fn build_requests(count: usize) -> Vec<AuthRequest> {
         .collect()
 }
 
-pub fn bench_brief(count: usize) {
-    let engine = build_engine();
-    let parallel = ParallelConfig::new(1, 1, Some(usize::MAX));
-    let requests = build_requests(count);
-    let _ = evaluate_batch_requests_for_bench(
-        &requests,
-        &engine,
-        &parallel,
-        AuthorizeDecisionBrief::from,
-    );
+pub struct BatchContext {
+    engine: Arc<treetop_core::PolicyEngine>,
+    parallel: ParallelConfig,
+    requests: Vec<AuthRequest>,
 }
 
-pub fn bench_detailed(count: usize) {
-    let engine = build_engine();
-    let parallel = ParallelConfig::new(1, 1, Some(usize::MAX));
-    let requests = build_requests(count);
-    let _ = evaluate_batch_requests_for_bench(
-        &requests,
-        &engine,
-        &parallel,
-        AuthorizeDecisionDetailed::from,
-    );
+impl BatchContext {
+    pub fn evaluate<T, F>(&self, map_fn: F)
+    where
+        T: Send,
+        F: Fn(treetop_core::Decision) -> T + Send + Sync,
+    {
+        black_box(evaluate_batch_requests_for_bench(
+            &self.requests,
+            &self.engine,
+            &self.parallel,
+            map_fn,
+        ));
+    }
 }
+
+pub fn setup_batch(count: usize) -> BatchContext {
+    BatchContext {
+        engine: build_engine(),
+        parallel: ParallelConfig::new(1, 1, Some(usize::MAX)),
+        requests: build_requests(count),
+    }
+}
+
+pub fn teardown_batch(_: BatchContext) {}
