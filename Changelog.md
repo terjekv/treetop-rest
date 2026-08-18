@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added deterministic large-policy REST characterization using Treetop Core's shared corpus, covering authorization,
+  policy listing, reload and rollback, process memory, and administrator-visible OpenMetrics across 1,000-, 10,000-,
+  and 100,000-policy weekly runs, with manual 250,000-policy and sustained reload-soak modes.
+- Added a fixed 1,000-policy Callgrind target for store reload, allow and forbid authorization, mixed batches, and
+  cached policy listing.
+
+### Changed
+
+- Updated `treetop-core` to 0.0.22 and `treetop-bundle` to 0.0.5. The REST API, configuration, and production metric
+  surface are unchanged.
+
 ## [0.0.13] - 2026-08-16
 
 ### Added
