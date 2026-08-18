@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `treetop-core` to 0.0.22 and `treetop-bundle` to 0.0.5. The REST API, configuration, and production metric
   surface are unchanged.
 
+### Security
+
+- Updated the HTTP client stack to patched `h2` 0.4.16 and stopped compiling Actix's vulnerable `h2` 0.3 line by
+  disabling the unused server HTTP/2 feature. The server continues to expose the same plaintext HTTP/1.x listener.
+
 ## [0.0.13] - 2026-08-16
 
 ### Added
