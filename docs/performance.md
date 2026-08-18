@@ -366,7 +366,7 @@ For a publishable result, provide the target build provenance and the server CPU
 into the report and do not become metric tags:
 
 ```bash
-TREETOP_K6_REST_VERSION=0.0.13 \
+TREETOP_K6_REST_VERSION=0.0.14 \
 TREETOP_K6_REST_SHA=<full-rest-sha> \
 TREETOP_K6_CORE_VERSION=0.0.22 \
 TREETOP_K6_CORE_SHA=<full-core-sha> \
