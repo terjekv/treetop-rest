@@ -1,6 +1,6 @@
 [package]
 name = "treetop-rest"
-version = "0.0.13"
+version = "0.0.14"
 edition = "2024"
 description = "REST server for the Treetop policy management framework"
 license = "MIT"

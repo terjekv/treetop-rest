@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.14] - 2026-08-18
+
 ### Added
 
 - Added deterministic large-policy REST characterization using Treetop Core's shared corpus, covering authorization,

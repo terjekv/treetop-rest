@@ -613,7 +613,7 @@ fn anonymous_report_schema_includes_source_provenance_without_host_identity() {
         rust_version: "1.97.1".to_owned(),
         target: "x86_64-unknown-linux-gnu".to_owned(),
         build_profile: "release".to_owned(),
-        treetop_rest_version: "0.0.13",
+        treetop_rest_version: "0.0.14",
         treetop_rest_sha: "rest-sha".to_owned(),
         treetop_rest_dirty: true,
         treetop_core_version: "0.0.22".to_owned(),
