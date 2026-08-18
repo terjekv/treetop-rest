@@ -195,6 +195,11 @@ no automatic telemetry. The included Linux matrix runner defaults to real 1-, 2-
 arbitrary counts or exact CPU sets, and can compare production, HTTP-heavy, batch-heavy, and combined thread layouts. A
 separate k6 scenario covers sustained, fixed-arrival-rate, and remote load while keeping result publication opt-in.
 
+For large rule sets, the policy-scale suite uses Treetop Core's shared deterministic corpus to compare 1,000, 10,000,
+and 100,000 policies, with a manual 250,000-policy point and reload soak. It records authorization, management and
+reload timings, process memory, and the exact `/metrics` output an administrator can scrape. See the
+[large-policy scale guide](docs/performance.md#large-policy-scale-curve-and-reload-soak).
+
 ## Development
 
 There is also a `docker-compose.yml` to set up a minialist web server to host cedar policies.

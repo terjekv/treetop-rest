@@ -140,6 +140,22 @@ scripts/run-performance-matrix.sh
 See [`docs/performance.md`](../docs/performance.md#compare-cpu-allocations-and-runtime-layouts) for arbitrary CPU counts,
 exact CPU sets, sample/concurrency controls, and Actix/Rayon layouts.
 
+#### Large-policy Scale Characterization (`tests/policy_scale_characterization.rs`)
+
+The ordinary test loads, serves, reloads, rejects an invalid replacement, lists policies, and exposes metrics for the
+shared deterministic 1,000-policy Treetop Core corpus. An ignored release-mode test measures the 1,000-, 10,000-, and
+100,000-policy curve, with manual 250,000-policy and sustained reload-soak modes.
+
+Run the complete default curve with:
+
+```bash
+scripts/run-policy-scale.sh
+```
+
+The runner writes JSON, Markdown, exact OpenMetrics, whole-process resource, and log artifacts. See the
+[`docs/performance.md` scale guide](../docs/performance.md#large-policy-scale-curve-and-reload-soak) for workloads,
+point and soak commands, controls, artifact privacy, and interpretation.
+
 For sustained, fixed-arrival-rate, or remote load against an already running server, use the k6 2.2.0-compatible
 scenario:
 
@@ -204,6 +220,7 @@ cargo test --test integration_tests
 cargo test --test client_allowlist_tests
 cargo test --test metrics_tests
 cargo test --test latency_characterization
+cargo test --test policy_scale_characterization
 cargo test --test openapi_docs_tests
 cargo test --test detailed_response_tests
 ```

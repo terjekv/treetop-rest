@@ -30,7 +30,7 @@ server handling, response serialization, and response transfer.
 
 The HTTP histogram starts inside Treetop's tracing middleware and stops when the Actix service returns its response. It
 does not include client work or transferring the completed response to the client. The policy histograms come directly
-from the `treetop-core` 0.0.21 observability sink:
+from the `treetop-core` 0.0.22 observability sink:
 
 - `policy_eval_duration_seconds` is Core's total evaluation timer for one authorization decision.
 - `cedar_authorize` measures the Cedar `Authorizer::is_authorized` call.
@@ -91,6 +91,10 @@ and regex compilation while retaining strict shared behavior for legacy and bund
 schema-backed engine. `policy_store_list_cache_callgrind` separately measures raw and JSON cache misses and hits over a
 100-policy store. Policy construction, cache priming, and store destruction are outside those measured regions.
 
+`policy_scale_rest_callgrind` uses Treetop Core's shared deterministic corpus at a fixed 1,000-policy point. It
+separately measures REST store replacement, allow and full-detail forbid authorization, a mixed eight-request batch,
+and a warmed policy-list cache. Corpus and request construction remain outside the measured regions.
+
 Bundle refresh and upload are control-plane operations. Compressed bodies are bounded while streaming and reserve at
 most the bounded declared `Content-Length`; uploads reject an oversized declared length before polling the body.
 Archive decoding, signature and semantic validation, metadata construction, label preparation, and engine
@@ -121,6 +125,7 @@ cargo bench --bench labels_parse_callgrind
 cargo bench --bench labels_policy_store_callgrind
 cargo bench --bench policy_store_schema_reload_callgrind
 cargo bench --bench policy_store_list_cache_callgrind
+cargo bench --bench policy_scale_rest_callgrind
 cargo bench --bench middleware_ip_peer_addr_callgrind
 cargo bench --bench middleware_ip_allowlist_parse_callgrind
 cargo bench --bench middleware_ip_allowlist_hit_callgrind
@@ -242,6 +247,77 @@ The generated JSON records the observed CPU allocation and exact affinity, actua
 model, operating system, kernel, governor, Rust target, and exact REST/Core versions and source SHAs. This keeps the
 matrix reproducible and makes differently configured rows auditable.
 
+## Large-policy scale curve and reload soak
+
+The policy-scale suite exercises REST with the same deterministic corpus exported by `treetop-core` 0.0.22. It loads
+the shared schema in strict mode and uses two corpus generations to test successful replacement and invalid-update
+rollback without inventing a REST-only large fixture.
+
+Run the weekly three-point curve locally with:
+
+```bash
+scripts/run-policy-scale.sh
+```
+
+The scale points have different purposes:
+
+| Policy count | Scheduled | Purpose |
+| ---: | --- | --- |
+| 1,000 | Weekly | Repeated baseline with enough samples for latency distributions. |
+| 10,000 | Weekly | Intermediate growth point for parsing, memory, listing, and authorization. |
+| 100,000 | Weekly | Large-corpus behavior with bounded sample counts. |
+| 250,000 | Manual | Upper-bound point for runners with sufficient memory and time. |
+
+Run one point, including the manual tier, with:
+
+```bash
+TREETOP_REST_SCALE_MODE=point \
+TREETOP_SCALE_POLICY_COUNT=250000 \
+scripts/run-policy-scale.sh
+```
+
+Use soak mode to keep mixed authorization traffic active while alternating between the two valid corpus generations:
+
+```bash
+TREETOP_REST_SCALE_MODE=soak \
+TREETOP_SCALE_POLICY_COUNT=100000 \
+TREETOP_REST_SCALE_SOAK_SECONDS=900 \
+TREETOP_REST_SCALE_RELOAD_INTERVAL_SECONDS=60 \
+scripts/run-policy-scale.sh
+```
+
+Every point records strict schema loading, initial policy loading, successful reload, rejected reload with
+last-known-good preservation, and Linux process RSS/high-water memory samples. It sends allow, explicit-forbid, group,
+and no-match requests in brief mode; allow and forbid requests in full-detail mode; and mixed eight-decision batches in
+both modes. Management probes cover filtered raw and JSON policy-list cache misses and hits plus full raw and JSON
+policy downloads.
+
+The suite scrapes `/metrics` twice after the workload so the captured scrape includes its own request. The report
+summarizes scrape size, series count, and the available HTTP, authorization, Core total, action, and Core-phase
+distributions. The companion `.prom` file is the exact OpenMetrics text an administrator would see; this deliberately
+characterizes the existing metric surface without adding benchmark-only production metrics.
+
+Output defaults to `performance-results/policy-scale/`. Each point has an anonymous JSON report, compact Markdown
+summary, exact OpenMetrics scrape, whole-process `/usr/bin/time -v` resources, and test log. The JSON excludes host and
+user names, paths, policy text, and request bodies. The `.prom` file includes the loopback client-IP label, so review
+all artifacts before sharing them.
+
+| Variable | Default | Meaning |
+| --- | ---: | --- |
+| `TREETOP_REST_SCALE_MODE` | `curve` | `curve`, `point`, or `soak`. |
+| `TREETOP_SCALE_POLICY_COUNT` | `100000` | Policy count used by point or soak mode. |
+| `TREETOP_REST_SCALE_SAMPLES` | tier-dependent | Measured requests per workload and concurrency. |
+| `TREETOP_REST_SCALE_WARMUP` | tier-dependent | Unmeasured warm-up requests per workload and concurrency. |
+| `TREETOP_REST_SCALE_CONCURRENCIES` | `1,min(CPUs,8)` | Comma-separated in-flight request counts. |
+| `TREETOP_REST_SCALE_SOAK_SECONDS` | `900` in soak mode | Mixed-traffic soak duration. |
+| `TREETOP_REST_SCALE_RELOAD_INTERVAL_SECONDS` | `60` | Delay between completed soak reloads. |
+| `TREETOP_REST_SCALE_OUTPUT_DIR` | `performance-results/policy-scale` | Artifact root. |
+| `TREETOP_REST_SCALE_TOOLCHAIN` | `1.97.1` | Rust toolchain used for the release build and run. |
+
+The weekly workflow and manual runs are observational and threshold-free. Compare the full curve and repeated runs,
+and investigate changes in latency, throughput, loading time, memory, series count, or metric shape rather than treating
+one hosted-runner number as a capacity promise.
+
 ## Sustained and remote load with k6
 
 Use the Rust characterization for a self-contained, fixed-fixture comparison and Core phase attribution. Use k6 when
@@ -292,7 +368,7 @@ into the report and do not become metric tags:
 ```bash
 TREETOP_K6_REST_VERSION=0.0.13 \
 TREETOP_K6_REST_SHA=<full-rest-sha> \
-TREETOP_K6_CORE_VERSION=0.0.21 \
+TREETOP_K6_CORE_VERSION=0.0.22 \
 TREETOP_K6_CORE_SHA=<full-core-sha> \
 TREETOP_K6_CEDAR_VERSION=4.12.0 \
 TREETOP_K6_SERVER_CPUS=0-3 \

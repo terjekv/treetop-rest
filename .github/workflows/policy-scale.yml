@@ -1,0 +1,95 @@
+name: Policy Scale
+
+on:
+  schedule:
+    - cron: "17 3 * * 3"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run the three-size curve, one point, or a sustained reload soak
+        required: true
+        default: curve
+        type: choice
+        options:
+          - curve
+          - point
+          - soak
+      policy_count:
+        description: Policy count for point or soak mode
+        required: true
+        default: "100000"
+        type: choice
+        options:
+          - "1000"
+          - "10000"
+          - "100000"
+          - "250000"
+      soak_seconds:
+        description: Traffic duration for soak mode
+        required: true
+        default: 900
+        type: number
+      reload_interval_seconds:
+        description: Delay between completed soak reloads
+        required: true
+        default: 60
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: policy-scale-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  TREETOP_REST_SCALE_TOOLCHAIN: "1.97.1"
+
+jobs:
+  characterize:
+    name: REST policy scale
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      TREETOP_REST_SCALE_MODE: ${{ github.event_name == 'schedule' && 'curve' || inputs.mode }}
+      TREETOP_SCALE_POLICY_COUNT: ${{ inputs.policy_count || '100000' }}
+      TREETOP_REST_SCALE_SOAK_SECONDS: ${{ inputs.soak_seconds || 900 }}
+      TREETOP_REST_SCALE_RELOAD_INTERVAL_SECONDS: ${{ inputs.reload_interval_seconds || 60 }}
+      TREETOP_REST_SCALE_OUTPUT_DIR: performance-results/policy-scale
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust 1.97.1
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: 1.97.1
+
+      - name: Cache Cargo artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-policy-scale-${{ hashFiles('Cargo.lock') }}
+
+      - name: Run REST scale characterization
+        run: scripts/run-policy-scale.sh
+
+      - name: Publish job summary
+        if: always()
+        run: |
+          if [[ -f performance-results/policy-scale/summary.md ]]; then
+            cat performance-results/policy-scale/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload scale artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: policy-scale-${{ github.run_id }}-${{ github.run_attempt }}
+          path: performance-results/policy-scale
+          if-no-files-found: warn
+          retention-days: 90
